@@ -5,6 +5,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { OverviewAccountComparison } from '@/components/dashboard/overview-account-comparison'
 import type { ComparisonDisplayMode } from '@/components/dashboard/overview-account-comparison-helpers'
 import type { NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
+import { buildRecordedBalanceModel } from '@/components/charts/recorded-balance-model'
+import enDashboard from '@/i18n/locales/en/dashboard.json'
+import esDashboard from '@/i18n/locales/es/dashboard.json'
 import type { Account } from '@/types/database'
 import { useCurrencyStore } from '@/stores/currency-store'
 
@@ -45,15 +48,180 @@ vi.mock('@/components/ui/safe-chart', () => ({
   SafeChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))
 
-vi.mock('recharts', () => ({
-  LineChart: () => null,
-  Line: () => null,
-  CartesianGrid: () => null,
-  XAxis: () => null,
-  YAxis: () => null,
-  Tooltip: () => null,
-  Legend: () => null,
-}))
+let comparisonChartRows: Array<{
+  date: string
+  first: number | null
+  second: number | null
+  utcTimestamp?: number
+}> = []
+
+vi.mock('recharts', () => {
+  function renderAxisTicks(
+    tick:
+      | ((tickProps: {
+          x?: number
+          y?: number
+          index?: number
+          visibleTicksCount?: number
+          payload?: { value?: number }
+        }) => React.ReactNode)
+      | { fill?: string; fontSize?: number }
+      | undefined,
+    ticks: readonly number[] | undefined
+  ) {
+    if (typeof tick !== 'function' || !Array.isArray(ticks)) return null
+    return ticks.map((value, index) => (
+      <span key={`${value}-${index}`}>
+        {tick({
+          x: index === 0 ? 0 : 40,
+          y: 16,
+          index,
+          visibleTicksCount: ticks.length,
+          payload: { value },
+        })}
+      </span>
+    ))
+  }
+  return {
+    LineChart: ({
+      data,
+      children,
+      accessibilityLayer,
+    }: {
+      data?: Array<{
+        date: string
+        first: number | null
+        second: number | null
+        utcTimestamp?: number
+      }>
+      children?: React.ReactNode
+      accessibilityLayer?: boolean
+    }) => {
+      comparisonChartRows = data ?? []
+      return (
+        <div
+          data-testid="line-chart"
+          data-points={data?.map((point) => point.date).join(',') ?? ''}
+          data-count={String(data?.length ?? 0)}
+          data-first={
+            data
+              ?.map((point) =>
+                point.first === null || point.first === undefined ? 'null' : String(point.first)
+              )
+              .join(',') ?? ''
+          }
+          data-second={
+            data
+              ?.map((point) =>
+                point.second === null || point.second === undefined ? 'null' : String(point.second)
+              )
+              .join(',') ?? ''
+          }
+          data-timestamps={data?.map((point) => point.utcTimestamp ?? '').join(',') ?? ''}
+          data-accessibility={accessibilityLayer === false ? 'off' : 'on'}
+        >
+          {children}
+        </div>
+      )
+    },
+    Line: ({
+      type,
+      dataKey,
+      connectNulls,
+      isAnimationActive,
+      strokeWidth,
+    }: {
+      type?: string
+      dataKey?: string
+      connectNulls?: boolean
+      isAnimationActive?: boolean
+      strokeWidth?: number
+    }) => (
+      <div
+        data-testid="line"
+        data-key={dataKey ?? ''}
+        data-type={type ?? ''}
+        data-connect-nulls={connectNulls ? 'true' : 'false'}
+        data-animation={isAnimationActive === false ? 'off' : 'on'}
+        data-stroke-width={strokeWidth ?? ''}
+      />
+    ),
+    CartesianGrid: ({ vertical }: { vertical?: boolean }) => (
+      <div data-testid="cartesian-grid" data-vertical={vertical === false ? 'false' : 'true'} />
+    ),
+    XAxis: (props: {
+      dataKey?: string
+      type?: string
+      scale?: string
+      domain?: readonly number[]
+      ticks?: readonly number[]
+      interval?: number | string
+      tick?:
+        | { fill?: string; fontSize?: number }
+        | ((tickProps: {
+            x?: number
+            y?: number
+            index?: number
+            visibleTicksCount?: number
+            payload?: { value?: number }
+          }) => React.ReactNode)
+    }) => (
+      <div
+        data-testid="x-axis"
+        data-key={props.dataKey ?? ''}
+        data-type={props.type ?? ''}
+        data-scale={props.scale ?? ''}
+        data-domain={Array.isArray(props.domain) ? props.domain.join('|') : ''}
+        data-ticks={Array.isArray(props.ticks) ? props.ticks.join('|') : ''}
+        data-interval={props.interval ?? ''}
+        data-tick-size={
+          props.tick && typeof props.tick === 'object' && 'fontSize' in props.tick
+            ? String(props.tick.fontSize)
+            : ''
+        }
+      >
+        {renderAxisTicks(props.tick, props.ticks)}
+      </div>
+    ),
+    YAxis: (props: {
+      domain?: readonly number[]
+      ticks?: readonly number[]
+      width?: number
+      interval?: number | string
+      tick?:
+        | { fill?: string; fontSize?: number }
+        | ((tickProps: { x?: number; y?: number; payload?: { value?: number } }) => React.ReactNode)
+    }) => (
+      <div
+        data-testid="y-axis"
+        data-width={props.width ?? ''}
+        data-domain={Array.isArray(props.domain) ? props.domain.join('|') : ''}
+        data-ticks={Array.isArray(props.ticks) ? props.ticks.join('|') : ''}
+        data-interval={props.interval ?? ''}
+      >
+        {renderAxisTicks(props.tick, props.ticks)}
+      </div>
+    ),
+    Tooltip: (props: {
+      content?: (contentProps: {
+        active?: boolean
+        payload?: ReadonlyArray<{ payload?: unknown }>
+      }) => React.ReactNode
+    }) => {
+      if (typeof props.content !== 'function') return null
+      const point = comparisonChartRows[0]
+      return (
+        <div data-testid="tooltip-binding">
+          {props.content({
+            active: true,
+            payload: point ? [{ payload: point }] : [],
+          })}
+        </div>
+      )
+    },
+    Legend: () => null,
+  }
+})
 
 const accounts = [
   {
@@ -236,6 +404,8 @@ describe('OverviewAccountComparison', () => {
     )
     expect(screen.getByRole('status')).toHaveTextContent('overview.comparison.loading')
     expect(screen.queryByText(/overview.comparison.lastRecorded/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId('line-chart')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('overview-comparison-plot')).not.toBeInTheDocument()
 
     history.isLoading = false
     history.error = 'history unavailable'
@@ -265,5 +435,133 @@ describe('OverviewAccountComparison', () => {
     )
     expect(screen.getByText(/overview.comparison.noHistory/)).toBeInTheDocument()
     expect(screen.queryByText(/overview.comparison.lastRecorded/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId('line-chart')).not.toBeInTheDocument()
+    expect(document.querySelector('[class*="h-48"]')).toBeNull()
+    expect(document.querySelector('[class*="h-[300px]"]')).toBeNull()
+  })
+
+  it('plots each account on a shared UTC currency axis without filling gaps as zero', () => {
+    expect(enDashboard.overview.comparison.join).toMatch(/not zero|gap/i)
+    expect(esDashboard.overview.comparison.join).not.toBe(enDashboard.overview.comparison.join)
+    expect(esDashboard.overview.comparison.noLine).toMatch(/dos registros/)
+
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 })
+    render(<ComparisonHarness accounts={accounts} preferredCurrency="USD" />)
+    const chart = screen.getByTestId('line-chart')
+    const axisRows = [
+      { date: '2026-01-01', amountCentavos: -20_000 },
+      { date: '2026-02-01', amountCentavos: 200_000 },
+      { date: '2026-03-01', amountCentavos: -5_000 },
+      { date: '2026-03-01', amountCentavos: 240_000 },
+    ]
+    const model = buildRecordedBalanceModel(axisRows, 'USD', {
+      includeZero: false,
+      maxDateTicks: 5,
+      locale: 'en',
+    })
+    expect(model.status).toBe('series')
+    if (model.status !== 'series') return
+    expect(chart).toHaveAttribute('data-count', '3')
+    expect(chart).toHaveAttribute('data-points', '2026-01-01,2026-02-01,2026-03-01')
+    expect(chart).toHaveAttribute('data-first', '-20000,null,-5000')
+    expect(chart).toHaveAttribute('data-second', 'null,200000,240000')
+    expect(chart).toHaveAttribute(
+      'data-timestamps',
+      ['2026-01-01', '2026-02-01', '2026-03-01']
+        .map((date) => model.points.find((point) => point.date === date)?.utcTimestamp)
+        .join(',')
+    )
+    const timestamps = chart.getAttribute('data-timestamps')?.split(',') ?? []
+    expect(timestamps).toHaveLength(3)
+    expect(Number(timestamps[0])).toBeLessThan(Number(timestamps[1]))
+    expect(Number(timestamps[1])).toBeLessThan(Number(timestamps[2]))
+    expect(chart).toHaveAttribute('data-accessibility', 'off')
+    expect(chart.querySelectorAll('[data-testid="line"]')).toHaveLength(2)
+    for (const line of chart.querySelectorAll('[data-testid="line"]')) {
+      expect(line).toHaveAttribute('data-type', 'linear')
+      expect(line).toHaveAttribute('data-connect-nulls', 'true')
+      expect(line).toHaveAttribute('data-animation', 'off')
+      expect(line).not.toHaveAttribute('data-key', 'amountCentavos')
+    }
+    expect(chart.querySelector('[data-testid="line"]')).toHaveAttribute('data-key', 'first')
+    const axis = chart.querySelector('[data-testid="x-axis"]')
+    expect(axis).toHaveAttribute('data-key', 'utcTimestamp')
+    expect(axis).toHaveAttribute('data-type', 'number')
+    expect(axis).toHaveAttribute('data-scale', 'utc')
+    expect(axis).toHaveAttribute('data-domain', model.xDomain.join('|'))
+    expect(axis).toHaveAttribute('data-ticks', model.dateTicks.join('|'))
+    expect(axis?.querySelector('text')?.getAttribute('fill')).toBe('var(--color-foreground)')
+    expect(axis?.querySelector('text')?.getAttribute('font-size')).toBe('12')
+    const yAxis = chart.querySelector('[data-testid="y-axis"]')
+    expect(Number(yAxis?.getAttribute('data-width'))).toBeGreaterThanOrEqual(64)
+    expect(yAxis).toHaveAttribute('data-domain', model.yDomain.join('|'))
+    expect(yAxis).toHaveAttribute('data-ticks', model.yTicks.join('|'))
+    expect(Number(model.yDomain[0])).toBeLessThan(0)
+    expect(model.yDomain[1]).toBeGreaterThan(0)
+    const moneyNodes = [...(yAxis?.querySelectorAll('text') ?? [])]
+    expect(moneyNodes.map((node) => node.textContent)).toEqual(model.yTickLabels)
+    const moneyTitles = moneyNodes.map((node) => node.getAttribute('data-full'))
+    expect(new Set(moneyTitles).size).toBe(moneyTitles.length)
+    expect(moneyTitles.every((title) => title?.includes('$'))).toBe(true)
+    const negativeTicks = model.yTicks.filter((tick) => tick < 0)
+    if (negativeTicks.length > 0) {
+      expect(
+        moneyTitles.some(
+          (title) => title?.includes('-') || title?.includes('−') || title?.includes('(')
+        )
+      ).toBe(true)
+    }
+    expect(screen.getByTestId('overview-comparison-plot')).toHaveAttribute('data-chart-box', '300')
+    expect(
+      Number(screen.getByTestId('overview-comparison-plot').getAttribute('data-plot-inner'))
+    ).toBeGreaterThanOrEqual(220)
+    expect(screen.getByTestId('overview-comparison-plot')).toHaveAttribute(
+      'data-include-zero',
+      'false'
+    )
+    expect(screen.getByTestId('overview-comparison-plot')).toHaveAttribute('data-point-count', '3')
+    const tooltip = screen.getByTestId('tooltip-binding')
+    expect(tooltip).toHaveTextContent('Jan 1, 2026')
+    expect(tooltip).toHaveTextContent('-$200.00')
+    expect(tooltip).not.toHaveTextContent('$0.00')
+    expect(tooltip).not.toHaveTextContent('BBVA')
+    expect(screen.getByText('overview.comparison.join')).toBeInTheDocument()
+    const plot = screen.getByTestId('overview-comparison-plot')
+    const controls = screen.getByTestId('overview-comparison-controls')
+    expect(plot.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(controls).toHaveClass('justify-end', 'flex-wrap')
+    expect(controls.className.split(/\s+/)).not.toContain('w-full')
+    expect(screen.getByRole('button', { name: 'overview.comparison.change' })).toHaveClass(
+      'min-h-11',
+      'sm:min-h-8'
+    )
+    expect(screen.getByLabelText('overview.comparison.firstAccount')).toBeInTheDocument()
+    const table = document.getElementById('overview-comparison-recorded-snapshots')
+    expect(table?.closest('[role="img"]')).toBeNull()
+    expect(within(table as HTMLElement).getAllByRole('row')[1]).toHaveTextContent('—')
+    expect(table).toHaveTextContent('-$200.00')
+    expect(table).toHaveTextContent('$2,400.00')
+    expect(table).not.toHaveTextContent('$0.00')
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
+  })
+
+  it('does not draw a line for a single snapshot per account', () => {
+    history.firstHistory = [{ date: '2026-03-01', balance: -5_000 }]
+    history.secondHistory = [{ date: '2026-04-15', balance: 100_000 }]
+    render(<ComparisonHarness accounts={accounts} preferredCurrency="USD" />)
+    expect(screen.queryByTestId('line-chart')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('overview-comparison-plot')).not.toBeInTheDocument()
+    expect(screen.getByTestId('overview-comparison-no-line')).toHaveTextContent(
+      'overview.comparison.noLine'
+    )
+    expect(screen.getByText(/overview.comparison.lastRecorded Mar 1, 2026/)).toBeInTheDocument()
+    expect(screen.getByText(/overview.comparison.lastRecorded Apr 15, 2026/)).toBeInTheDocument()
+    expect(document.getElementById('overview-comparison-recorded-snapshots')).toHaveTextContent(
+      '-$50.00'
+    )
+    expect(document.getElementById('overview-comparison-recorded-snapshots')).toHaveTextContent(
+      '$2,000.00'
+    )
   })
 })

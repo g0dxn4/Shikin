@@ -98,6 +98,7 @@ vi.mock('recharts', () => {
       fillOpacity,
       baseValue,
       strokeWidth,
+      isAnimationActive,
       dot,
     }: {
       type?: string
@@ -106,6 +107,7 @@ vi.mock('recharts', () => {
       fillOpacity?: number
       baseValue?: number
       strokeWidth?: number
+      isAnimationActive?: boolean
       dot?: (props: {
         cx?: number
         cy?: number
@@ -121,6 +123,7 @@ vi.mock('recharts', () => {
         data-fill-opacity={fillOpacity ?? ''}
         data-base={baseValue ?? ''}
         data-stroke-width={strokeWidth ?? ''}
+        data-animation={isAnimationActive === false ? 'off' : 'on'}
       >
         {typeof dot === 'function'
           ? chartPoints.map((point, index) => (
@@ -608,9 +611,17 @@ describe('Overview summary visual', () => {
     expect(summary.querySelector('[data-testid="line"]')).toHaveAttribute('data-type', 'linear')
     expect(summary.querySelector('[data-testid="area-chart"]')).not.toBeInTheDocument()
     expect(summary.querySelector('[data-testid="overview-summary-composition"]')).toBeNull()
+    const historyArea = document
+      .getElementById('overview-history-panel')
+      ?.querySelector('[data-testid="area"]')
+    expect(historyArea).toHaveAttribute('data-type', 'linear')
+    expect(historyArea).toHaveAttribute('data-base', '0')
+    expect(historyArea).toHaveAttribute('data-connect-nulls', 'false')
+    expect(historyArea).toHaveAttribute('data-animation', 'off')
+    expect(historyArea?.getAttribute('data-fill') ?? '').not.toContain('url(')
     expect(
-      document.getElementById('overview-history-panel')?.querySelector('[data-testid="area"]')
-    ).toHaveAttribute('data-type', 'monotone')
+      document.getElementById('overview-history-panel')?.querySelector('linearGradient')
+    ).toBeNull()
 
     const table = document.getElementById('overview-summary-recorded-snapshots') as HTMLTableElement
     expect(table.closest('.sr-only')).toBeNull()
@@ -880,11 +891,13 @@ describe('Overview summary visual', () => {
     expect(summary.querySelector('time[datetime="2026-01-02"]')).toHaveTextContent('2026')
     expect(summary).toHaveTextContent('$500.00')
 
-    const historyAxis = document
-      .getElementById('overview-history-panel')
-      ?.querySelector('[data-testid="y-axis"]')
-    expect(historyAxis).toHaveAttribute('data-domain', '')
-    expect(historyAxis).toHaveAttribute('data-hide', 'false')
+    const historyPanel = document.getElementById('overview-history-panel')
+    expect(historyPanel?.querySelector('[data-testid="y-axis"]')).toBeNull()
+    expect(historyPanel?.querySelector('[data-testid="area-chart"]')).toBeNull()
+    expect(historyPanel?.querySelector('[data-testid="overview-history-flat"]')).toHaveTextContent(
+      'overview.summaryUnchanged'
+    )
+    expect(historyPanel?.querySelector('[data-testid="overview-history-plot"]')).toBeNull()
   })
 
   it('keeps all three overview tabs readable in a three-column wrap grid', () => {
@@ -1358,5 +1371,213 @@ describe('Overview summary ranges and point inspection', () => {
     expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
     expect(document.getElementById('overview-history-panel')).toHaveAttribute('hidden')
     expect(document.getElementById('overview-comparison-panel')).toHaveAttribute('inert')
+  })
+})
+
+describe('Overview history recorded chart', () => {
+  const history = [
+    { date: '2026-01-31', netWorth: 1_888_150 },
+    { date: '2026-04-30', netWorth: 2_744_850 },
+    { date: '2026-07-31', netWorth: 3_520_770 },
+    { date: '2026-10-18', netWorth: -4_265_840 },
+  ]
+
+  function renderHistory(width: number) {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+    render(
+      <OverviewNetWorth
+        {...baseProps}
+        history={history}
+        historyCurrency="USD"
+        onPeriodChange={() => {}}
+      />
+    )
+    return document.getElementById('overview-history-panel')!
+  }
+
+  it('plots original centavos on a UTC currency axis without a gradient or invented rows', () => {
+    const originalWidth = window.innerWidth
+    const panel = renderHistory(1280)
+    const model = buildRecordedBalanceModel(
+      history.map((point) => ({ date: point.date, amountCentavos: point.netWorth })),
+      'USD',
+      { includeZero: true, maxDateTicks: 5, locale: 'en' }
+    )
+    expect(model.status).toBe('series')
+    if (model.status !== 'series') return
+    const chart = panel.querySelector('[data-testid="area-chart"]')
+    expect(chart).toHaveAttribute('data-points', history.map((point) => point.date).join(','))
+    expect(chart).toHaveAttribute('data-count', String(history.length))
+    expect(chart).toHaveAttribute('data-cents', history.map((point) => point.netWorth).join(','))
+    expect(chart).toHaveAttribute(
+      'data-timestamps',
+      model.points.map((point) => point.utcTimestamp).join(',')
+    )
+    expect(chart).toHaveAttribute('data-accessibility', 'off')
+    const axis = chart?.querySelector('[data-testid="x-axis"]')
+    expect(axis).toHaveAttribute('data-key', 'utcTimestamp')
+    expect(axis).toHaveAttribute('data-type', 'number')
+    expect(axis).toHaveAttribute('data-scale', 'utc')
+    expect(axis).toHaveAttribute('data-domain', model.xDomain.join('|'))
+    expect(axis).toHaveAttribute('data-ticks', model.dateTicks.join('|'))
+    expect(axis).toHaveAttribute('data-interval', '0')
+    expect(model.dateTicks[0]).toBe(model.xDomain[0])
+    expect(model.dateTicks[model.dateTicks.length - 1]).toBe(model.xDomain[1])
+    expect(new Set(model.dateTicks).size).toBe(model.dateTicks.length)
+    const anchors = [...(axis?.querySelectorAll('text') ?? [])].map((node) =>
+      node.getAttribute('data-anchor')
+    )
+    expect(anchors[0]).toBe('start')
+    expect(anchors[anchors.length - 1]).toBe('end')
+    const tickText = axis?.querySelector('text')
+    expect(tickText?.getAttribute('fill')).toBe('var(--color-foreground)')
+    expect(tickText?.getAttribute('font-size') ?? tickText?.getAttribute('fontsize')).toBe('12')
+    const yAxis = chart?.querySelector('[data-testid="y-axis"]')
+    expect(Number(yAxis?.getAttribute('data-width'))).toBeGreaterThanOrEqual(64)
+    expect(yAxis).toHaveAttribute('data-domain', model.yDomain.join('|'))
+    expect(yAxis).toHaveAttribute('data-ticks', model.yTicks.join('|'))
+    expect(Number(model.yDomain[0])).toBeLessThan(0)
+    expect(Number(model.yDomain[1])).toBeGreaterThan(0)
+    const moneyTitles = [...(yAxis?.querySelectorAll('text') ?? [])].map((node) =>
+      node.getAttribute('data-full')
+    )
+    expect(moneyTitles.length).toBeGreaterThan(1)
+    expect(new Set(moneyTitles).size).toBe(moneyTitles.length)
+    expect(
+      moneyTitles.some(
+        (title) => title?.includes('-') || title?.includes('−') || title?.includes('(')
+      )
+    ).toBe(true)
+    expect(panel.querySelector('[data-testid="overview-history-plot"]')).toHaveAttribute(
+      'data-chart-box',
+      '300'
+    )
+    expect(
+      Number(panel.querySelector('[data-plot-inner]')?.getAttribute('data-plot-inner'))
+    ).toBeGreaterThanOrEqual(220)
+    expect(panel.querySelector('linearGradient')).toBeNull()
+    expect(document.getElementById('overviewNetWorthFill')).toBeNull()
+    expect(document.querySelectorAll('#overview-summary-recorded-snapshots')).toHaveLength(1)
+    expect(document.querySelectorAll('#overview-history-recorded-snapshots')).toHaveLength(1)
+    const table = document.getElementById('overview-history-recorded-snapshots')
+    expect(table?.closest('[role="img"]')).toBeNull()
+    expect(table?.closest('details')).toBeTruthy()
+    expect(table?.querySelector('time[datetime="2026-01-31"]')).toHaveTextContent('2026')
+    expect(table).toHaveTextContent('-$42,658.40')
+    expect(table).toHaveTextContent('$18,881.50')
+    const tooltip = chart?.querySelector('[data-testid="tooltip-binding"]')
+    expect(tooltip).toHaveTextContent('Jun 15, 2026')
+    expect(tooltip).toHaveTextContent('$1,234.00')
+    expect(tooltip?.textContent).not.toMatch(/\$1\.2K|\$1K/i)
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
+  })
+
+  it('anchors two date ticks at 320 and three at 375, with the range under the plot', async () => {
+    const user = userEvent.setup()
+    const originalWidth = window.innerWidth
+    const periods: string[] = []
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 320 })
+    const { unmount } = render(
+      <OverviewNetWorth
+        {...baseProps}
+        history={history}
+        historyCurrency="USD"
+        onPeriodChange={(next) => periods.push(next)}
+      />
+    )
+    const narrow = buildRecordedBalanceModel(
+      history.map((point) => ({ date: point.date, amountCentavos: point.netWorth })),
+      'USD',
+      { includeZero: true, maxDateTicks: 2, locale: 'en' }
+    )
+    expect(narrow.status).toBe('series')
+    if (narrow.status !== 'series') return
+    const panel = document.getElementById('overview-history-panel')!
+    expect(panel.querySelector('[data-testid="x-axis"]')).toHaveAttribute(
+      'data-ticks',
+      narrow.dateTicks.join('|')
+    )
+    expect(narrow.dateTicks).toHaveLength(2)
+    expect(panel.querySelector('[data-testid="overview-history-plot"]')).toHaveAttribute(
+      'data-tick-budget',
+      '2'
+    )
+    unmount()
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 })
+    render(
+      <OverviewNetWorth
+        {...baseProps}
+        history={history}
+        historyCurrency="USD"
+        onPeriodChange={(next) => periods.push(next)}
+      />
+    )
+    const mid = buildRecordedBalanceModel(
+      history.map((point) => ({ date: point.date, amountCentavos: point.netWorth })),
+      'USD',
+      { includeZero: true, maxDateTicks: 3, locale: 'en' }
+    )
+    expect(mid.status).toBe('series')
+    if (mid.status !== 'series') return
+    const phone = document.getElementById('overview-history-panel')!
+    expect(phone.querySelector('[data-testid="x-axis"]')).toHaveAttribute(
+      'data-ticks',
+      mid.dateTicks.join('|')
+    )
+    expect(mid.dateTicks).toHaveLength(3)
+    expect(new Set(mid.dateTicks).size).toBe(3)
+    expect(phone.querySelector('[data-testid="overview-history-plot"]')).toHaveAttribute(
+      'data-tick-budget',
+      '3'
+    )
+
+    await user.click(screen.getByRole('tab', { name: 'overview.views.history' }))
+    const plot = phone.querySelector('[data-testid="overview-history-plot"]')!
+    const range = phone.querySelector('[data-testid="overview-history-range"]')!
+    expect(plot.compareDocumentPosition(range) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(range).toHaveClass('flex-wrap', 'max-w-full', 'justify-end')
+    expect(range.className.split(/\s+/)).not.toContain('w-full')
+    expect(range.className).not.toContain('overflow-x-auto')
+    expect(range.className).not.toContain('bg-muted')
+    for (const item of ['month', '3m', '6m', 'ytd', '1y', 'all']) {
+      const button = screen.getByRole('button', { name: `overview.period.${item}` })
+      expect(button).toHaveClass('min-h-11', 'min-w-11', 'sm:min-h-8', 'sm:min-w-8')
+    }
+    await user.click(screen.getByRole('button', { name: 'overview.period.ytd' }))
+    expect(periods).toEqual(['ytd'])
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
+  })
+
+  it('does not reserve a plot for one snapshot or invalid dates', () => {
+    const { rerender } = render(
+      <OverviewNetWorth
+        {...baseProps}
+        history={[{ date: '2026-04-02', netWorth: 10_000 }]}
+        historyCurrency="USD"
+      />
+    )
+    const panel = document.getElementById('overview-history-panel')!
+    expect(panel.querySelector('[data-testid="overview-history-plot"]')).toBeNull()
+    expect(panel.querySelector('[data-testid="area-chart"]')).toBeNull()
+    expect(panel.querySelector('[data-testid="overview-history-single"]')).toHaveTextContent(
+      'overview.summaryOneSnapshot'
+    )
+    expect(panel.querySelector('[data-testid="overview-history-single"]')).toHaveTextContent(
+      '$100.00'
+    )
+    expect(panel.querySelector('[class*="h-48"]')).toBeNull()
+
+    rerender(
+      <OverviewNetWorth
+        {...baseProps}
+        history={[{ date: 'not-a-date', netWorth: 75_000 }]}
+        historyCurrency="USD"
+      />
+    )
+    expect(panel.querySelector('[data-testid="area-chart"]')).toBeNull()
+    expect(panel.querySelector('[data-testid="overview-history-invalid"]')).toBeTruthy()
+    expect(panel.querySelector('time[datetime="not-a-date"]')).toHaveTextContent('not-a-date')
+    expect(panel).toHaveTextContent('$750.00')
   })
 })

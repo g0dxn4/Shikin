@@ -1,7 +1,13 @@
-import { useMemo } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
-import { CartesianGrid, Legend, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
+import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
+import {
+  buildRecordedBalanceModel,
+  formatRecordedAxisDate,
+  type RecordedBalanceDateTicks,
+  type RecordedBalanceModel,
+} from '@/components/charts/recorded-balance-model'
 import { SafeChart } from '@/components/ui/safe-chart'
 import {
   Select,
@@ -11,7 +17,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
-  CHART_AXIS_COLOR,
   CHART_GRID_COLOR,
   CHART_ITEM_STYLE,
   CHART_LABEL_STYLE,
@@ -24,6 +29,7 @@ import type { NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
 import {
   prepareAccountComparison,
   reconcileComparisonSelection,
+  type ComparisonChartPoint,
   type ComparisonDisplayMode,
   type ConvertToPreferred,
   type PreparedAccountComparison,
@@ -47,6 +53,121 @@ interface OverviewAccountComparisonProps {
 
 const PERIODS: NetWorthPeriod[] = ['month', '3m', '6m', 'ytd', '1y', 'all']
 
+/** Chart box. Inner plot is the box minus the top margin and the date-axis band. */
+const COMPARE_CHART_BOX_PX = 300
+const COMPARE_MARGIN_TOP = 12
+const COMPARE_X_AXIS_HEIGHT = 36
+const COMPARE_PLOT_INNER_PX = COMPARE_CHART_BOX_PX - COMPARE_MARGIN_TOP - COMPARE_X_AXIS_HEIGHT
+const COMPARE_CHART_MARGIN = { top: COMPARE_MARGIN_TOP, right: 4, bottom: 0, left: 0 } as const
+const COMPARE_TICK_FILL = 'var(--color-foreground)'
+const COMPARE_CAPTION_ID = 'overview-comparison-recorded-caption'
+const COMPARE_TABLE_ID = 'overview-comparison-recorded-snapshots'
+const COMPARE_DISCLOSURE =
+  'text-accent focus-visible:ring-ring inline-flex min-h-11 cursor-pointer list-none items-center rounded-md px-1 text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none sm:min-h-8 [&::-webkit-details-marker]:hidden'
+const COMPARE_FOOTER_BUTTON =
+  'focus-visible:ring-ring inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md border border-border bg-surface px-2.5 text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none motion-reduce:transition-none sm:min-h-8 sm:min-w-8'
+
+type ComparePlottedModel = Exclude<RecordedBalanceModel, { status: 'invalid' | 'empty' }>
+type CompareSeriesModel = ComparePlottedModel & { status: 'series' }
+
+function isCompareSeries(model: RecordedBalanceModel | null): model is CompareSeriesModel {
+  return model?.status === 'series'
+}
+
+function safeCentavos(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value)
+}
+
+interface ComparisonPlotRow {
+  date: string
+  first: number | null
+  second: number | null
+  utcTimestamp: number
+}
+
+/** 2 at 320px, 3 at 375px, 5 once the plot is a desktop width. Ends stay anchored. */
+function comparisonDateTickBudget(width: number): RecordedBalanceDateTicks {
+  if (!Number.isFinite(width) || width <= 0) return 5
+  if (width < 330) return 2
+  if (width < 768) return 3
+  return 5
+}
+
+function chartLocale(language: string | undefined): string {
+  const value = language?.trim()
+  return value && value.length > 0 ? value : 'en'
+}
+
+function comparisonFullDate(utcTimestamp: number, locale: string) {
+  return formatRecordedAxisDate(utcTimestamp, locale, true)
+}
+
+/**
+ * Axis extent only. Same-day rows are the two accounts' real observations,
+ * not one financial series and not a derived balance.
+ * Returns null when a non-null amount is not an integer centavo.
+ */
+function comparisonAxisRows(
+  points: readonly ComparisonChartPoint[]
+): { date: string; amountCentavos: number }[] | null {
+  const rows: { date: string; amountCentavos: number }[] = []
+  for (const point of points) {
+    if (point.first !== null) {
+      if (!Number.isSafeInteger(point.first)) return null
+      rows.push({ date: point.date, amountCentavos: point.first })
+    }
+    if (point.second !== null) {
+      if (!Number.isSafeInteger(point.second)) return null
+      rows.push({ date: point.date, amountCentavos: point.second })
+    }
+  }
+  return rows
+}
+
+function comparisonChartRows(
+  points: readonly ComparisonChartPoint[],
+  model: CompareSeriesModel
+): ComparisonPlotRow[] | null {
+  const utcByDate = new Map<string, number>()
+  for (const point of model.points) {
+    const existing = utcByDate.get(point.date)
+    if (existing !== undefined && existing !== point.utcTimestamp) return null
+    utcByDate.set(point.date, point.utcTimestamp)
+  }
+  const rows: ComparisonPlotRow[] = []
+  for (const point of points) {
+    const utcTimestamp = utcByDate.get(point.date)
+    if (utcTimestamp === undefined) return null
+    rows.push({
+      date: point.date,
+      first: point.first,
+      second: point.second,
+      utcTimestamp,
+    })
+  }
+  return rows
+}
+
+function accountHasLine(points: readonly ComparisonChartPoint[]): boolean {
+  let first = 0
+  let second = 0
+  for (const point of points) {
+    if (point.first !== null) first += 1
+    if (point.second !== null) second += 1
+    if (first >= 2 || second >= 2) return true
+  }
+  return false
+}
+
+function observationCount(points: readonly ComparisonChartPoint[]): number {
+  let count = 0
+  for (const point of points) {
+    if (point.first !== null) count += 1
+    if (point.second !== null) count += 1
+  }
+  return count
+}
+
 const INVALID_COMPARISON: PreparedAccountComparison = {
   complete: false,
   points: [],
@@ -66,7 +187,8 @@ export function OverviewAccountComparison({
   mode,
   onModeChange,
 }: OverviewAccountComparisonProps) {
-  const { t } = useTranslation('dashboard')
+  const { t, i18n } = useTranslation('dashboard')
+  const locale = chartLocale(i18n?.resolvedLanguage ?? i18n?.language)
   const mainCurrency = useCurrencyStore((state) => state.mainCurrency)
   const setupDraft = useCurrencyStore((state) => state.preferredCurrency)
   const manualRates = useCurrencyStore((state) => state.manualRates)
@@ -108,6 +230,37 @@ export function OverviewAccountComparison({
     secondAccount,
     secondHistory,
   ])
+  const plotRef = useRef<HTMLDivElement>(null)
+  const [plotWidth, setPlotWidth] = useState(() =>
+    typeof window === 'undefined' ? 0 : window.innerWidth
+  )
+  const axisRows = comparison.complete ? comparisonAxisRows(comparison.points) : null
+  const axisModel =
+    axisRows && preferredCurrency
+      ? buildRecordedBalanceModel(axisRows, preferredCurrency, {
+          includeZero: false,
+          locale,
+          maxDateTicks: comparisonDateTickBudget(plotWidth),
+        })
+      : null
+  const chartRows = isCompareSeries(axisModel)
+    ? comparisonChartRows(comparison.points, axisModel)
+    : null
+  const showComparisonChart = chartRows !== null && accountHasLine(comparison.points)
+  useLayoutEffect(() => {
+    if (!showComparisonChart) return
+    const element = plotRef.current
+    const read = () => {
+      const measured = element?.clientWidth ?? 0
+      const next = measured > 0 ? measured : typeof window === 'undefined' ? 0 : window.innerWidth
+      setPlotWidth((current) => (current === next ? current : next))
+    }
+    read()
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(read)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [showComparisonChart])
 
   if (accounts.length < 2) {
     return (
@@ -162,24 +315,6 @@ export function OverviewAccountComparison({
           accounts={accounts}
           onChange={(value) => selectAccount('second', value)}
         />
-        <div className="col-span-2 min-w-0">
-          <SegmentedControl
-            label={t('overview.comparison.display')}
-            value={mode}
-            items={[
-              { value: 'balance', label: t('overview.comparison.balance') },
-              { value: 'change', label: t('overview.comparison.change') },
-            ]}
-            onChange={(value) => onModeChange(value as ComparisonDisplayMode)}
-          />
-        </div>
-        <div className="col-span-2 min-w-0">
-          <PeriodControl
-            period={period}
-            onChange={onPeriodChange}
-            label={t('overview.comparison.period')}
-          />
-        </div>
       </div>
 
       <p className="text-muted-foreground mt-3 text-xs">
@@ -203,15 +338,12 @@ export function OverviewAccountComparison({
       ) : null}
 
       {isLoading ? (
-        <div
-          className="bg-muted mt-4 flex h-48 items-center justify-center rounded-xl"
-          role="status"
-        >
+        <div className="mt-4" role="status">
           <p className="text-muted-foreground text-sm">{t('overview.comparison.loading')}</p>
         </div>
       ) : error ? (
         <div
-          className="border-destructive/30 bg-destructive/10 mt-4 rounded-xl border px-4 py-8 text-center"
+          className="border-destructive/30 bg-destructive/10 mt-4 rounded-xl border px-4 py-4 text-center"
           role="alert"
         >
           <p className="text-destructive text-sm font-semibold">
@@ -221,7 +353,7 @@ export function OverviewAccountComparison({
         </div>
       ) : !comparison.complete ? (
         <div
-          className="border-warning/30 bg-warning/10 mt-4 rounded-xl border px-4 py-8 text-center"
+          className="border-warning/30 bg-warning/10 mt-4 rounded-xl border px-4 py-4 text-center"
           role="alert"
         >
           <p className="text-warning text-sm font-semibold">
@@ -230,18 +362,16 @@ export function OverviewAccountComparison({
           <p className="text-muted-foreground mt-1 text-xs">{conversionMessage}</p>
         </div>
       ) : hasNoHistory ? (
-        <div className="bg-muted mt-4 flex h-48 items-center justify-center rounded-xl px-5 text-center">
-          <p className="text-muted-foreground text-sm">
-            {t('overview.comparison.noHistory', {
-              accounts: [
-                firstHistory.length === 0 ? firstAccount.name : null,
-                secondHistory.length === 0 ? secondAccount.name : null,
-              ]
-                .filter(Boolean)
-                .join(', '),
-            })}
-          </p>
-        </div>
+        <p className="text-muted-foreground mt-4 text-sm break-words">
+          {t('overview.comparison.noHistory', {
+            accounts: [
+              firstHistory.length === 0 ? firstAccount.name : null,
+              secondHistory.length === 0 ? secondAccount.name : null,
+            ]
+              .filter(Boolean)
+              .join(', '),
+          })}
+        </p>
       ) : (
         <>
           <dl className="mt-4 grid grid-cols-2 gap-2">
@@ -286,74 +416,35 @@ export function OverviewAccountComparison({
               }
             />
           </dl>
-          <div
-            className="mt-3 h-48 min-w-0 sm:h-72"
-            role="img"
-            aria-label={t('overview.comparison.chartLabel', {
-              first: firstAccount.name,
-              second: secondAccount.name,
-            })}
-          >
-            <SafeChart>
-              <LineChart data={comparison.points}>
-                <CartesianGrid stroke={CHART_GRID_COLOR} vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: CHART_AXIS_COLOR, fontSize: 10 }}
-                  tickFormatter={(date) => dayjs(String(date)).format('MMM D')}
-                />
-                <YAxis
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: CHART_AXIS_COLOR, fontSize: 10 }}
-                  tickFormatter={(value) => formatMoney(Number(value), preferredCurrency)}
-                  width={62}
-                />
-                <Tooltip
-                  contentStyle={CHART_TOOLTIP_STYLE}
-                  itemStyle={CHART_ITEM_STYLE}
-                  labelStyle={CHART_LABEL_STYLE}
-                  labelFormatter={(date) => dayjs(String(date)).format('MMM D, YYYY')}
-                  formatter={(value, name) => [
-                    value === null || value === undefined
-                      ? '—'
-                      : formatMoney(Number(value), preferredCurrency),
-                    name,
-                  ]}
-                />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="first"
-                  name={firstAccount.name}
-                  connectNulls
-                  isAnimationActive={false}
-                  stroke="var(--color-chart-1)"
-                  strokeWidth={2.2}
-                  dot={{ r: 2.5 }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="second"
-                  name={secondAccount.name}
-                  connectNulls
-                  isAnimationActive={false}
-                  stroke="var(--color-chart-2)"
-                  strokeWidth={2.2}
-                  dot={{ r: 2.5 }}
-                />
-              </LineChart>
-            </SafeChart>
-          </div>
+          {showComparisonChart && chartRows && isCompareSeries(axisModel) && preferredCurrency ? (
+            <ComparisonSeriesChart
+              model={axisModel}
+              rows={chartRows}
+              locale={locale}
+              periodLabel={t(`overview.period.${period}`)}
+              firstName={firstAccount.name}
+              secondName={secondAccount.name}
+              currency={preferredCurrency}
+              plotRef={plotRef}
+              tickBudget={comparisonDateTickBudget(plotWidth)}
+            />
+          ) : (
+            <p
+              data-testid="overview-comparison-no-line"
+              className="text-muted-foreground mt-3 max-w-prose text-xs leading-snug break-words"
+            >
+              {axisModel?.status === 'flat'
+                ? t('overview.summaryUnchanged')
+                : observationCount(comparison.points) <= 1
+                  ? t('overview.summaryOneSnapshot')
+                  : t('overview.comparison.noLine')}
+            </p>
+          )}
           <details className="mt-2">
-            <summary className="text-accent cursor-pointer text-xs font-semibold">
-              {t('overview.viewChartData')}
-            </summary>
+            <summary className={COMPARE_DISCLOSURE}>{t('overview.viewChartData')}</summary>
             <div className="max-w-full overflow-x-auto">
-              <table className="mt-2 w-full min-w-[420px] text-xs">
-                <caption className="sr-only">
+              <table id={COMPARE_TABLE_ID} className="mt-2 w-full min-w-[420px] text-xs">
+                <caption className="text-muted-foreground py-1 text-left">
                   {t('overview.comparison.chartLabel', {
                     first: firstAccount.name,
                     second: secondAccount.name,
@@ -361,15 +452,23 @@ export function OverviewAccountComparison({
                 </caption>
                 <thead>
                   <tr>
-                    <th className="py-1 pr-4 text-left font-medium">{t('analytics.day')}</th>
-                    <th className="py-1 pr-4 text-left font-medium">{firstAccount.name}</th>
-                    <th className="py-1 text-left font-medium">{secondAccount.name}</th>
+                    <th scope="col" className="py-1 pr-4 text-left font-medium">
+                      {t('analytics.day')}
+                    </th>
+                    <th scope="col" className="py-1 pr-4 text-left font-medium">
+                      {firstAccount.name}
+                    </th>
+                    <th scope="col" className="py-1 text-left font-medium">
+                      {secondAccount.name}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {comparison.points.map((point) => (
                     <tr key={point.date}>
-                      <td className="py-1 pr-4">{dayjs(point.date).format('MMM D, YYYY')}</td>
+                      <th scope="row" className="py-1 pr-4 text-left font-normal">
+                        <time dateTime={point.date}>{dayjs(point.date).format('MMM D, YYYY')}</time>
+                      </th>
                       <td className="py-1 pr-4 tabular-nums">
                         {formatOptionalMoney(point.first, preferredCurrency)}
                       </td>
@@ -384,6 +483,26 @@ export function OverviewAccountComparison({
           </details>
         </>
       )}
+
+      <div
+        className="mt-3 flex max-w-full flex-wrap items-end justify-end gap-x-3 gap-y-2 motion-reduce:transition-none"
+        data-testid="overview-comparison-controls"
+      >
+        <SegmentedControl
+          label={t('overview.comparison.display')}
+          value={mode}
+          items={[
+            { value: 'balance', label: t('overview.comparison.balance') },
+            { value: 'change', label: t('overview.comparison.change') },
+          ]}
+          onChange={(value) => onModeChange(value as ComparisonDisplayMode)}
+        />
+        <PeriodControl
+          period={period}
+          onChange={onPeriodChange}
+          label={t('overview.comparison.period')}
+        />
+      </div>
     </div>
   )
 }
@@ -434,13 +553,9 @@ function SegmentedControl({
   onChange: (value: string) => void
 }) {
   return (
-    <div>
+    <div className="min-w-0">
       <span className="text-muted-foreground mb-1 block text-xs font-medium">{label}</span>
-      <div
-        className="border-border bg-muted flex min-h-10 rounded-lg border p-0.5"
-        role="group"
-        aria-label={label}
-      >
+      <div className="flex max-w-full flex-wrap justify-end gap-1" role="group" aria-label={label}>
         {items.map((item) => (
           <button
             key={item.value}
@@ -448,9 +563,9 @@ function SegmentedControl({
             aria-pressed={value === item.value}
             onClick={() => onChange(item.value)}
             className={cn(
-              'rounded-md px-3 py-2 text-xs font-semibold',
+              COMPARE_FOOTER_BUTTON,
               value === item.value
-                ? 'bg-surface text-foreground shadow-sm'
+                ? 'bg-muted text-foreground'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
@@ -473,13 +588,9 @@ function PeriodControl({
 }) {
   const { t } = useTranslation('dashboard')
   return (
-    <div>
+    <div className="min-w-0">
       <span className="text-muted-foreground mb-1 block text-xs font-medium">{label}</span>
-      <div
-        className="border-border bg-muted flex min-h-10 max-w-full overflow-x-auto rounded-lg border p-0.5"
-        role="group"
-        aria-label={label}
-      >
+      <div className="flex max-w-full flex-wrap justify-end gap-1" role="group" aria-label={label}>
         {PERIODS.map((item) => (
           <button
             key={item}
@@ -487,9 +598,9 @@ function PeriodControl({
             aria-pressed={period === item}
             onClick={() => onChange(item)}
             className={cn(
-              'min-w-10 shrink-0 rounded-md px-2 py-2 text-xs font-semibold',
+              COMPARE_FOOTER_BUTTON,
               period === item
-                ? 'bg-surface text-foreground shadow-sm'
+                ? 'bg-muted text-foreground'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
@@ -553,4 +664,298 @@ function formatOptionalMoney(value: number | null, currency: string) {
 
 function formatSnapshotDate(date: string | null) {
   return date ? dayjs(date).format('MMM D, YYYY') : '—'
+}
+
+function ComparisonSeriesChart({
+  model,
+  rows,
+  locale,
+  periodLabel,
+  firstName,
+  secondName,
+  currency,
+  plotRef,
+  tickBudget,
+}: {
+  model: CompareSeriesModel
+  rows: readonly ComparisonPlotRow[]
+  locale: string
+  periodLabel: string
+  firstName: string
+  secondName: string
+  currency: string
+  plotRef: RefObject<HTMLDivElement | null>
+  tickBudget: RecordedBalanceDateTicks
+}) {
+  const { t } = useTranslation('dashboard')
+  const start = rows[0]
+  const end = rows[rows.length - 1]
+  if (!start || !end) return null
+  const recordedCount = rows.reduce(
+    (count, row) => count + (row.first !== null ? 1 : 0) + (row.second !== null ? 1 : 0),
+    0
+  )
+  const caption = t('overview.summaryCoverage', {
+    currency,
+    start: comparisonFullDate(start.utcTimestamp, locale),
+    end: comparisonFullDate(end.utcTimestamp, locale),
+    count: recordedCount,
+    period: periodLabel,
+  })
+
+  return (
+    <figure className="mt-3 min-w-0" aria-labelledby={COMPARE_CAPTION_ID}>
+      <figcaption id={COMPARE_CAPTION_ID}>
+        <p className="text-foreground text-sm font-semibold">
+          {t('overview.comparison.chartLabel', { first: firstName, second: secondName })}
+        </p>
+        <p className="text-muted-foreground mt-0.5 text-xs break-words">{caption}</p>
+      </figcaption>
+      <ul className="text-foreground mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        <li className="inline-flex items-center gap-1.5">
+          <span
+            className="inline-block size-2 rounded-full"
+            style={{ backgroundColor: 'var(--color-chart-1)' }}
+            aria-hidden="true"
+          />
+          {firstName}
+        </li>
+        <li className="inline-flex items-center gap-1.5">
+          <span
+            className="inline-block size-2 rounded-full"
+            style={{ backgroundColor: 'var(--color-chart-2)' }}
+            aria-hidden="true"
+          />
+          {secondName}
+        </li>
+      </ul>
+      <div
+        ref={plotRef}
+        className="-mx-4 mt-2 h-[300px] min-w-0 sm:mx-0"
+        data-testid="overview-comparison-plot"
+        data-chart-box={COMPARE_CHART_BOX_PX}
+        data-plot-inner={COMPARE_PLOT_INNER_PX}
+        data-max-date-ticks={model.dateTicks.length}
+        data-tick-budget={tickBudget}
+        data-include-zero="false"
+        data-point-count={rows.length}
+        role="img"
+        aria-label={t('overview.comparison.chartLabel', { first: firstName, second: secondName })}
+      >
+        <SafeChart>
+          <LineChart data={[...rows]} margin={COMPARE_CHART_MARGIN} accessibilityLayer={false}>
+            <CompareAxes model={model} locale={locale} />
+            <Tooltip
+              isAnimationActive={false}
+              cursor={{ stroke: 'var(--color-border)' }}
+              content={(props) => (
+                <CompareTooltip
+                  active={props.active}
+                  payload={props.payload}
+                  formatExact={model.formatExact}
+                  locale={locale}
+                  firstName={firstName}
+                  secondName={secondName}
+                />
+              )}
+            />
+            {/*
+              connectNulls joins each account's own observations across a union-timeline
+              slot where only the other account has a date. Null stays null in the data:
+              it is not zero, not a forward-filled measurement, and not a third series.
+              type="linear" is a straight segment between those observations, not a
+              smoothed path or a balance between the dates.
+            */}
+            <Line
+              type="linear"
+              dataKey="first"
+              name={firstName}
+              connectNulls
+              isAnimationActive={false}
+              stroke="var(--color-chart-1)"
+              strokeWidth={2}
+              dot={{ r: 2.5, strokeWidth: 0 }}
+              activeDot={false}
+            />
+            <Line
+              type="linear"
+              dataKey="second"
+              name={secondName}
+              connectNulls
+              isAnimationActive={false}
+              stroke="var(--color-chart-2)"
+              strokeWidth={2}
+              dot={{ r: 2.5, strokeWidth: 0 }}
+              activeDot={false}
+            />
+          </LineChart>
+        </SafeChart>
+      </div>
+      <details className="mt-2">
+        <summary className={COMPARE_DISCLOSURE}>{t('overview.comparison.joinLabel')}</summary>
+        <p className="text-muted-foreground mt-1 max-w-prose text-xs leading-snug">
+          {t('overview.comparison.join')}
+        </p>
+      </details>
+    </figure>
+  )
+}
+
+function CompareAxes({ model, locale }: { model: CompareSeriesModel; locale: string }) {
+  return (
+    <>
+      <CartesianGrid vertical={false} stroke={CHART_GRID_COLOR} />
+      <XAxis
+        dataKey="utcTimestamp"
+        type="number"
+        scale="utc"
+        domain={[model.xDomain[0], model.xDomain[1]]}
+        ticks={[...model.dateTicks]}
+        interval={0}
+        minTickGap={0}
+        height={COMPARE_X_AXIS_HEIGHT}
+        tickLine={false}
+        axisLine={{ stroke: 'var(--color-chart-axis)' }}
+        padding={{ left: 0, right: 0 }}
+        allowDataOverflow
+        tick={(props) => (
+          <CompareDateTick
+            x={props.x}
+            y={props.y}
+            index={props.index}
+            visibleTicksCount={props.visibleTicksCount}
+            value={Number(props.payload?.value)}
+            locale={locale}
+            formatDate={model.formatDate}
+          />
+        )}
+      />
+      <YAxis
+        type="number"
+        domain={[model.yDomain[0], model.yDomain[1]]}
+        ticks={[...model.yTicks]}
+        width={model.suggestedYWidth}
+        interval={0}
+        tickLine={false}
+        axisLine={false}
+        allowDataOverflow
+        tick={(props) => (
+          <CompareMoneyTick
+            x={props.x}
+            y={props.y}
+            value={Number(props.payload?.value)}
+            formatAxis={model.formatAxis}
+            formatExact={model.formatExact}
+          />
+        )}
+      />
+    </>
+  )
+}
+
+function CompareDateTick({
+  x,
+  y,
+  index,
+  visibleTicksCount,
+  value,
+  locale,
+  formatDate,
+}: {
+  x?: number | string
+  y?: number | string
+  index?: number
+  visibleTicksCount?: number
+  value: number
+  locale: string
+  formatDate: (utcTimestamp: number) => string
+}) {
+  if (!Number.isFinite(value)) return <g />
+  const last = (visibleTicksCount ?? 1) - 1
+  const anchor = index === 0 ? 'start' : index === last ? 'end' : 'middle'
+  const full = comparisonFullDate(value, locale)
+  return (
+    <text
+      x={x}
+      y={y}
+      dy={14}
+      textAnchor={anchor}
+      data-anchor={anchor}
+      fill={COMPARE_TICK_FILL}
+      fontSize={12}
+      data-full={full}
+    >
+      <title>{full}</title>
+      {formatDate(value)}
+    </text>
+  )
+}
+
+function CompareMoneyTick({
+  x,
+  y,
+  value,
+  formatAxis,
+  formatExact,
+}: {
+  x?: number | string
+  y?: number | string
+  value: number
+  formatAxis: (centavos: number) => string
+  formatExact: (centavos: number) => string
+}) {
+  if (!Number.isFinite(value)) return <g />
+  const full = formatExact(value)
+  return (
+    <text
+      x={x}
+      y={y}
+      dy={4}
+      textAnchor="end"
+      fill={COMPARE_TICK_FILL}
+      fontSize={12}
+      data-full={full}
+    >
+      <title>{full}</title>
+      {formatAxis(value)}
+    </text>
+  )
+}
+
+function CompareTooltip({
+  active,
+  payload,
+  formatExact,
+  locale,
+  firstName,
+  secondName,
+}: {
+  active?: boolean
+  payload?: ReadonlyArray<{ payload?: Partial<ComparisonPlotRow> }>
+  formatExact: (centavos: number) => string
+  locale: string
+  firstName: string
+  secondName: string
+}) {
+  const point = payload?.[0]?.payload
+  const utcTimestamp = point?.utcTimestamp
+  if (!active || !point || utcTimestamp === undefined || !Number.isFinite(utcTimestamp)) return null
+  const rows = [
+    { name: firstName, value: point.first },
+    { name: secondName, value: point.second },
+  ].flatMap((row) => (safeCentavos(row.value) ? [{ name: row.name, value: row.value }] : []))
+  if (rows.length === 0) return null
+  return (
+    <div style={CHART_TOOLTIP_STYLE}>
+      <p className="recharts-tooltip-label" style={{ ...CHART_LABEL_STYLE, margin: 0 }}>
+        {comparisonFullDate(utcTimestamp, locale)}
+      </p>
+      {rows.map((row) => (
+        <p key={row.name} style={{ ...CHART_ITEM_STYLE, margin: '2px 0 0' }}>
+          <span className="recharts-tooltip-item-name">{row.name}</span>
+          <span className="recharts-tooltip-item-value">{formatExact(row.value)}</span>
+        </p>
+      ))}
+    </div>
+  )
 }

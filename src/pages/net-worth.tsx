@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { TrendingUp, TrendingDown, Landmark, CreditCard } from 'lucide-react'
 import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts'
+import { FX_CURRENCIES } from '@shikin/finance-core/fx'
 import { SafeChart } from '@/components/ui/safe-chart'
 import { StatRow } from '@/components/ui/stat-row'
 import { ProgressBar } from '@/components/ui/progress-bar'
@@ -25,6 +26,18 @@ const PERIODS = [{ value: '3m' }, { value: '6m' }, { value: '1y' }, { value: 'al
 function describeIncompleteNetWorth(reasons: Array<string | false | undefined>, fallback: string) {
   const parts = reasons.filter((reason): reason is string => Boolean(reason))
   return parts.length > 0 ? parts.join(' ') : fallback
+}
+
+function formatNativeSnapshotEvidence(snapshot: {
+  date: string
+  currency: string
+  amountCentavos: number
+}) {
+  const currency = snapshot.currency.trim().toUpperCase()
+  const amount = (FX_CURRENCIES as readonly string[]).includes(currency)
+    ? formatMoney(snapshot.amountCentavos, currency)
+    : '—'
+  return `${dayjs(snapshot.date).format('MMM D, YYYY')}: ${amount}`
 }
 
 export function NetWorth() {
@@ -150,10 +163,7 @@ export function NetWorth() {
           {historyNativeSnapshots.length > 0 ? (
             <span className="text-muted-foreground mt-1 block text-xs">
               {historyNativeSnapshots
-                .map(
-                  (snapshot) =>
-                    `${dayjs(snapshot.date).format('MMM D, YYYY')}: ${formatMoney(snapshot.amountCentavos, snapshot.currency)}`
-                )
+                .map((snapshot) => formatNativeSnapshotEvidence(snapshot))
                 .join(' · ')}
             </span>
           ) : null}

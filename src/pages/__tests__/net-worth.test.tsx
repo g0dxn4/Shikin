@@ -229,6 +229,36 @@ describe('NetWorth page', () => {
     expect(screen.queryByText('$200.00')).not.toBeInTheDocument()
   })
 
+  it('does not throw when native snapshot evidence has an unsupported currency', () => {
+    mockState = {
+      ...mockState,
+      history: [],
+      historyComplete: false,
+      historyMissingCurrencies: ['UNKNOWN'],
+      historyNativeSnapshots: [
+        { id: 'legacy', date: '2024-01-01', currency: 'UNKNOWN', amountCentavos: 10_000 },
+        { id: 'blank', date: '2024-03-15', currency: '   ', amountCentavos: 25_000 },
+        { id: 'unsupported', date: '2024-04-02', currency: 'CHF', amountCentavos: 10_000 },
+      ],
+    }
+
+    expect(() => render(<NetWorth />)).not.toThrow()
+
+    const evidence = screen.getByRole('alert')
+    expect(evidence).toHaveTextContent('netWorth.unavailable')
+    expect(evidence).toHaveTextContent('UNKNOWN')
+    expect(evidence).toHaveTextContent('Jan 1, 2024: —')
+    expect(evidence).toHaveTextContent('Mar 15, 2024: —')
+    expect(evidence).toHaveTextContent('Apr 2, 2024: —')
+    expect(evidence).not.toHaveTextContent('$100.00')
+    expect(evidence).not.toHaveTextContent('$250.00')
+    expect(evidence).not.toHaveTextContent('CHF')
+    expect(screen.queryByText('$100.00')).not.toBeInTheDocument()
+    expect(screen.queryByText('$250.00')).not.toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'netWorth.chartTitle' })).not.toBeInTheDocument()
+    expect(screen.queryByText('$1,000.00')).not.toBeInTheDocument()
+  })
+
   it('withholds chart, table, and period delta for stale history authority', () => {
     mockState = {
       ...mockState,

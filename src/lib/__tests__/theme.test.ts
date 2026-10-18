@@ -22,6 +22,7 @@ import {
   applyNativeAppearance,
   applyTheme,
   customAccentForeground,
+  customFinancialColors,
   defaultTheme,
   isValidTheme,
   loadAppearancePreference,
@@ -275,6 +276,179 @@ describe('Theme Engine', () => {
     expect(document.documentElement.style.getPropertyValue('--color-primary-foreground')).toBe('')
     expect(document.documentElement).not.toHaveClass('dark')
   })
+
+  it('derives readable financial colors for every custom preset without rewriting tokens', () => {
+    const added = Object.entries(presetThemes).filter(([name]) => !(name in ORIGINAL_PRESETS))
+    expect(added).toHaveLength(24)
+    const before = JSON.stringify(presetThemes)
+
+    for (const [name, theme] of Object.entries(presetThemes)) {
+      const colors = customFinancialColors(theme)
+      expect(colors.income, name).toBe(colors.success)
+      expect(colors.expense, name).toBe(colors.destructive)
+      expect(colors.chart2, name).toBe(colors.success)
+      expect(colors.chart4, name).toBe(colors.warning)
+      expect(colors.chart5, name).toBe(colors.destructive)
+      expect(keepsMeaning('success', colors.success), `${name} success`).toBe(true)
+      expect(keepsMeaning('warning', colors.warning), `${name} warning`).toBe(true)
+      expect(keepsMeaning('destructive', colors.destructive), `${name} destructive`).toBe(true)
+      expect(keepsMeaning('cool', colors.chart3), `${name} chart3`).toBe(true)
+
+      for (const surface of [theme.background, theme.surface]) {
+        for (const [role, color] of [
+          ['success', colors.success],
+          ['warning', colors.warning],
+          ['destructive', colors.destructive],
+          ['chart2', colors.chart2],
+          ['chart3', colors.chart3],
+          ['chart4', colors.chart4],
+          ['chart5', colors.chart5],
+        ] as const) {
+          expect(contrast(color, surface), `${name} ${role} on ${surface}`).toBeGreaterThanOrEqual(
+            4.5
+          )
+          expect(
+            contrast(color, mixHex(color, surface, 0.1)),
+            `${name} ${role} 10% badge`
+          ).toBeGreaterThanOrEqual(4.5)
+        }
+      }
+      expect(
+        contrast(colors.chart3, mixHex(theme.foreground, theme.surface, 0.07)),
+        `${name} snowball`
+      ).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(colors.successForeground, colors.success), name).toBeGreaterThanOrEqual(4.5)
+      expect(contrast(colors.warningForeground, colors.warning), name).toBeGreaterThanOrEqual(4.5)
+      expect(
+        contrast(colors.destructiveForeground, colors.destructive),
+        name
+      ).toBeGreaterThanOrEqual(4.5)
+      for (const color of [colors.chart2, colors.chart3, colors.chart4, colors.chart5]) {
+        expect(contrast(customAccentForeground(color), color), name).toBeGreaterThanOrEqual(4.5)
+      }
+    }
+
+    expect(JSON.stringify(presetThemes)).toBe(before)
+    expect(Object.keys(presetThemes.sand)).toEqual(Object.keys(defaultTheme))
+  })
+
+  it('corrects Sand and Harbor inherited financial contrast and keeps Harbor bases', () => {
+    const sand = customFinancialColors(presetThemes.sand)
+    const harbor = customFinancialColors(presetThemes.harbor)
+
+    expect(contrast('#a96108', presetThemes.sand.surface)).toBeCloseTo(3.75, 2)
+    expect(contrast('#18783c', presetThemes.sand.surface)).toBeCloseTo(4.35, 2)
+    expect(contrast('#8eb7ed', presetThemes.sand.surface)).toBeCloseTo(1.62, 2)
+    expect(contrast('#18783c', presetThemes.harbor.surface)).toBeCloseTo(2.84, 2)
+
+    expect(contrast(sand.warning, presetThemes.sand.background)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(sand.warning, presetThemes.sand.surface)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(sand.success, presetThemes.sand.surface)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(sand.chart3, presetThemes.sand.surface)).toBeGreaterThanOrEqual(4.5)
+    expect(sand.chart3).not.toBe('#8eb7ed')
+    expect(contrast(sand.warningForeground, sand.warning)).toBeGreaterThanOrEqual(4.5)
+
+    expect(harbor.success).toBe('#4dcc78')
+    expect(harbor.warning).toBe('#e9a84d')
+    expect(harbor.destructive).toBe('#f07474')
+    expect(harbor.income).toBe('#4dcc78')
+    expect(harbor.chart2).toBe('#4dcc78')
+    expect(harbor.chart3).toBe('#8eb7ed')
+    expect(harbor.chart4).toBe('#e9a84d')
+    expect(harbor.chart5).toBe('#f07474')
+    expect(harbor.successForeground).toBe('#101010')
+    expect(contrast(harbor.success, presetThemes.harbor.background)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(harbor.success, presetThemes.harbor.surface)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(harbor.destructiveForeground, harbor.destructive)).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('keeps readable legacy chart-3 exact and clears it when returning to native', async () => {
+    expect(customFinancialColors(defaultTheme).chart3).toBe('#8eb7ed')
+    expect(customFinancialColors(presetThemes.midnight).chart3).toBe('#8eb7ed')
+    applyTheme(defaultTheme)
+    expect(document.documentElement.style.getPropertyValue('--color-chart-3')).toBe('')
+    expect(document.documentElement.style.getPropertyValue('--color-success')).toBe('#4dcc78')
+    expect(document.documentElement.style.getPropertyValue('--color-income')).toBe('#4dcc78')
+
+    applyTheme(presetThemes.sand)
+    const sand = customFinancialColors(presetThemes.sand)
+    expect(document.documentElement.style.getPropertyValue('--color-chart-3')).toBe(sand.chart3)
+    expect(document.documentElement.style.getPropertyValue('--color-warning')).toBe(sand.warning)
+    expect(document.documentElement.style.getPropertyValue('--color-warning-foreground')).toBe(
+      sand.warningForeground
+    )
+    expect(document.documentElement.style.getPropertyValue('--color-expense')).toBe(
+      sand.destructive
+    )
+
+    applyTheme(defaultTheme)
+    expect(document.documentElement.style.getPropertyValue('--color-chart-3')).toBe('')
+    expect(customFinancialColors(defaultTheme).chart3).toBe('#8eb7ed')
+
+    applyNativeAppearance('native-light')
+    for (const property of FINANCIAL_INLINE_PROPERTIES) {
+      expect(document.documentElement.style.getPropertyValue(property), property).toBe('')
+    }
+    expect(document.documentElement.dataset.appearance).toBe('native-light')
+    expect(document.documentElement).not.toHaveClass('dark')
+
+    applyTheme(presetThemes.sand)
+    expect(document.documentElement.style.getPropertyValue('--color-success')).toBe(sand.success)
+    applyNativeAppearance('native-dark')
+    for (const property of FINANCIAL_INLINE_PROPERTIES) {
+      expect(document.documentElement.style.getPropertyValue(property), property).toBe('')
+    }
+    expect(document.documentElement).toHaveClass('dark')
+
+    await saveTheme(presetThemes.harbor)
+    applyTheme(presetThemes.harbor)
+    expect(stored.get(THEME_KEY)).toBe(JSON.stringify(presetThemes.harbor))
+    expect(Object.keys(JSON.parse(String(stored.get(THEME_KEY))))).toEqual(
+      Object.keys(defaultTheme)
+    )
+    expect(document.documentElement.style.getPropertyValue('--color-chart-3')).toBe('')
+    expect(document.documentElement.style.getPropertyValue('--color-success')).toBe('#4dcc78')
+  })
+
+  it('accepts opaque rgb financial surfaces and does not throw on translucent legacy colors', () => {
+    const rgbSand = {
+      ...presetThemes.sand,
+      background: 'rgb(246, 240, 228)',
+      surface: 'rgb(236, 227, 210)',
+      foreground: 'rgb(44, 36, 24)',
+    }
+    expect(customFinancialColors(rgbSand)).toEqual(customFinancialColors(presetThemes.sand))
+
+    expect(() =>
+      applyTheme({
+        ...defaultTheme,
+        background: 'rgba(246, 240, 228, 0.4)',
+        surface: '#ece3d280',
+        foreground: 'rgba(44, 36, 24, 0.2)',
+      })
+    ).not.toThrow()
+    expect(document.documentElement.style.getPropertyValue('--color-success')).toMatch(
+      /^#[0-9a-f]{6}$/
+    )
+    expect(document.documentElement.style.getPropertyValue('--color-warning-foreground')).toMatch(
+      /^#(ffffff|101010)$/
+    )
+
+    applyTheme({ ...presetThemes.sand, background: '#f6f0e480', surface: '#ece3d280' })
+    expect(document.documentElement.style.getPropertyValue('--color-success')).toBe('#18783c')
+    expect(document.documentElement.style.getPropertyValue('--color-chart-3')).toBe('#1d5fad')
+    expect(document.documentElement.style.getPropertyValue('--color-destructive-foreground')).toBe(
+      '#ffffff'
+    )
+
+    expect(() =>
+      customFinancialColors({
+        background: 'not-a-color',
+        surface: '#ffffff14',
+        foreground: 'rgba(255, 255, 255, 0.4)',
+      })
+    ).not.toThrow()
+  })
 })
 
 const ORIGINAL_PRESETS = {
@@ -487,4 +661,53 @@ function contrastTone(background: string): 'light' | 'dark' {
   const green = channel(background, 3)
   const blue = channel(background, 5)
   return red * 0.299 + green * 0.587 + blue * 0.114 < 150 ? 'dark' : 'light'
+}
+
+const FINANCIAL_INLINE_PROPERTIES = [
+  '--color-success',
+  '--color-success-foreground',
+  '--color-warning',
+  '--color-warning-foreground',
+  '--color-destructive',
+  '--color-destructive-foreground',
+  '--color-income',
+  '--color-expense',
+  '--color-chart-2',
+  '--color-chart-3',
+  '--color-chart-4',
+  '--color-chart-5',
+]
+
+function mixHex(front: string, back: string, amount: number): string {
+  const mix = (from: number, to: number) => Math.round(from * amount + to * (1 - amount))
+  const channels = [1, 3, 5].map((offset) =>
+    mix(channel(front.toLowerCase(), offset), channel(back.toLowerCase(), offset))
+  )
+  return `#${channels.map((value) => value.toString(16).padStart(2, '0')).join('')}`
+}
+
+function hueAndSaturation(hex: string): { hue: number; saturation: number } {
+  const [red, green, blue] = [1, 3, 5].map((offset) => channel(hex.toLowerCase(), offset) / 255)
+  const max = Math.max(red, green, blue)
+  const min = Math.min(red, green, blue)
+  const delta = max - min
+  const lightness = (max + min) / 2
+  if (delta === 0) return { hue: 0, saturation: 0 }
+  const saturation = delta / (1 - Math.abs(2 * lightness - 1))
+  const hueSector =
+    max === red
+      ? ((green - blue) / delta) % 6
+      : max === green
+        ? (blue - red) / delta + 2
+        : (red - green) / delta + 4
+  return { hue: (hueSector * 60 + 360) % 360, saturation }
+}
+
+function keepsMeaning(role: 'success' | 'warning' | 'destructive' | 'cool', hex: string): boolean {
+  const { hue, saturation } = hueAndSaturation(hex)
+  if (saturation < 0.42) return false
+  if (role === 'success') return hue >= 90 && hue <= 165
+  if (role === 'warning') return hue >= 18 && hue <= 52
+  if (role === 'destructive') return hue <= 16 || hue >= 345
+  return hue >= 190 && hue <= 235
 }

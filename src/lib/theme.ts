@@ -526,6 +526,18 @@ const CUSTOM_PROPERTIES = [
   '--color-border-accent',
   '--color-ring',
   '--color-chart-1',
+  '--color-chart-2',
+  '--color-chart-3',
+  '--color-chart-4',
+  '--color-chart-5',
+  '--color-success',
+  '--color-success-foreground',
+  '--color-warning',
+  '--color-warning-foreground',
+  '--color-destructive',
+  '--color-destructive-foreground',
+  '--color-income',
+  '--color-expense',
   '--radius-sm',
   '--radius-md',
   '--radius-lg',
@@ -658,6 +670,311 @@ export function customAccentForeground(accent: string): '#ffffff' | '#101010' {
     : CUSTOM_ACCENT_LIGHT_FOREGROUND
 }
 
+const FINANCIAL_TEXT_CONTRAST = 4.5
+const TINTED_BADGE_MIX = 0.1
+const SNOWBALL_MUTED_MIX = 0.07
+const FINANCIAL_MIX_STEPS = 80
+const MEANINGFUL_SATURATION = 0.42
+/** Legacy custom series. Kept inline-unset so the custom CSS fallback stays exact when readable. */
+const LEGACY_CUSTOM_CHART_3 = '#8eb7ed'
+/** Cool text used only when a light custom surface cannot be parsed. */
+const LIGHT_CHART_3_FALLBACK = '#1d5fad'
+
+const LIGHT_FINANCIAL_BASES = {
+  success: '#18783c',
+  warning: '#a96108',
+  destructive: '#c43b3b',
+} as const
+
+const DARK_FINANCIAL_BASES = {
+  success: '#4dcc78',
+  warning: '#e9a84d',
+  destructive: '#f07474',
+} as const
+
+type FinancialRole = 'success' | 'warning' | 'destructive' | 'cool'
+
+export type CustomFinancialColors = {
+  success: string
+  warning: string
+  destructive: string
+  income: string
+  expense: string
+  successForeground: string
+  warningForeground: string
+  destructiveForeground: string
+  chart2: string
+  chart3: string
+  chart4: string
+  chart5: string
+}
+
+function formatOpaqueHex(color: OpaqueRgb): string {
+  const channel = (value: number) =>
+    Math.max(0, Math.min(255, Math.round(value)))
+      .toString(16)
+      .padStart(2, '0')
+  return `#${channel(color.r)}${channel(color.g)}${channel(color.b)}`
+}
+
+function mixOpaque(base: OpaqueRgb, toward: OpaqueRgb, amount: number): OpaqueRgb {
+  return {
+    r: Math.round(base.r + (toward.r - base.r) * amount),
+    g: Math.round(base.g + (toward.g - base.g) * amount),
+    b: Math.round(base.b + (toward.b - base.b) * amount),
+  }
+}
+
+function compositeOpaque(front: OpaqueRgb, back: OpaqueRgb, amount: number): OpaqueRgb {
+  return {
+    r: Math.round(front.r * amount + back.r * (1 - amount)),
+    g: Math.round(front.g * amount + back.g * (1 - amount)),
+    b: Math.round(front.b * amount + back.b * (1 - amount)),
+  }
+}
+
+function hueSaturationLightness(color: OpaqueRgb): {
+  hue: number
+  saturation: number
+  lightness: number
+} {
+  const red = color.r / 255
+  const green = color.g / 255
+  const blue = color.b / 255
+  const max = Math.max(red, green, blue)
+  const min = Math.min(red, green, blue)
+  const delta = max - min
+  const lightness = (max + min) / 2
+  if (delta === 0) return { hue: 0, saturation: 0, lightness }
+  const saturation = delta / (1 - Math.abs(2 * lightness - 1))
+  const hueSector =
+    max === red
+      ? ((green - blue) / delta) % 6
+      : max === green
+        ? (blue - red) / delta + 2
+        : (red - green) / delta + 4
+  return { hue: (hueSector * 60 + 360) % 360, saturation, lightness }
+}
+
+function hslToOpaque(hue: number, saturation: number, lightness: number): OpaqueRgb {
+  const chroma = (1 - Math.abs(2 * lightness - 1)) * saturation
+  const sector = (((hue % 360) + 360) % 360) / 60
+  const x = chroma * (1 - Math.abs((sector % 2) - 1))
+  const [red, green, blue] =
+    sector < 1
+      ? [chroma, x, 0]
+      : sector < 2
+        ? [x, chroma, 0]
+        : sector < 3
+          ? [0, chroma, x]
+          : sector < 4
+            ? [0, x, chroma]
+            : sector < 5
+              ? [x, 0, chroma]
+              : [chroma, 0, x]
+  const match = lightness - chroma / 2
+  return {
+    r: Math.round((red + match) * 255),
+    g: Math.round((green + match) * 255),
+    b: Math.round((blue + match) * 255),
+  }
+}
+
+function keepsFinancialMeaning(role: FinancialRole, color: OpaqueRgb): boolean {
+  const { hue, saturation } = hueSaturationLightness(color)
+  if (saturation < MEANINGFUL_SATURATION) return false
+  if (role === 'success') return hue >= 90 && hue <= 165
+  if (role === 'warning') return hue >= 18 && hue <= 52
+  if (role === 'destructive') return hue <= 16 || hue >= 345
+  return hue >= 190 && hue <= 235
+}
+
+function filledLabelContrast(color: OpaqueRgb): number {
+  const white = { r: 255, g: 255, b: 255 }
+  const ink = { r: 16, g: 16, b: 16 }
+  return Math.max(contrastRatio(white, color), contrastRatio(ink, color))
+}
+
+function readableFinancialColor(
+  color: OpaqueRgb,
+  backgrounds: OpaqueRgb[],
+  extraBackgrounds: OpaqueRgb[]
+): boolean {
+  if (
+    [...backgrounds, ...extraBackgrounds].some(
+      (background) => contrastRatio(color, background) < FINANCIAL_TEXT_CONTRAST
+    )
+  ) {
+    return false
+  }
+  if (
+    backgrounds.some(
+      (background) =>
+        contrastRatio(color, compositeOpaque(color, background, TINTED_BADGE_MIX)) <
+        FINANCIAL_TEXT_CONTRAST
+    )
+  ) {
+    return false
+  }
+  return filledLabelContrast(color) >= FINANCIAL_TEXT_CONTRAST
+}
+
+function firstMeaningfulMix(
+  base: OpaqueRgb,
+  toward: OpaqueRgb,
+  role: FinancialRole,
+  backgrounds: OpaqueRgb[],
+  extraBackgrounds: OpaqueRgb[]
+): OpaqueRgb | null {
+  for (let step = 1; step <= FINANCIAL_MIX_STEPS; step += 1) {
+    const color = mixOpaque(base, toward, step / FINANCIAL_MIX_STEPS)
+    if (
+      readableFinancialColor(color, backgrounds, extraBackgrounds) &&
+      keepsFinancialMeaning(role, color)
+    ) {
+      return color
+    }
+  }
+  return null
+}
+
+/** Moves lightness toward the foreground while keeping the preferred hue. */
+function shiftLightnessTowardForeground(
+  base: OpaqueRgb,
+  foreground: OpaqueRgb,
+  role: FinancialRole,
+  backgrounds: OpaqueRgb[],
+  extraBackgrounds: OpaqueRgb[]
+): OpaqueRgb {
+  const { hue, saturation, lightness } = hueSaturationLightness(base)
+  const keptSaturation = Math.max(saturation, MEANINGFUL_SATURATION)
+  const limit = hueSaturationLightness(foreground).lightness >= lightness ? 0.92 : 0.1
+  let shifted = hslToOpaque(hue, keptSaturation, limit)
+  for (let step = 1; step <= FINANCIAL_MIX_STEPS; step += 1) {
+    const nextLightness = lightness + ((limit - lightness) * step) / FINANCIAL_MIX_STEPS
+    const color = hslToOpaque(hue, keptSaturation, nextLightness)
+    if (
+      readableFinancialColor(color, backgrounds, extraBackgrounds) &&
+      keepsFinancialMeaning(role, color)
+    ) {
+      return color
+    }
+    shifted = color
+  }
+  return shifted
+}
+
+function adaptFinancialColor(
+  preferred: string,
+  role: FinancialRole,
+  foreground: OpaqueRgb,
+  backgrounds: OpaqueRgb[],
+  extraBackgrounds: OpaqueRgb[] = []
+): string {
+  const base = parseOpaqueColor(preferred)
+  if (!base) return preferred
+  if (
+    readableFinancialColor(base, backgrounds, extraBackgrounds) &&
+    keepsFinancialMeaning(role, base)
+  ) {
+    return preferred
+  }
+  const mixed = firstMeaningfulMix(base, foreground, role, backgrounds, extraBackgrounds)
+  if (mixed) return formatOpaqueHex(mixed)
+  return formatOpaqueHex(
+    shiftLightnessTowardForeground(base, foreground, role, backgrounds, extraBackgrounds)
+  )
+}
+
+function financialPalette(
+  success: string,
+  warning: string,
+  destructive: string,
+  chart3: string
+): CustomFinancialColors {
+  return {
+    success,
+    warning,
+    destructive,
+    income: success,
+    expense: destructive,
+    successForeground: customAccentForeground(success),
+    warningForeground: customAccentForeground(warning),
+    destructiveForeground: customAccentForeground(destructive),
+    chart2: success,
+    chart3,
+    chart4: warning,
+    chart5: destructive,
+  }
+}
+
+function conservativeFinancialColors(dark: boolean): CustomFinancialColors {
+  const bases = dark ? DARK_FINANCIAL_BASES : LIGHT_FINANCIAL_BASES
+  return financialPalette(
+    bases.success,
+    bases.warning,
+    bases.destructive,
+    dark ? LEGACY_CUSTOM_CHART_3 : LIGHT_CHART_3_FALLBACK
+  )
+}
+
+/**
+ * Runtime status and chart colors for custom appearance. Saved 8-token payloads are not rewritten.
+ * Preferred legacy bases stay when text, 10% tinted badges, and filled labels already clear 4.5
+ * on both surfaces. Otherwise the hue is mixed toward the theme foreground. Chart-3 keeps
+ * #8eb7ed when that legacy custom series is readable, including the old default dark theme.
+ */
+export function customFinancialColors(
+  theme: Pick<ThemeTokens, 'background' | 'surface' | 'foreground'>
+): CustomFinancialColors {
+  const background = parseOpaqueColor(theme.background)
+  const surface = parseOpaqueColor(theme.surface)
+  const foreground = parseOpaqueColor(theme.foreground)
+  // Opaque rgb/hex uses real luminance. Unparseable forms keep the existing dark-controls fallback.
+  const dark = background
+    ? background.r * 0.299 + background.g * 0.587 + background.b * 0.114 < 150
+    : requiresDarkControls(theme.background)
+  if (!background || !surface || !foreground) return conservativeFinancialColors(dark)
+
+  const bases = dark ? DARK_FINANCIAL_BASES : LIGHT_FINANCIAL_BASES
+  const backgrounds = [background, surface]
+  const snowballMuted = [
+    compositeOpaque(foreground, surface, SNOWBALL_MUTED_MIX),
+    compositeOpaque(foreground, background, SNOWBALL_MUTED_MIX),
+  ]
+  return financialPalette(
+    adaptFinancialColor(bases.success, 'success', foreground, backgrounds),
+    adaptFinancialColor(bases.warning, 'warning', foreground, backgrounds),
+    adaptFinancialColor(bases.destructive, 'destructive', foreground, backgrounds),
+    adaptFinancialColor(LEGACY_CUSTOM_CHART_3, 'cool', foreground, backgrounds, snowballMuted)
+  )
+}
+
+function applyCustomFinancialColors(root: HTMLElement, theme: ThemeTokens) {
+  const financial = customFinancialColors(theme)
+  const inline: Array<[string, string]> = [
+    ['--color-success', financial.success],
+    ['--color-success-foreground', financial.successForeground],
+    ['--color-warning', financial.warning],
+    ['--color-warning-foreground', financial.warningForeground],
+    ['--color-destructive', financial.destructive],
+    ['--color-destructive-foreground', financial.destructiveForeground],
+    ['--color-income', financial.income],
+    ['--color-expense', financial.expense],
+    ['--color-chart-2', financial.chart2],
+    ['--color-chart-4', financial.chart4],
+    ['--color-chart-5', financial.chart5],
+  ]
+  for (const [property, value] of inline) root.style.setProperty(property, value)
+  // Readable legacy chart-3 stays on the custom CSS rule instead of an inline override.
+  const chart3Property = '--color-chart-3'
+  if (financial.chart3.toLowerCase() === LEGACY_CUSTOM_CHART_3) {
+    root.style.removeProperty(chart3Property)
+  } else {
+    root.style.setProperty(chart3Property, financial.chart3)
+  }
+}
+
 export function applyNativeAppearance(appearance: 'native-light' | 'native-dark') {
   const root = document.documentElement
   CUSTOM_PROPERTIES.forEach((property) => root.style.removeProperty(property))
@@ -700,6 +1017,7 @@ export function applyTheme(theme: ThemeTokens) {
   root.style.setProperty('--color-primary-foreground', accentForeground)
   root.style.setProperty('--color-ring', theme.accent)
   root.style.setProperty('--color-chart-1', theme.accent)
+  applyCustomFinancialColors(root, theme)
   root.style.setProperty(
     '--color-border-hover',
     'color-mix(in srgb, var(--color-foreground) 12%, transparent)'

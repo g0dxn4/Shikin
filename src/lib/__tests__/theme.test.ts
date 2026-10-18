@@ -309,8 +309,8 @@ describe('Theme Engine', () => {
           )
           expect(
             contrast(color, mixHex(color, surface, 0.1)),
-            `${name} ${role} 10% badge`
-          ).toBeGreaterThanOrEqual(4.5)
+            `${name} ${role} 10% badge compositing margin`
+          ).toBeGreaterThanOrEqual(4.75)
         }
       }
       expect(
@@ -330,6 +330,14 @@ describe('Theme Engine', () => {
 
     expect(JSON.stringify(presetThemes)).toBe(before)
     expect(Object.keys(presetThemes.sand)).toEqual(Object.keys(defaultTheme))
+  })
+
+  it('leaves headroom above independently captured browser tint pixels', () => {
+    // Real Tailwind/Chromium paint, not mixHex(): the old Sand warning painted on #e2d3bd.
+    expect(contrast('#87500c', '#e2d3bd')).toBeCloseTo(4.48837391485407, 8)
+    const sand = customFinancialColors(presetThemes.sand)
+    expect(sand.warning).not.toBe('#87500c')
+    expect(contrast(sand.warning, '#e2d3bd')).toBeGreaterThanOrEqual(4.75)
   })
 
   it('corrects Sand and Harbor inherited financial contrast and keeps Harbor bases', () => {

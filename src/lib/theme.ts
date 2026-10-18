@@ -671,6 +671,8 @@ export function customAccentForeground(accent: string): '#ffffff' | '#101010' {
 }
 
 const FINANCIAL_TEXT_CONTRAST = 4.5
+// Leave headroom for browser color-space compositing and 8-bit paint rounding.
+const FINANCIAL_TINT_CONTRAST = 4.75
 const TINTED_BADGE_MIX = 0.1
 const SNOWBALL_MUTED_MIX = 0.07
 const FINANCIAL_MIX_STEPS = 80
@@ -811,7 +813,7 @@ function readableFinancialColor(
     backgrounds.some(
       (background) =>
         contrastRatio(color, compositeOpaque(color, background, TINTED_BADGE_MIX)) <
-        FINANCIAL_TEXT_CONTRAST
+        FINANCIAL_TINT_CONTRAST
     )
   ) {
     return false

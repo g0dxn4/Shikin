@@ -116,8 +116,11 @@ export class RouteReadSettlement {
         const result = this.page.locator('.native-panel[aria-busy]')
         await expect(result).toHaveAttribute('aria-busy', 'false')
         // A rendered incomplete financial result is valid; a loading/error state is not.
-        // Assert the scoped evidence breakdown, not a chart's additional accessible table.
-        await expect(result.getByRole('region').getByRole('table').first()).toBeVisible()
+        // The request-owned evidence can follow the chart in its own panel.
+        // Assert that breakdown, not a chart's additional accessible table.
+        await expect(
+          this.page.locator('.page-content').getByRole('region').getByRole('table').first()
+        ).toBeVisible()
         await expect(result.getByRole('alert')).toHaveCount(0)
       } else if (route === '/budgets') {
         // This report mounts even when its containing category panel is hidden.

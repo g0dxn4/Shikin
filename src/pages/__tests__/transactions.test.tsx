@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { classificationCatalog } from '@shikin/finance-core'
 import { Transactions } from '../transactions'
 import { transactionDateBounds } from '@/lib/transaction-date-presets'
+import { formatMoney } from '@/lib/money'
 import type { TransactionPageResult, TransactionPageRow } from '@/lib/transaction-query'
 
 vi.mock('react-i18next', () => ({
@@ -640,4 +641,338 @@ describe('Transactions', () => {
     await user.selectOptions(date, 'custom')
     expect(screen.getByLabelText('filters.from')).toBeInTheDocument()
   })
+
+  it('renders stored ledger identity, full amounts, and exception chips only when true', () => {
+    window.history.replaceState(null, '', '/transactions?view=ledger')
+    const note = 'Private ledger note that must stay collapsed'
+    setRows([
+      makeRow({
+        id: 'clean',
+        description: 'Plain coffee',
+        amount: 1234,
+        currency: 'USD',
+        date: '2026-03-01',
+        status: ' ' as never,
+        category_name: 'Groceries',
+        category_color: '#18783c',
+        account_name: 'Checking',
+        has_splits: 0,
+        type: 'expense',
+        ledger_treatment: 'normal',
+        reporting_treatment: 'normal',
+        is_placeholder: 1,
+        placeholder_status: 'resolved',
+        is_consumption_unclassified: 0,
+        source: 'manual',
+        notes: null,
+        note: '   ',
+        import_fingerprint: 'fp-hidden',
+        import_content_fingerprint: 'content-fp-hidden',
+        staging_batch_id: 'batch-hidden',
+        import_external_id: 'ext-hidden',
+      }),
+      makeRow({
+        id: 'flagged',
+        description: 'Flagged payee',
+        amount: 123456789012,
+        currency: 'EUR',
+        date: '2026-03-01T00:00:00Z',
+        status: 'pending',
+        type: 'transfer',
+        account_name: 'Checking',
+        transfer_to_account_name: 'Savings',
+        category_name: 'Parent Category',
+        category_color: '#ff00aa',
+        has_splits: 1,
+        ledger_treatment: 'staged_no_balance_impact',
+        reporting_treatment: 'exclude_from_cashflow',
+        is_placeholder: 1,
+        placeholder_status: 'unresolved',
+        is_consumption_unclassified: 1,
+        source: 'bank_import',
+        notes: note,
+        import_fingerprint: 'fp-do-not-render',
+        import_content_fingerprint: 'content-fp-do-not-render',
+        staging_batch_id: 'batch-do-not-render',
+        import_external_id: 'ext-do-not-render',
+      }),
+      makeRow({
+        id: 'cleared',
+        description: 'Paycheck',
+        amount: 5000,
+        currency: 'MXN',
+        status: 'cleared',
+        type: 'income',
+        is_consumption_unclassified: 0,
+        source: null,
+        import_source: 'ofx',
+        category_name: 'Salary',
+      }),
+      makeRow({
+        id: 'linked',
+        description: 'Linked record',
+        matched_transaction_id: 'other',
+        finalization_id: 'final',
+        is_consumption_unclassified: 0,
+      }),
+    ])
+
+    render(<Transactions />)
+
+    expect(document.querySelector('table tfoot')).toBeNull()
+    expect(document.body.textContent?.toLowerCase()).not.toContain('approved')
+    for (const secret of [
+      'fp-hidden',
+      'content-fp-hidden',
+      'batch-hidden',
+      'ext-hidden',
+      'fp-do-not-render',
+      'content-fp-do-not-render',
+      'batch-do-not-render',
+      'ext-do-not-render',
+    ]) {
+      expect(document.body.textContent).not.toContain(secret)
+    }
+
+    expect(ledgerMounts('clean')).toHaveLength(2)
+    expect(ledgerMounts('flagged')).toHaveLength(2)
+    for (const mount of ledgerMounts('clean')) {
+      expect(mount.className).toMatch(/hover:bg-muted/)
+      expect(mount.className).toMatch(/focus-within:bg-muted/)
+      expect(mount.className).not.toMatch(/accent|primary/)
+      expect(mount).toHaveTextContent('2026-03-01')
+      expect(mount).not.toHaveTextContent('Mar 1, 2026')
+      expect(mount.querySelectorAll('[data-ledger-flag]')).toHaveLength(0)
+      expect(within(mount).queryByText('review.reasons.staged')).not.toBeInTheDocument()
+      expect(within(mount).queryByText('split.badge')).not.toBeInTheDocument()
+      expect(within(mount).queryByText('types.transfer')).not.toBeInTheDocument()
+      expect(within(mount).queryByText('review.reasons.placeholder')).not.toBeInTheDocument()
+      expect(within(mount).queryByText('review.reason')).not.toBeInTheDocument()
+      expect(within(mount).queryByText('correction.excluded')).not.toBeInTheDocument()
+      expect(within(mount).queryByText('source.manual')).not.toBeInTheDocument()
+      expect(within(mount).queryByText('detail.notes')).not.toBeInTheDocument()
+      expect(within(mount).getByText('Groceries')).toBeInTheDocument()
+      expect(within(mount).getByText(`-${formatMoney(1234, 'USD')}`)).toBeInTheDocument()
+      expect(mount.querySelector('[data-ledger-status="posted"]')).toHaveClass(
+        'text-xs',
+        'border-border',
+        'text-muted-foreground'
+      )
+      expect(mount.querySelector('[data-ledger-status="posted"]')?.className).not.toContain(
+        'text-[10px]'
+      )
+      expect(mount.querySelector('[data-ledger-category-dot]')?.getAttribute('style')).toMatch(
+        /#18783c|rgb\(24,\s*120,\s*60\)/i
+      )
+      const money = mount.querySelector('[data-ledger-money]')
+      const region = mount.querySelector('[data-ledger-amount]')
+      expect(region).toHaveClass('min-w-0', 'max-w-full', 'overflow-x-auto')
+      expect(money).toHaveClass('shrink-0', 'whitespace-nowrap', 'tabular-nums')
+      expect(money?.className).not.toMatch(/overflow-x-auto|truncate|text-ellipsis|\bmin-w-0\b/)
+      expect(money?.parentElement?.className).toContain('shrink-0')
+      expect(money?.parentElement?.className).not.toContain('overflow-x-auto')
+      expect(money?.parentElement?.className).not.toMatch(/\bmin-w-0\b/)
+      expect(money).toHaveTextContent(formatMoney(1234, 'USD'))
+      expect(money).toHaveTextContent('USD')
+      expect(mount.querySelector('[data-ledger-figure]')).toHaveClass('text-foreground')
+      expect(
+        within(mount).queryByRole('button', { name: 'Edit Plain coffee' })
+      ).not.toBeInTheDocument()
+      expect(
+        within(mount).queryByRole('button', { name: 'Delete Plain coffee' })
+      ).not.toBeInTheDocument()
+    }
+
+    const eur = formatMoney(123456789012, 'EUR')
+    for (const mount of ledgerMounts('flagged')) {
+      expect(mount).toHaveTextContent('2026-03-01')
+      expect(mount).not.toHaveTextContent('T00:00:00Z')
+      expect(mount).not.toHaveTextContent('Mar 1, 2026')
+      expect(mount.textContent).toContain('Checking → Savings')
+      expect(within(mount).getByText('review.reasons.staged')).toBeInTheDocument()
+      expect(within(mount).getByText('review.reasons.placeholder')).toBeInTheDocument()
+      expect(within(mount).getByText('split.badge')).toBeInTheDocument()
+      expect(within(mount).getByText('types.transfer')).toBeInTheDocument()
+      expect(within(mount).getByText('review.reason')).toBeInTheDocument()
+      expect(within(mount).getByText('correction.excluded')).toBeInTheDocument()
+      expect(within(mount).getByText('bank import')).toBeInTheDocument()
+      expect(within(mount).queryByText('Parent Category')).not.toBeInTheDocument()
+      expect(mount.querySelector('[data-ledger-category-dot]')).toBeNull()
+      expect(mount.querySelector('[data-ledger-flag="source"]')).toHaveAttribute(
+        'title',
+        'bank_import'
+      )
+      expect(mount.querySelector('[data-ledger-status="pending"]')).toHaveClass(
+        'text-xs',
+        'border-warning/50',
+        'text-warning'
+      )
+      const figure = mount.querySelector('[data-ledger-figure]')
+      expect(figure).toHaveClass('text-muted-foreground')
+      expect(figure).toHaveTextContent(eur)
+      expect(figure?.textContent?.startsWith('-') || figure?.textContent?.startsWith('+')).toBe(
+        false
+      )
+      const money = mount.querySelector('[data-ledger-money]')
+      expect(money).toHaveTextContent(eur)
+      expect(money).toHaveTextContent('EUR')
+      expect(money?.textContent).not.toMatch(/\bUSD\b|[KMB]|million/i)
+      expect(money).toHaveClass('shrink-0', 'whitespace-nowrap', 'tabular-nums')
+      expect(money?.className).not.toMatch(/overflow-x-auto|truncate|text-ellipsis/)
+      const details = within(mount).getByText('detail.notes').closest('details')
+      expect(details).not.toHaveAttribute('open')
+      expect(details).toHaveTextContent(note)
+      const payee = within(mount).getByTitle('Flagged payee')
+      expect(payee.tagName).toBe('BUTTON')
+      expect(payee.textContent).not.toContain(note)
+      expect(payee.querySelector('span')).toHaveClass('line-clamp-2')
+    }
+
+    for (const mount of ledgerMounts('cleared')) {
+      expect(mount.querySelector('[data-ledger-status="cleared"]')).toHaveClass(
+        'text-xs',
+        'border-success/50',
+        'text-success'
+      )
+      expect(mount.querySelector('[data-ledger-figure]')).toHaveClass('text-success')
+      expect(within(mount).getByText(`+${formatMoney(5000, 'MXN')}`)).toBeInTheDocument()
+      expect(mount.querySelector('[data-ledger-money]')).toHaveTextContent('MXN')
+      expect(mount.querySelectorAll('[data-ledger-flag]')).toHaveLength(1)
+      expect(mount.querySelector('[data-ledger-flag="source"]')).toHaveTextContent('ofx')
+      expect(within(mount).queryByText('source.manual')).not.toBeInTheDocument()
+    }
+
+    for (const mount of ledgerMounts('linked')) {
+      expect(
+        within(mount).queryByRole('button', { name: 'Edit Linked record' })
+      ).not.toBeInTheDocument()
+      expect(
+        within(mount).queryByRole('button', { name: 'Delete Linked record' })
+      ).not.toBeInTheDocument()
+    }
+
+    const mobile = document.querySelector(
+      '[data-ledger-row="clean"][data-ledger-mount="mobile"]'
+    ) as HTMLElement
+    const payee = within(mobile).getByRole('button', { name: /Plain coffee/ })
+    expect(payee).toHaveClass(
+      'min-h-11',
+      'min-w-0',
+      'w-full',
+      'focus-visible:ring-2',
+      'focus-visible:outline-none'
+    )
+    expect(payee.className).toContain('safe-area-inset-bottom')
+    expect(payee.className).not.toContain('text-accent')
+    expect(payee).toHaveAttribute('title', 'Plain coffee')
+    const editableMobile = document.querySelector(
+      '[data-ledger-row="cleared"][data-ledger-mount="mobile"]'
+    ) as HTMLElement
+    expect(within(editableMobile).getByRole('button', { name: 'Edit Paycheck' })).toHaveClass(
+      'min-h-11',
+      'md:h-8'
+    )
+    expect(
+      within(editableMobile).getByRole('button', { name: 'Delete Paycheck' }).className
+    ).toContain('safe-area-inset-bottom')
+    expect(document.querySelector('[data-ledger-list="mobile"]')?.className).toContain(
+      'safe-area-inset-bottom'
+    )
+  })
+
+  it('keeps ledger sort headers focusable without dropping filters or the ledger view', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/transactions?view=ledger&account=account-2&page=2&search=coffee'
+    )
+    setRows([makeRow({ is_consumption_unclassified: 0 })], 80)
+    const user = userEvent.setup()
+    render(<Transactions />)
+
+    const dateHeader = screen.getByRole('columnheader', { name: 'ledger.date' })
+    expect(dateHeader).toHaveAttribute('aria-sort', 'descending')
+    expect(screen.getByRole('columnheader', { name: 'ledger.description' })).toHaveAttribute(
+      'aria-sort',
+      'none'
+    )
+    expect(screen.getByRole('columnheader', { name: 'ledger.amount' })).toHaveAttribute(
+      'aria-sort',
+      'none'
+    )
+    const sortButton = within(dateHeader).getByRole('button')
+    expect(sortButton).toHaveClass(
+      'focus-visible:ring-2',
+      'focus-visible:ring-ring',
+      'focus-visible:outline-none'
+    )
+    await user.click(sortButton)
+    expect(window.location.search).toContain('view=ledger')
+    expect(window.location.search).toContain('account=account-2')
+    expect(window.location.search).toContain('search=coffee')
+    expect(window.location.search).toContain('direction=asc')
+    expect(window.location.search).not.toContain('page=2')
+    expect(screen.getByRole('columnheader', { name: 'ledger.date' })).toHaveAttribute(
+      'aria-sort',
+      'ascending'
+    )
+  })
+
+  it('does not apply review J/K navigation in the ledger, including on action buttons', async () => {
+    setRows([
+      makeRow({ id: 'alpha', description: 'Alpha', is_consumption_unclassified: 0 }),
+      makeRow({ id: 'beta', description: 'Beta', is_consumption_unclassified: 0 }),
+    ])
+    const user = userEvent.setup()
+    render(<Transactions />)
+    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
+
+    const edit = screen.getAllByRole('button', { name: 'Edit Alpha' })[0]
+    edit.focus()
+    fireEvent.keyDown(edit, { key: 'j' })
+    fireEvent.keyDown(document, { key: 'j' })
+    fireEvent.keyDown(document, { key: 'k' })
+    expect(edit).toHaveFocus()
+    expect(mockOpenTransactionDialog).not.toHaveBeenCalled()
+  })
+
+  it('opens the ledger editor once from the pencil without a bubbled second open', async () => {
+    setRows([makeRow({ id: 'pencil', description: 'Pencil row', is_consumption_unclassified: 0 })])
+    const user = userEvent.setup()
+    render(<Transactions />)
+    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
+
+    const edit = screen.getAllByRole('button', { name: 'Edit Pencil row' })[0]
+    edit.focus()
+    expect(mockOpenTransactionDialog).not.toHaveBeenCalled()
+    await user.keyboard('{Enter}')
+    expect(mockOpenTransactionDialog).toHaveBeenCalledTimes(1)
+    expect(mockOpenTransactionDialog).toHaveBeenCalledWith('pencil')
+  })
+
+  it('keeps ledger delete behind confirmation and does not open edit from the action', async () => {
+    setRows([
+      makeRow({
+        id: 'ledger-delete',
+        description: 'Ledger delete',
+        is_consumption_unclassified: 0,
+      }),
+    ])
+    const user = userEvent.setup()
+    render(<Transactions />)
+    await user.selectOptions(screen.getByLabelText('views.label'), 'ledger')
+
+    const remove = screen.getAllByRole('button', { name: 'Delete Ledger delete' })[0]
+    remove.focus()
+    expect(mockOpenTransactionDialog).not.toHaveBeenCalled()
+    await user.click(remove)
+    expect(mockOpenTransactionDialog).not.toHaveBeenCalled()
+    expect(mockRemove).not.toHaveBeenCalled()
+    await user.click(screen.getByText('Confirm delete'))
+    await waitFor(() => expect(mockRemove).toHaveBeenCalledWith('ledger-delete'))
+  })
 })
+
+function ledgerMounts(id: string): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(`[data-ledger-row="${id}"]`))
+}

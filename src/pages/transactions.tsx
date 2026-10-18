@@ -1064,6 +1064,243 @@ function FilterSelect({
   )
 }
 
+const LEDGER_ACTION_CLASS =
+  'h-11 w-11 min-h-11 min-w-11 shrink-0 scroll-mb-[calc(4rem+env(safe-area-inset-bottom))] md:h-8 md:w-8 md:min-h-8 md:min-w-8 md:scroll-mb-0'
+const LEDGER_FOCUS_SCROLL = 'scroll-mb-[calc(4rem+env(safe-area-inset-bottom))] md:scroll-mb-0'
+
+function storedLedgerDate(date: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})(?:$|T)/.exec(date)
+  return match?.[1] ?? date
+}
+
+function ledgerNoteText(transaction: TransactionPageRow): string | null {
+  for (const value of [transaction.notes, transaction.note]) {
+    const trimmed = value?.trim()
+    if (trimmed) return trimmed
+  }
+  return null
+}
+
+function ledgerCanEdit(transaction: TransactionPageRow): boolean {
+  return (
+    !transaction.matched_transaction_id &&
+    !transaction.is_receivable_payment &&
+    !transaction.is_reconciliation_adjustment &&
+    (transaction.transaction_kind ?? 'standard') === 'standard' &&
+    !transactionProtection(transaction)
+  )
+}
+
+function ledgerHasSplits(transaction: TransactionPageRow): boolean {
+  return Boolean(transaction.has_splits)
+}
+
+function ledgerUnresolvedPlaceholder(transaction: TransactionPageRow): boolean {
+  return (
+    transaction.is_placeholder === 1 &&
+    (transaction.placeholder_status ?? 'unresolved') === 'unresolved'
+  )
+}
+
+function ledgerSourceChip(transaction: TransactionPageRow): { raw: string; label: string } | null {
+  const raw = getTransactionSource(transaction)
+  if (raw === 'manual') return null
+  const label = raw.replace(/[_-]+/g, ' ').trim()
+  return label ? { raw, label } : null
+}
+
+function ledgerAmountPrefix(type: TransactionPageRow['type']): string {
+  if (type === 'income') return '+'
+  if (type === 'expense') return '-'
+  return ''
+}
+
+function LedgerStatusChip({ transaction }: { transaction: TransactionPageRow }) {
+  const { t } = useTranslation('transactions')
+  const status = getTransactionStatus(transaction)
+  return (
+    <Badge
+      variant="outline"
+      data-ledger-status={status}
+      className={cn(
+        'shrink-0 text-xs font-medium',
+        status === 'pending'
+          ? 'border-warning/50 text-warning bg-transparent'
+          : status === 'cleared'
+            ? 'border-success/50 text-success bg-transparent'
+            : 'border-border bg-muted/50 text-muted-foreground'
+      )}
+    >
+      {t(`status.${status}`)}
+    </Badge>
+  )
+}
+
+function LedgerCategory({ transaction }: { transaction: TransactionPageRow }) {
+  const { t } = useTranslation('transactions')
+  if (ledgerHasSplits(transaction)) {
+    return (
+      <Badge
+        variant="outline"
+        data-ledger-flag="split"
+        className="border-border bg-muted/40 text-foreground max-w-full min-w-0 text-xs font-medium whitespace-normal"
+      >
+        {t('split.badge')}
+      </Badge>
+    )
+  }
+  const name = transaction.category_name?.trim() || '—'
+  return (
+    <span
+      className="flex min-w-0 items-start gap-1.5 text-sm"
+      title={transaction.category_name?.trim() || undefined}
+    >
+      <span
+        data-ledger-category-dot=""
+        aria-hidden="true"
+        className="border-border mt-1 size-2.5 shrink-0 rounded-full border"
+        style={{ backgroundColor: transaction.category_color || 'var(--color-muted-foreground)' }}
+      />
+      <span className="min-w-0 break-words">{name}</span>
+    </span>
+  )
+}
+
+function LedgerExceptionChips({
+  transaction,
+  className,
+}: {
+  transaction: TransactionPageRow
+  className?: string
+}) {
+  const { t } = useTranslation('transactions')
+  const { t: tConsumption } = useTranslation('consumption')
+  const flags: Array<{ id: string; label: string; title?: string; attention?: boolean }> = []
+  if (transaction.ledger_treatment === 'staged_no_balance_impact') {
+    flags.push({ id: 'staged', label: t('review.reasons.staged'), attention: true })
+  }
+  if (ledgerUnresolvedPlaceholder(transaction)) {
+    flags.push({ id: 'placeholder', label: t('review.reasons.placeholder'), attention: true })
+  }
+  if (transaction.is_consumption_unclassified) {
+    flags.push({ id: 'unclassified', label: tConsumption('review.reason'), attention: true })
+  }
+  if (transaction.reporting_treatment === 'exclude_from_cashflow') {
+    flags.push({ id: 'excluded', label: t('correction.excluded') })
+  }
+  if (transaction.type === 'transfer') {
+    flags.push({ id: 'transfer', label: t('types.transfer') })
+  }
+  const source = ledgerSourceChip(transaction)
+  if (source) flags.push({ id: 'source', label: source.label, title: source.raw })
+  const note = ledgerNoteText(transaction)
+  if (flags.length === 0 && !note) return null
+  return (
+    <div className={cn('flex max-w-full min-w-0 flex-wrap items-center gap-1', className)}>
+      {flags.map((flag) => (
+        <Badge
+          key={flag.id}
+          variant="outline"
+          data-ledger-flag={flag.id}
+          title={flag.title}
+          className={cn(
+            'max-w-full min-w-0 text-xs font-medium whitespace-normal',
+            flag.attention
+              ? 'border-warning/50 bg-muted/40 text-foreground'
+              : 'border-border bg-muted/40 text-muted-foreground'
+          )}
+        >
+          <span className={flag.id === 'source' ? 'line-clamp-2 break-words' : 'break-words'}>
+            {flag.label}
+          </span>
+        </Badge>
+      ))}
+      {note ? (
+        <details
+          className="max-w-full min-w-0"
+          onClick={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <summary
+            className={cn(
+              'text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex min-h-11 cursor-pointer list-none items-center rounded-md text-xs font-medium focus-visible:ring-2 focus-visible:outline-none md:min-h-8 [&::-webkit-details-marker]:hidden',
+              LEDGER_FOCUS_SCROLL
+            )}
+          >
+            {t('detail.notes')}
+          </summary>
+          <p className="text-muted-foreground max-w-full pb-1 text-xs break-words whitespace-pre-wrap">
+            {note}
+          </p>
+        </details>
+      ) : null}
+    </div>
+  )
+}
+
+function LedgerAmount({ transaction }: { transaction: TransactionPageRow }) {
+  const { t } = useTranslation('transactions')
+  const prefix = ledgerAmountPrefix(transaction.type)
+  const formatted = formatMoney(transaction.amount, transaction.currency)
+  const figureClass =
+    transaction.type === 'income'
+      ? 'text-success'
+      : transaction.type === 'transfer'
+        ? 'text-muted-foreground'
+        : 'text-foreground'
+  return (
+    <div
+      data-ledger-amount=""
+      tabIndex={0}
+      role="group"
+      aria-label={`${t('ledger.amount')} ${prefix}${formatted} ${transaction.currency}`}
+      className={cn(
+        'focus-visible:ring-ring w-full max-w-full min-w-0 touch-pan-x overflow-x-auto overscroll-x-contain rounded-sm focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset',
+        LEDGER_FOCUS_SCROLL
+      )}
+    >
+      <div className="flex w-max min-w-full shrink-0 justify-end">
+        <span
+          data-ledger-money=""
+          className="inline-flex w-max shrink-0 items-baseline text-base font-semibold whitespace-nowrap tabular-nums md:text-sm"
+        >
+          <span data-ledger-figure="" className={figureClass}>
+            {`${prefix}${formatted}`}
+          </span>
+          <span className="text-muted-foreground text-xs font-medium">{` ${transaction.currency}`}</span>
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function LedgerActions({
+  transaction,
+  onEdit,
+  onDelete,
+}: {
+  transaction: TransactionPageRow
+  onEdit: (id: string) => void
+  onDelete: (id: string) => void
+}) {
+  return (
+    <div
+      className="flex shrink-0 justify-end"
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+    >
+      <TransactionActions
+        transaction={transaction}
+        canEdit={ledgerCanEdit(transaction)}
+        onEdit={() => onEdit(transaction.id)}
+        onDelete={() => onDelete(transaction.id)}
+        compact
+        buttonClassName={LEDGER_ACTION_CLASS}
+      />
+    </div>
+  )
+}
+
 function LedgerView({
   transactions,
   sort,
@@ -1082,8 +1319,8 @@ function LedgerView({
   const { t } = useTranslation('transactions')
   return (
     <NativePanel className="max-w-full min-w-0 overflow-hidden">
-      <div className="hidden max-w-full overflow-x-auto md:block">
-        <table className="w-full table-fixed text-left text-sm">
+      <div className="hidden max-w-full min-w-0 overflow-x-auto overscroll-x-contain md:block">
+        <table className="w-full min-w-[40rem] table-fixed text-left text-sm">
           <thead className="bg-muted/60 text-muted-foreground text-xs">
             <tr className="border-border border-b">
               <SortableHeader
@@ -1091,7 +1328,7 @@ function LedgerView({
                 field="date"
                 sort={sort}
                 onSort={onSort}
-                className="w-32"
+                className="w-[7.25rem]"
               />
               <SortableHeader
                 label={t('ledger.description')}
@@ -1099,120 +1336,126 @@ function LedgerView({
                 sort={sort}
                 onSort={onSort}
               />
-              <th className="w-44 px-4 py-3 font-medium">{t('ledger.account')}</th>
-              <th className="w-36 px-4 py-3 font-medium">{t('ledger.category')}</th>
-              <th className="w-28 px-4 py-3 font-medium">{t('ledger.status')}</th>
+              <th scope="col" className="w-[18%] px-3 py-2 align-bottom font-medium">
+                {t('ledger.account')}
+              </th>
+              <th scope="col" className="w-[16%] px-3 py-2 align-bottom font-medium">
+                {t('ledger.category')}
+              </th>
+              <th scope="col" className="w-[6.75rem] px-3 py-2 align-bottom font-medium">
+                {t('ledger.status')}
+              </th>
               <SortableHeader
                 label={t('ledger.amount')}
                 field="amount"
                 sort={sort}
                 onSort={onSort}
-                className="w-36 text-right"
+                align="end"
+                className="w-[10.75rem]"
               />
-              <th className="w-20">
+              <th scope="col" className="w-20">
                 <span className="sr-only">{t('ledger.actions')}</span>
               </th>
             </tr>
           </thead>
           <tbody className="divide-border divide-y">
-            {transactions.map((transaction) => (
-              <tr key={transaction.id} className="group hover:bg-muted/45">
-                <td className="text-muted-foreground px-4 py-3 text-xs tabular-nums">
-                  {dayjs(transaction.date).format('MMM D, YYYY')}
-                </td>
-                <td className="px-4 py-3">
-                  <button
-                    type="button"
-                    onClick={() => onDetails(transaction)}
-                    className="hover:text-accent focus-visible:ring-ring block w-full truncate rounded text-left font-medium focus-visible:ring-2 focus-visible:outline-none"
-                  >
-                    {transaction.description}
-                  </button>
-                </td>
-                <td className="truncate px-4 py-3 text-xs">{getLedgerAccountLabel(transaction)}</td>
-                <td className="text-muted-foreground truncate px-4 py-3 text-xs">
-                  {transaction.has_splits ? t('split.badge') : (transaction.category_name ?? '—')}
-                </td>
-                <td className="px-4 py-3">
-                  <StatusBadge transaction={transaction} />
-                </td>
-                <td
-                  className={cn(
-                    'px-4 py-3 text-right font-semibold tabular-nums',
-                    transaction.type === 'income'
-                      ? 'text-success'
-                      : transaction.type === 'transfer'
-                        ? 'text-muted-foreground'
-                        : 'text-foreground'
-                  )}
+            {transactions.map((transaction) => {
+              const accountLabel = getLedgerAccountLabel(transaction)
+              return (
+                <tr
+                  key={transaction.id}
+                  data-ledger-row={transaction.id}
+                  data-ledger-mount="desktop"
+                  className="group hover:bg-muted/45 focus-within:bg-muted/40"
                 >
-                  {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : ''}
-                  {formatMoney(transaction.amount, transaction.currency)}
-                </td>
-                <td className="px-2 py-2">
-                  <TransactionActions
-                    transaction={transaction}
-                    canEdit={
-                      !transaction.matched_transaction_id &&
-                      !transaction.is_receivable_payment &&
-                      !transaction.is_reconciliation_adjustment &&
-                      (transaction.transaction_kind ?? 'standard') === 'standard' &&
-                      !transactionProtection(transaction)
-                    }
-                    onEdit={() => onEdit(transaction.id)}
-                    onDelete={() => onDelete(transaction.id)}
-                    compact
-                  />
-                </td>
-              </tr>
-            ))}
+                  <td className="text-muted-foreground px-3 py-2 align-top text-sm whitespace-nowrap tabular-nums">
+                    {storedLedgerDate(transaction.date)}
+                  </td>
+                  <td className="min-w-0 px-3 py-2 align-top">
+                    <button
+                      type="button"
+                      onClick={() => onDetails(transaction)}
+                      title={transaction.description}
+                      className="hover:text-foreground focus-visible:ring-ring block w-full min-w-0 rounded text-left text-sm font-semibold focus-visible:ring-2 focus-visible:outline-none"
+                    >
+                      <span className="line-clamp-2 leading-5 break-words">
+                        {transaction.description}
+                      </span>
+                    </button>
+                    <LedgerExceptionChips transaction={transaction} className="mt-1" />
+                  </td>
+                  <td className="min-w-0 px-3 py-2 align-top text-sm">
+                    <span className="line-clamp-2 leading-5 break-words" title={accountLabel}>
+                      {accountLabel}
+                    </span>
+                  </td>
+                  <td className="min-w-0 px-3 py-2 align-top">
+                    <LedgerCategory transaction={transaction} />
+                  </td>
+                  <td className="px-3 py-2 align-top">
+                    <LedgerStatusChip transaction={transaction} />
+                  </td>
+                  <td className="min-w-0 px-3 py-2 align-top">
+                    <LedgerAmount transaction={transaction} />
+                  </td>
+                  <td className="px-1.5 py-1.5 align-top whitespace-nowrap">
+                    <LedgerActions transaction={transaction} onEdit={onEdit} onDelete={onDelete} />
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
-      <div className="divide-border divide-y md:hidden">
-        {transactions.map((transaction) => (
-          <div key={transaction.id} className="p-4">
-            <button
-              type="button"
-              onClick={() => onDetails(transaction)}
-              className="focus-visible:ring-ring flex min-h-11 w-full min-w-0 flex-col justify-center rounded text-left focus-visible:ring-2 focus-visible:outline-none"
+      <div
+        data-ledger-list="mobile"
+        className="divide-border max-w-full min-w-0 divide-y pb-[env(safe-area-inset-bottom)] md:hidden"
+      >
+        {transactions.map((transaction) => {
+          const accountLabel = getLedgerAccountLabel(transaction)
+          return (
+            <div
+              key={transaction.id}
+              data-ledger-row={transaction.id}
+              data-ledger-mount="mobile"
+              className="hover:bg-muted/45 focus-within:bg-muted/40 max-w-full min-w-0 px-3 py-3"
             >
-              <span className="block truncate text-sm font-semibold">
-                {transaction.description}
-              </span>
-              <span className="text-muted-foreground mt-1 block truncate text-xs">
-                {dayjs(transaction.date).format('MMM D')} · {getLedgerAccountLabel(transaction)}
-              </span>
-            </button>
-            <span
-              className={cn(
-                'mt-1 block text-right text-sm font-semibold tabular-nums',
-                transaction.type === 'income' ? 'text-success' : 'text-foreground'
-              )}
-            >
-              {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : ''}
-              {formatMoney(transaction.amount, transaction.currency)}
-            </span>
-            <div className="mt-3 flex items-center justify-between gap-2">
-              <div className="flex gap-2">
-                <StatusBadge transaction={transaction} />
-                <SourceBadge transaction={transaction} />
+              <button
+                type="button"
+                onClick={() => onDetails(transaction)}
+                title={transaction.description}
+                className={cn(
+                  'hover:text-foreground focus-visible:ring-ring flex min-h-11 w-full min-w-0 flex-col justify-center rounded text-left focus-visible:ring-2 focus-visible:outline-none',
+                  LEDGER_FOCUS_SCROLL
+                )}
+              >
+                <span className="line-clamp-2 text-sm leading-5 font-semibold break-words">
+                  {transaction.description}
+                </span>
+                <span className="text-muted-foreground mt-0.5 block min-w-0 text-xs leading-4">
+                  <span className="tabular-nums">{storedLedgerDate(transaction.date)}</span>
+                  <span aria-hidden="true"> · </span>
+                  <span className="line-clamp-2 break-words" title={accountLabel}>
+                    {accountLabel}
+                  </span>
+                </span>
+              </button>
+              <div className="mt-1 max-w-full min-w-0">
+                <LedgerCategory transaction={transaction} />
               </div>
-              <TransactionActions
-                transaction={transaction}
-                canEdit={
-                  !transaction.matched_transaction_id &&
-                  !transaction.is_receivable_payment &&
-                  !transaction.is_reconciliation_adjustment &&
-                  (transaction.transaction_kind ?? 'standard') === 'standard' &&
-                  !transactionProtection(transaction)
-                }
-                onEdit={() => onEdit(transaction.id)}
-                onDelete={() => onDelete(transaction.id)}
-              />
+              <div className="mt-1.5 max-w-full min-w-0">
+                <LedgerAmount transaction={transaction} />
+              </div>
+              <div className="mt-2 flex max-w-full min-w-0 flex-wrap items-center gap-1.5">
+                <LedgerStatusChip transaction={transaction} />
+                <LedgerExceptionChips transaction={transaction} />
+              </div>
+              <div className="mt-2">
+                <LedgerActions transaction={transaction} onEdit={onEdit} onDelete={onDelete} />
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </NativePanel>
   )
@@ -1224,26 +1467,38 @@ function SortableHeader({
   sort,
   onSort,
   className,
+  align = 'start',
 }: {
   label: string
   field: TransactionSort
   sort: { field: TransactionSort; direction: TransactionSortDirection }
   onSort: (field: TransactionSort) => void
   className?: string
+  align?: 'start' | 'end'
 }) {
   const active = sort.field === field
   return (
     <th
-      className={cn('px-4 py-3 font-medium', className)}
+      scope="col"
+      className={cn('px-3 py-2 align-bottom text-xs font-medium', className)}
       aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
     >
       <button
         type="button"
         onClick={() => onSort(field)}
-        className="hover:text-foreground inline-flex items-center gap-1"
+        className={cn(
+          'hover:text-foreground focus-visible:ring-ring inline-flex min-h-8 items-center gap-1 rounded-md focus-visible:ring-2 focus-visible:outline-none',
+          align === 'end' && 'w-full justify-end'
+        )}
       >
         {label}
-        {active && (sort.direction === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
+        {active ? (
+          sort.direction === 'asc' ? (
+            <ArrowUp size={12} aria-hidden="true" />
+          ) : (
+            <ArrowDown size={12} aria-hidden="true" />
+          )
+        ) : null}
       </button>
     </th>
   )
@@ -1631,12 +1886,14 @@ function TransactionActions({
   onDelete,
   canEdit = true,
   compact = false,
+  buttonClassName,
 }: {
   transaction: TransactionPageRow
   onEdit: () => void
   onDelete: () => void
   canEdit?: boolean
   compact?: boolean
+  buttonClassName?: string
 }) {
   return (
     <div
@@ -1649,8 +1906,11 @@ function TransactionActions({
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8"
-          onClick={onEdit}
+          className={cn('h-8 w-8', buttonClassName)}
+          onClick={(event) => {
+            event.stopPropagation()
+            onEdit()
+          }}
           aria-label={`Edit ${transaction.description}`}
         >
           <Pencil size={13} />
@@ -1662,8 +1922,11 @@ function TransactionActions({
           <Button
             variant="ghost"
             size="icon"
-            className="text-destructive hover:text-destructive h-8 w-8"
-            onClick={onDelete}
+            className={cn('text-destructive hover:text-destructive h-8 w-8', buttonClassName)}
+            onClick={(event) => {
+              event.stopPropagation()
+              onDelete()
+            }}
             aria-label={`Delete ${transaction.description}`}
           >
             <Trash2 size={13} />

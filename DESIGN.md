@@ -87,6 +87,10 @@ neutral. Chart grids, axes, legends, and tooltips use the shared CSS-variable co
   with keyboard and screen-reader access preserved.
 - A line needs real dated points; a share needs a valid denominator. Empty or incomplete data never
   gets a decorative financial graph. Quantitative widths are not inflated for decoration.
+- Primary recorded-balance figures are proper charts, not axisless stretched sparklines: visible
+  date and currency-aware value ticks, useful plot height, real elapsed-time spacing, and exact
+  data/inspection alternatives. Keep range/display controls content-sized below the plot, aligned
+  right, rather than a full-width empty track. See [Financial chart design](docs/reference/FINANCIAL_CHARTS.md).
 - Utility screens lead with appearance previews, category icons, and capability tiles, not fake
   financial charts. Prefer fewer default words and clearer visual groups.
 
@@ -99,17 +103,22 @@ neutral. Chart grids, axes, legends, and tooltips use the shared CSS-variable co
 - The shell keeps one screen-reader-only route `h1`; do not add a visible title-only header bar or
   cross-page tab row. Tabs switch views within one page. Route navigation belongs in the sidebar and
   the grouped mobile More sheet.
-- Overview keeps Summary, History, and Compare as tabs in the finance panel. Summary is visual-first
-  and bottom-weighted. Its upper area shows real recorded history when that history is complete;
-  otherwise it shows a truthful current composition from recorded accounts. Do not invent a trend,
-  interpolate missing dates, or draw a violet chart wash. The net-worth figure is anchored to the
-  bottom of the summary, with its as-of state, and an explicit unavailable state when conversion is
-  incomplete. History and Compare stay recorded-balance views with explicit dates, currency
-  conversion, and missing-data states.
-- Accounts are a collection of single-frame, equal-height, visual-first cards. One account is one
-  frame: do not nest that card in a second bordered panel. A row of cards shares height. The
-  asset/liability mix remains a compact supporting section after the collection, not a sparse
-  sidebar. Budgets likewise keep a full-width primary section, then compact budget intelligence.
+- Overview keeps Summary, History, and Compare as mounted tabs in the finance panel. Summary uses
+  compact current/monthly figures with a larger full-width recorded-history chart and compact
+  bottom-right controls. Current net worth remains an independent headline with its as-of and
+  completeness state; selecting history never replaces it. Real dates and money axes explain the
+  plot. Sparse/unavailable history has a truthful fallback, not an invented trend or violet wash.
+  History and Compare retain explicit dates, currencies, conversion, and missing-data states.
+- Accounts are single-frame cards with room for a readable recorded-history figure: at most two
+  columns on desktop and one on mobile. Do not nest a card in a second bordered panel or retain a
+  tiny unlabeled sparkline above a second history chart. Empty/single/unchanged history is explicit,
+  not a giant empty plot or fake line. Native balances, debt signs, and real cache coverage stay
+  visible. The asset/liability mix remains a compact supporting section after the collection, not
+  a sparse sidebar. Budgets retain a full-width primary section and compact intelligence.
+- Transactions is one coherent record workspace, not a stack of technical dashboard cards: compact
+  search/actions, visible Timeline/Ledger/Review modes, clear filters, and a dense journal/table or
+  focused review inspector. Actual records lead. Review counts remain scoped worded counts with
+  overlap context, not a paginated money chart or an approval claim.
 - Planning and Insights are data-led. Charts, mixes, and scenarios may only show recorded or
   explicitly calculated data. Do not fabricate series, sample balances, or decorative charts. Do not
   add incompatible currencies, overlapping plans, or independent recurring estimates. Incomplete FX

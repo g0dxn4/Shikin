@@ -292,6 +292,7 @@
     "summary": "Las claves son opcionales; las tasas directas para informes se gestionan por separado."
   },
   "settingsDescription": "Idioma, moneda, actualizaciones, respaldos y controles locales de la app.",
+  "methodDetails": "Detalles",
   "navigation": {
     "label": "Secciones de configuración",
     "general": "General",

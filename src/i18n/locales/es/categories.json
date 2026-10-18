@@ -52,6 +52,24 @@
     "selectColor": "Seleccionar color {{color}}",
     "selectIcon": "Seleccionar ícono {{icon}}"
   },
+  "colors": {
+    "green": "Verde",
+    "amber": "Ámbar",
+    "blue": "Azul",
+    "purple": "Morado",
+    "red": "Rojo",
+    "cyan": "Cian",
+    "pink": "Rosa",
+    "gray": "Gris",
+    "orange": "Naranja",
+    "violet": "Violeta",
+    "seededPurple": "Púrpura inicial",
+    "emerald": "Esmeralda",
+    "teal": "Verde azulado",
+    "darkEmerald": "Esmeralda oscura",
+    "indigo": "Índigo",
+    "custom": "Personalizado"
+  },
   "toast": {
     "nameRequired": "El nombre de la categoría es obligatorio",
     "created": "Categoría creada",

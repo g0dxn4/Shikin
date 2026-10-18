@@ -44,11 +44,10 @@ import {
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
-import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
+import { NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { ShowMorePagination } from '@/components/shared/show-more-pagination'
 import {
   Select,
@@ -173,22 +172,33 @@ const DEFAULT_CATEGORY_FORM = {
   icon: 'tag',
 }
 
-const COLOR_LABELS: Record<string, string> = {
-  '#22c55e': 'Green',
-  '#f59e0b': 'Amber',
-  '#3b82f6': 'Blue',
-  '#7C5CFF': 'Purple',
-  '#ef4444': 'Red',
-  '#06b6d4': 'Cyan',
-  '#ec4899': 'Pink',
-  '#71717a': 'Gray',
-  '#f97316': 'Orange',
-  '#8b5cf6': 'Violet',
-  '#a855f7': 'Seeded purple',
-  '#10b981': 'Emerald',
-  '#14b8a6': 'Teal',
-  '#059669': 'Dark emerald',
-  '#6366f1': 'Indigo',
+const COLOR_KEYS = {
+  '#22c55e': 'green',
+  '#f59e0b': 'amber',
+  '#3b82f6': 'blue',
+  '#7c5cff': 'purple',
+  '#ef4444': 'red',
+  '#06b6d4': 'cyan',
+  '#ec4899': 'pink',
+  '#71717a': 'gray',
+  '#f97316': 'orange',
+  '#8b5cf6': 'violet',
+  '#a855f7': 'seededPurple',
+  '#10b981': 'emerald',
+  '#14b8a6': 'teal',
+  '#059669': 'darkEmerald',
+  '#6366f1': 'indigo',
+} as const
+
+type ColorName = (typeof COLOR_KEYS)[keyof typeof COLOR_KEYS] | 'custom'
+
+function colorMessageKey(color: string): `colors.${ColorName}` {
+  const key = COLOR_KEYS[color.trim().toLowerCase() as keyof typeof COLOR_KEYS]
+  return `colors.${key ?? 'custom'}`
+}
+
+function isSameColor(left: string, right: string): boolean {
+  return left.trim().toLowerCase() === right.trim().toLowerCase()
 }
 
 const ICON_LABELS: Record<string, string> = {
@@ -337,10 +347,6 @@ export function CategoryManagement() {
   const showForm = isAdding || !!selectedId
   const hasInitialLoadError = !!fetchError && categories.length === 0
   const showNameError = saveAttempted && !formName.trim()
-  const counts = TYPE_OPTIONS.map((type) => ({
-    type,
-    count: categories.filter((cat) => cat.type === type).length,
-  }))
   const filteredIcons = useMemo(() => {
     const query = iconSearch.trim().toLowerCase()
     if (!query) return DEFAULT_ICONS
@@ -360,27 +366,15 @@ export function CategoryManagement() {
   }
 
   return (
-    <div className="animate-fade-in-up page-content space-y-4">
+    <div className="animate-fade-in-up page-content space-y-3">
       <PageToolbar
-        leading={<p className="text-muted-foreground text-sm">{t('subtitle')}</p>}
         actions={
-          <Button size="sm" onClick={startAdd}>
+          <Button size="sm" className="min-h-11" onClick={startAdd}>
             <Plus size={16} />
             {t('addCategory')}
           </Button>
         }
       />
-
-      <MetricStrip aria-label={t('summary.label')}>
-        <MetricItem
-          label={t('summary.total')}
-          value={categories.length}
-          detail={t('summary.detail')}
-        />
-        {counts.map(({ type, count }) => (
-          <MetricItem key={type} label={t(`types.${type}`)} value={count} />
-        ))}
-      </MetricStrip>
 
       <ErrorBanner
         title={t('loadError')}
@@ -403,7 +397,7 @@ export function CategoryManagement() {
       ) : categories.length === 0 ? (
         <NativePanel className="flex flex-col items-center justify-center py-16 text-center">
           <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-3xl">
-            <LayoutGrid size={28} className="text-primary" />
+            <LayoutGrid size={28} className="text-accent" />
           </div>
           <h2 className="font-heading mb-2 text-lg font-semibold">{t('empty.title')}</h2>
           <p className="text-muted-foreground mb-4 max-w-sm text-sm">{t('empty.description')}</p>
@@ -413,77 +407,78 @@ export function CategoryManagement() {
           </Button>
         </NativePanel>
       ) : (
-        <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+        <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-3">
           {TYPE_OPTIONS.map((type) => {
             const typedCategories = categories.filter((cat) => cat.type === type)
             const visibleCount = visibleCategoryCounts[type] ?? CATEGORIES_PAGE_SIZE
             const visibleCategories = typedCategories.slice(0, visibleCount)
             return (
-              <NativePanel key={type} className="min-h-[360px] p-5" aria-label={t(`types.${type}`)}>
-                <div className="mb-5 flex items-center justify-between gap-3">
-                  <div>
-                    <h2 className="font-heading text-xl font-bold tracking-tight">
-                      {t(`types.${type}`)}
-                    </h2>
-                  </div>
-                  <Badge variant="secondary" className="text-[10px]">
+              <NativePanel key={type} className="p-3" aria-label={t(`types.${type}`)}>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h2 className="font-heading text-sm font-semibold break-words">
+                    {t(`types.${type}`)}
+                  </h2>
+                  <span className="border-border text-foreground rounded-md border px-2 py-0.5 text-xs font-semibold tabular-nums">
                     {typedCategories.length}
-                  </Badge>
+                  </span>
                 </div>
                 <div className="space-y-2" role="list" aria-label={t(`types.${type}`)}>
-                  {visibleCategories.map((cat) => (
-                    <div
-                      key={cat.id}
-                      role="listitem"
-                      className="group border-border bg-surface hover:bg-muted/45 rounded-lg border p-3 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <button
-                          type="button"
-                          aria-label={cat.name}
-                          onClick={() => startEdit(cat.id)}
-                          className="focus-visible:ring-ring/50 flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left focus-visible:ring-2 focus-visible:outline-none"
-                        >
-                          <div
-                            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl"
+                  {visibleCategories.map((cat) => {
+                    const color = cat.color || '#7C5CFF'
+                    return (
+                      <div
+                        key={cat.id}
+                        role="listitem"
+                        className="group border-border bg-surface hover:bg-muted/45 rounded-lg border p-2 transition-colors"
+                      >
+                        <div className="flex items-start gap-2">
+                          <span
+                            className="grid size-11 shrink-0 place-items-center rounded-xl"
                             style={{
-                              backgroundColor: `${cat.color || '#7C5CFF'}20`,
-                              color: cat.color || '#7C5CFF',
+                              backgroundColor: `${color}20`,
+                              color,
                             }}
+                            aria-hidden="true"
                           >
-                            <CategoryIcon name={cat.icon} size={16} />
-                          </div>
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-semibold">{cat.name}</span>
+                            <CategoryIcon name={cat.icon} size={18} />
                           </span>
-                        </button>
-                        <div className="flex shrink-0 gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-muted-foreground hover:text-foreground h-8 w-8"
-                            aria-label={t('actions.edit', { name: cat.name })}
-                            onClick={() => startEdit(cat.id)}
-                          >
-                            <Pencil size={12} />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive/80 hover:text-destructive h-8 w-8"
-                            aria-label={t('actions.delete', { name: cat.name })}
-                            onClick={() => setDeleteId(cat.id)}
-                          >
-                            <Trash2 size={12} />
-                          </Button>
+                          <div className="min-w-0 flex-1">
+                            <button
+                              type="button"
+                              onClick={() => startEdit(cat.id)}
+                              className="focus-visible:ring-ring/50 w-full min-w-0 rounded-md text-left text-sm font-semibold break-words focus-visible:ring-2 focus-visible:outline-none"
+                            >
+                              {cat.name}
+                            </button>
+                            <div className="mt-1 flex gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-muted-foreground hover:text-foreground size-11"
+                                aria-label={t('actions.edit', { name: cat.name })}
+                                onClick={() => startEdit(cat.id)}
+                              >
+                                <Pencil size={16} />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-destructive/80 hover:text-destructive size-11"
+                                aria-label={t('actions.delete', { name: cat.name })}
+                                onClick={() => setDeleteId(cat.id)}
+                              >
+                                <Trash2 size={16} />
+                              </Button>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                   {typedCategories.length === 0 && (
-                    <div className="border-border rounded-lg border border-dashed p-4 text-center">
-                      <p className="text-muted-foreground text-sm">{t('empty.group')}</p>
-                    </div>
+                    <p className="border-border text-muted-foreground rounded-lg border border-dashed px-3 py-2 text-xs">
+                      {t('empty.group')}
+                    </p>
                   )}
                 </div>
                 <ShowMorePagination
@@ -527,7 +522,7 @@ export function CategoryManagement() {
                 <CategoryIcon name={formIcon} size={18} />
               </div>
               <div>
-                <DialogTitle className="font-heading text-xl">
+                <DialogTitle className="font-heading text-xl break-words">
                   {isAdding ? t('newCategory') : selected?.name}
                 </DialogTitle>
                 <DialogDescription>{t('modal.description')}</DialogDescription>
@@ -589,28 +584,42 @@ export function CategoryManagement() {
             </div>
 
             <div className="space-y-2">
-              <label
-                id="category-color-label"
-                className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase"
-              >
-                {t('form.color')}
-              </label>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label
+                  id="category-color-label"
+                  className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase"
+                >
+                  {t('form.color')}
+                </label>
+                <span
+                  id="category-selected-color"
+                  className="inline-flex min-w-0 items-center gap-2 text-sm font-medium"
+                >
+                  <span
+                    className="border-border size-3 shrink-0 rounded-full border"
+                    style={{ backgroundColor: formColor }}
+                    aria-hidden="true"
+                  />
+                  <span className="break-words">{t(colorMessageKey(formColor))}</span>
+                </span>
+              </div>
               <div
                 className="flex flex-wrap gap-2"
                 role="group"
                 aria-labelledby="category-color-label"
+                aria-describedby="category-selected-color"
               >
                 {COLOR_OPTIONS.map((color) => (
                   <button
                     key={color}
                     type="button"
                     aria-label={t('actions.selectColor', {
-                      color: COLOR_LABELS[color] ?? color,
+                      color: t(colorMessageKey(color)),
                     })}
-                    aria-pressed={formColor === color}
+                    aria-pressed={isSameColor(formColor, color)}
                     onClick={() => setFormColor(color)}
-                    className={`focus-visible:ring-ring focus-visible:ring-offset-background h-8 w-8 rounded-full transition-transform hover:scale-110 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none motion-reduce:transition-none motion-reduce:hover:scale-100 ${
-                      formColor === color
+                    className={`focus-visible:ring-ring focus-visible:ring-offset-background size-11 rounded-full focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none ${
+                      isSameColor(formColor, color)
                         ? 'ring-ring ring-offset-background ring-2 ring-offset-2'
                         : ''
                     }`}
@@ -754,34 +763,18 @@ export function CategoryManagement() {
 
 function CategorySkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_400px]">
-      <NativePanel className="space-y-3 p-5">
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-3 px-2 py-2">
-            <Skeleton className="h-7 w-7 rounded-lg" />
-            <Skeleton className="h-4 w-32" />
-            <div className="ml-auto flex gap-1">
-              <Skeleton className="h-7 w-7 rounded-md" />
-              <Skeleton className="h-7 w-7 rounded-md" />
+    <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-3">
+      {Array.from({ length: 3 }).map((_, column) => (
+        <NativePanel key={column} className="space-y-2 p-3">
+          <Skeleton className="h-4 w-24" />
+          {Array.from({ length: 3 }).map((_, row) => (
+            <div key={row} className="flex items-center gap-2">
+              <Skeleton className="size-11 rounded-xl" />
+              <Skeleton className="h-4 w-28" />
             </div>
-          </div>
-        ))}
-      </NativePanel>
-      <NativePanel className="space-y-6 p-5">
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-8 w-8 rounded-lg" />
-          <Skeleton className="h-5 w-28" />
-        </div>
-        <div className="space-y-2">
-          <Skeleton className="h-3 w-12" />
-          <Skeleton className="h-10 w-full" />
-        </div>
-        <div className="space-y-2">
-          <Skeleton className="h-3 w-12" />
-          <Skeleton className="h-10 w-full" />
-        </div>
-        <Skeleton className="h-10 w-full" />
-      </NativePanel>
+          ))}
+        </NativePanel>
+      ))}
     </div>
   )
 }

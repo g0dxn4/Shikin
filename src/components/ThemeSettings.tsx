@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { ChevronRight, Moon, Palette, RotateCcw, Save, Sun, Undo } from 'lucide-react'
+import { Check, ChevronRight, RotateCcw, Save, Undo } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -92,29 +92,23 @@ export function ThemeSettings() {
 
   return (
     <div className="space-y-4">
-      <div
-        className="grid gap-2 sm:grid-cols-3"
-        role="radiogroup"
-        aria-label={t('theme.appearance')}
-      >
+      <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label={t('theme.appearance')}>
         <AppearanceOption
           label={t('theme.nativeLight')}
-          description={t('theme.nativeLightDescription')}
-          icon={<Sun aria-hidden="true" />}
+          variant="native-light"
           selected={appearance === 'native-light'}
           onClick={() => void selectAppearance('native-light')}
         />
         <AppearanceOption
           label={t('theme.nativeDark')}
-          description={t('theme.nativeDarkDescription')}
-          icon={<Moon aria-hidden="true" />}
+          variant="native-dark"
           selected={appearance === 'native-dark'}
           onClick={() => void selectAppearance('native-dark')}
         />
         <AppearanceOption
           label={t('theme.custom')}
-          description={t('theme.customDescription')}
-          icon={<Palette aria-hidden="true" />}
+          variant="custom"
+          savedTheme={savedTheme}
           selected={appearance === 'custom'}
           onClick={() => void selectAppearance('custom')}
         />
@@ -238,14 +232,14 @@ export function ThemeSettings() {
 
 function AppearanceOption({
   label,
-  description,
-  icon,
+  variant,
+  savedTheme,
   selected,
   onClick,
 }: {
   label: string
-  description: string
-  icon: React.ReactNode
+  variant: Appearance
+  savedTheme?: ThemeTokens
   selected: boolean
   onClick: () => void
 }) {
@@ -257,12 +251,66 @@ function AppearanceOption({
       onClick={onClick}
       className="appearance-option"
     >
-      <span className="appearance-option-icon">{icon}</span>
-      <span className="min-w-0 text-left">
-        <strong className="block text-sm font-semibold">{label}</strong>
-        <span className="text-muted-foreground mt-0.5 block text-xs">{description}</span>
+      <AppearancePreview variant={variant} savedTheme={savedTheme} />
+      <span className="appearance-option-meta">
+        <strong>{label}</strong>
+        <Check
+          aria-hidden="true"
+          className="appearance-option-check"
+          data-hidden={selected ? 'false' : 'true'}
+        />
       </span>
     </button>
+  )
+}
+
+function AppearancePreview({
+  variant,
+  savedTheme,
+}: {
+  variant: Appearance
+  savedTheme?: ThemeTokens
+}) {
+  const savedStyle =
+    variant === 'custom' && savedTheme
+      ? ({
+          backgroundColor: savedTheme.background,
+          color: savedTheme.foreground,
+          borderColor: savedTheme.border,
+          borderRadius: savedTheme.radiusMd,
+          '--preview-sidebar': savedTheme.surface,
+          '--preview-card': savedTheme.surface,
+          '--preview-ink': savedTheme.foreground,
+          '--preview-muted': savedTheme.mutedForeground,
+          '--preview-line': savedTheme.border,
+          '--preview-action': savedTheme.accent,
+          '--preview-nav': savedTheme.mutedForeground,
+          '--preview-nav-active': savedTheme.accent,
+        } as React.CSSProperties)
+      : undefined
+
+  return (
+    <span
+      className="appearance-preview"
+      data-appearance-preview={variant}
+      data-preview-source={variant === 'custom' ? 'saved' : 'native'}
+      data-saved-background={variant === 'custom' ? savedTheme?.background : undefined}
+      style={savedStyle}
+      aria-hidden="true"
+    >
+      <span className="appearance-preview-sidebar">
+        <span className="appearance-preview-nav" />
+        <span className="appearance-preview-nav appearance-preview-nav-active" />
+        <span className="appearance-preview-nav" />
+      </span>
+      <span className="appearance-preview-main">
+        <span className="appearance-preview-card">
+          <span className="appearance-preview-line" />
+          <span className="appearance-preview-line appearance-preview-line-short" />
+        </span>
+        <span className="appearance-preview-action" />
+      </span>
+    </span>
   )
 }
 

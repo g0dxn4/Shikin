@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { CategoryManagement } from '../category-management'
+import enCategories from '@/i18n/locales/en/categories.json'
+import esCategories from '@/i18n/locales/es/categories.json'
 
 // ResizeObserver polyfill for jsdom
 globalThis.ResizeObserver = class {
@@ -11,6 +13,7 @@ globalThis.ResizeObserver = class {
 } as unknown as typeof ResizeObserver
 
 const mockFetch = vi.fn().mockResolvedValue(undefined)
+const mockUpdate = vi.fn().mockResolvedValue(undefined)
 let mockCategories: Array<Record<string, unknown>> = []
 let mockFetchError: string | null = null
 let mockIsLoading = false
@@ -52,6 +55,9 @@ const translationMap: Record<string, string> = {
   selectPrompt: 'Select a category to edit, or click Add Category to create one.',
   deleteCategory: 'Delete Category',
   deleteDescription: 'Are you sure you want to delete this category? This cannot be undone.',
+  'actions.selectColor': 'Select {{color}} color',
+  'actions.edit': 'Edit {{name}}',
+  'actions.delete': 'Delete {{name}}',
 }
 
 vi.mock('react-i18next', () => ({
@@ -74,7 +80,7 @@ vi.mock('@/stores/category-store', () => ({
     fetchError: mockFetchError,
     fetch: mockFetch,
     add: vi.fn(),
-    update: vi.fn(),
+    update: mockUpdate,
     remove: vi.fn(),
   }),
 }))
@@ -94,7 +100,8 @@ describe('CategoryManagement', () => {
   it('uses the shell title and renders a compact native toolbar', () => {
     render(<CategoryManagement />)
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
-    expect(screen.getByText('Management')).toBeInTheDocument()
+    expect(screen.queryByText('Management')).not.toBeInTheDocument()
+    expect(screen.queryByText('summary.detail')).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: /Add Category/i }).length).toBeGreaterThanOrEqual(
       1
     )
@@ -141,6 +148,13 @@ describe('CategoryManagement', () => {
     render(<CategoryManagement />)
     expect(screen.getByText('Food')).toBeInTheDocument()
     expect(screen.getByText('Salary')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Food' })).toHaveClass('break-words')
+    expect(screen.getByRole('button', { name: 'Edit Food' })).toHaveClass('size-11')
+    expect(screen.getByRole('button', { name: 'Delete Food' })).toHaveClass('size-11')
+    expect(screen.getAllByText('1')).toHaveLength(2)
+    expect(screen.getByText('0')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Transfer' }).className).not.toContain('min-h-')
+    expect(screen.queryByText('$')).not.toBeInTheDocument()
   })
 
   it('renders long category groups in pages', async () => {
@@ -203,10 +217,51 @@ describe('CategoryManagement', () => {
     await user.click(screen.getAllByRole('button', { name: /Add Category/i })[0])
     expect(screen.getByText('New Category')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Create Category/i })).toBeInTheDocument()
+    expect(screen.getByText('Tag')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Select colors.purple color' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
   })
 
   it('calls fetch on mount', () => {
     render(<CategoryManagement />)
     expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('localizes color names in English and Spanish without forcing unknown hexes', async () => {
+    const user = userEvent.setup()
+    expect(Object.keys(enCategories.colors).sort()).toEqual(Object.keys(esCategories.colors).sort())
+    expect(enCategories.colors.custom).toBe('Custom')
+    expect(esCategories.colors.custom).toBe('Personalizado')
+    expect(esCategories.colors.orange).toBe('Naranja')
+
+    mockCategories = [
+      {
+        id: '01CAT001',
+        name: 'Food',
+        type: 'expense',
+        color: '#112233',
+        icon: 'utensils',
+        sort_order: 1,
+        created_at: '2024-01-01T00:00:00Z',
+      },
+    ]
+    render(<CategoryManagement />)
+    await user.click(screen.getByRole('button', { name: 'Food' }))
+
+    expect(screen.getByText('colors.custom')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Select colors\./, pressed: true })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Select colors.purple color' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    )
+    await user.click(screen.getByRole('button', { name: /Save Changes/i }))
+    expect(mockUpdate).toHaveBeenCalledWith('01CAT001', {
+      name: 'Food',
+      type: 'expense',
+      color: '#112233',
+      icon: 'utensils',
+    })
   })
 })

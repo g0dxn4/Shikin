@@ -3,7 +3,7 @@
   "description": "Herramientas e integraciones locales disponibles con tus datos de Shikin.",
   "capabilitiesTitle": "Capacidades disponibles",
   "capabilitiesDescription": "Abre el flujo o ajuste existente para cada capacidad.",
-  "status": { "ready": "Lista", "configure": "Configurar" },
+  "status": { "ready": "Lista", "configure": "Configurar", "desktop": "Escritorio" },
   "items": {
     "csvImport": {
       "title": "Importar extractos",

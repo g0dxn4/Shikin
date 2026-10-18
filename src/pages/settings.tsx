@@ -3,17 +3,18 @@ import { Link, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
+  AlertTriangle,
   BadgeDollarSign,
   CheckCircle2,
   ChevronRight,
   Database,
   Download,
   Globe2,
+  Info,
   KeyRound,
   Layers3,
   Loader2,
   MonitorUp,
-  Palette,
   RefreshCw,
   RotateCcw,
   Settings2,
@@ -417,11 +418,10 @@ export function SettingsPage() {
 
   return (
     <div className="page-content">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-muted-foreground max-w-2xl text-sm">{t('settingsDescription')}</p>
+      <div className="flex justify-end">
         <Link
           to="/categories"
-          className="border-border text-foreground hover:bg-muted focus-visible:ring-ring inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-xs font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
+          className="border-border text-foreground hover:bg-muted focus-visible:ring-ring inline-flex min-h-11 items-center gap-2 rounded-lg border px-3 text-xs font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none"
         >
           <Tags size={15} aria-hidden="true" />
           {tCommon('navigation.manageCategories')}
@@ -434,79 +434,38 @@ export function SettingsPage() {
         aria-labelledby="settings-general-title"
         className="scroll-mt-4 space-y-3"
       >
-        <SettingsGroupTitle
-          id="settings-general-title"
-          title={t('navigation.general')}
-          description={t('general.description')}
-        />
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-          <section className="native-panel min-w-0 space-y-5 p-5 sm:p-6">
-            <SectionTitle icon={<Globe2 size={18} />} title={t('general.languageTitle')} />
-            <div className="space-y-1">
-              <Label
-                htmlFor="language-select"
-                className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
-              >
-                {t('language.label')}
-              </Label>
-              <p className="text-muted-foreground text-xs">{t('language.description')}</p>
-              <select
-                id="language-select"
-                value={i18n.resolvedLanguage ?? i18n.language}
-                onChange={(e) => i18n.changeLanguage(e.target.value)}
-                className="native-select mt-2 w-full"
-              >
-                {SUPPORTED_LANGUAGES.map((lang) => (
-                  <option key={lang.code} value={lang.code}>
-                    {lang.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </section>
-
-          <section id="main-currency-summary" className="native-panel min-w-0 space-y-5 p-5 sm:p-6">
-            <SectionTitle
-              icon={<BadgeDollarSign size={18} />}
-              title={t('general.mainCurrencyTitle')}
-              description={t('general.mainCurrencyDescription')}
-            />
-            <div
-              className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 ${
-                mainCurrency ? 'border-border bg-muted/40' : 'border-warning/30 bg-warning/10'
-              }`}
-            >
-              <div>
-                <p className="text-muted-foreground font-mono text-[10px] tracking-wider uppercase">
-                  {t('general.mainCurrencyStatus')}
-                </p>
-                <p className="mt-1 text-lg font-semibold tabular-nums">
-                  {mainCurrency ?? t('general.notConfigured')}
-                </p>
-                {!mainCurrency ? (
-                  <p className="text-muted-foreground mt-1 text-xs">
-                    {t('general.suggestedCurrency', { currency: preferredCurrency })}
-                  </p>
-                ) : null}
-              </div>
-              <Link
-                to="/settings?section=money#main-currency"
-                className="border-border bg-background hover:bg-muted focus-visible:ring-ring inline-flex min-h-10 items-center gap-2 rounded-lg border px-3 text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none"
-              >
-                {t('general.manageCurrency')}
-                <ChevronRight size={14} aria-hidden="true" />
-              </Link>
-            </div>
-          </section>
-        </div>
-
-        <section className="native-panel space-y-5 p-5 sm:p-6">
-          <SectionTitle
-            icon={<Palette size={18} />}
-            title={t('sections.theme', 'Theme & Appearance')}
-            description={t('theme.description', 'Customize the visual appearance of Shikin')}
-          />
+        <SettingsGroupTitle id="settings-general-title" title={t('navigation.general')} />
+        <section className="native-panel p-3 sm:p-4">
           <ThemeSettings />
+        </section>
+        <section className="native-panel grid gap-4 p-4 lg:grid-cols-2 lg:items-end">
+          <div className="min-w-0 space-y-1">
+            <Label
+              htmlFor="language-select"
+              className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
+            >
+              {t('language.label')}
+            </Label>
+            <select
+              id="language-select"
+              value={i18n.resolvedLanguage ?? i18n.language}
+              onChange={(e) => i18n.changeLanguage(e.target.value)}
+              className="native-select mt-2 w-full"
+            >
+              {SUPPORTED_LANGUAGES.map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <SavedCurrencyStatus
+            mainCurrency={mainCurrency}
+            suggestion={t('general.suggestedCurrency', { currency: preferredCurrency })}
+            statusLabel={t('general.mainCurrencyStatus')}
+            notConfiguredLabel={t('general.notConfigured')}
+            manageLabel={t('general.manageCurrency')}
+          />
         </section>
       </section>
 
@@ -516,17 +475,9 @@ export function SettingsPage() {
         aria-labelledby="settings-money-title"
         className="scroll-mt-4 space-y-3"
       >
-        <SettingsGroupTitle
-          id="settings-money-title"
-          title={t('navigation.money')}
-          description={t('money.description')}
-        />
+        <SettingsGroupTitle id="settings-money-title" title={t('navigation.money')} />
         <section className="native-panel min-w-0 space-y-5 p-5 sm:p-6">
-          <SectionTitle
-            icon={<BadgeDollarSign size={18} />}
-            title={t('sections.currency')}
-            description={t('money.description')}
-          />
+          <SectionTitle icon={<BadgeDollarSign size={18} />} title={t('sections.currency')} />
           <CurrencySettings
             manualRatesOpen={openTasks.has('manual-rates')}
             onManualRatesOpenChange={(open) => setTaskOpen('manual-rates', open)}
@@ -628,18 +579,11 @@ export function SettingsPage() {
         aria-labelledby="settings-data-title"
         className="scroll-mt-4 space-y-3"
       >
-        <SettingsGroupTitle
-          id="settings-data-title"
-          title={t('navigation.data')}
-          description={t('appData.description')}
-        />
+        <SettingsGroupTitle id="settings-data-title" title={t('navigation.data')} />
         <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-2">
           <section id="updates" tabIndex={-1} className="native-panel space-y-5 p-5 sm:p-6">
-            <SectionTitle
-              icon={<MonitorUp size={18} />}
-              title={t('sections.updates')}
-              description={t('updates.description')}
-            />
+            <SectionTitle icon={<MonitorUp size={18} />} title={t('sections.updates')} />
+            <MethodNote label={t('methodDetails')}>{t('updates.description')}</MethodNote>
 
             {isTauri ? (
               <>
@@ -795,11 +739,10 @@ export function SettingsPage() {
             )}
           </section>
           <section id="backups" tabIndex={-1} className="native-panel space-y-5 p-5 sm:p-6">
-            <SectionTitle
-              icon={<Database size={18} />}
-              title={t('sections.data')}
-              description={t('data.description')}
-            />
+            <SectionTitle icon={<Database size={18} />} title={t('sections.data')} />
+            <p className="border-warning/30 bg-warning/10 text-foreground rounded-lg border px-3 py-2 text-xs leading-relaxed">
+              {t('data.description')}
+            </p>
             <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
@@ -831,22 +774,19 @@ export function SettingsPage() {
           </section>
           {isTauri ? (
             <section className="native-panel space-y-5 p-5 sm:p-6 xl:col-span-2">
-              <SectionTitle
-                icon={<Settings2 size={18} />}
-                title={t('appData.desktopTitle')}
-                description={t('appData.desktopDescription')}
-              />
+              <SectionTitle icon={<Settings2 size={18} />} title={t('appData.desktopTitle')} />
+              <MethodNote label={t('methodDetails')}>
+                <p>{t('appData.desktopDescription')}</p>
+                <p className="mt-2">{t('desktop.closeToTrayDescription')}</p>
+              </MethodNote>
               <div className="border-border bg-muted/50 flex items-center justify-between gap-4 rounded-lg border p-4">
-                <div className="min-w-0 space-y-1">
+                <div className="min-w-0">
                   <Label
                     htmlFor="close-to-tray-switch"
                     className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
                   >
                     {t('desktop.closeToTrayLabel')}
                   </Label>
-                  <p className="text-muted-foreground text-xs">
-                    {t('desktop.closeToTrayDescription')}
-                  </p>
                 </div>
                 <button
                   id="close-to-tray-switch"
@@ -885,11 +825,7 @@ export function SettingsPage() {
         aria-labelledby="settings-integrations-title"
         className="scroll-mt-4 space-y-3"
       >
-        <SettingsGroupTitle
-          id="settings-integrations-title"
-          title={t('navigation.integrations')}
-          description={t('integrations.description')}
-        />
+        <SettingsGroupTitle id="settings-integrations-title" title={t('navigation.integrations')} />
         <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-2">
           <TaskDisclosure
             id="market-data"
@@ -974,16 +910,13 @@ export function SettingsPage() {
             {isTauri ? (
               <div className="border-border bg-muted/50 space-y-4 rounded-lg border p-4">
                 <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0 space-y-1">
+                  <div className="min-w-0">
                     <Label
                       htmlFor="web-server-switch"
                       className="text-muted-foreground font-mono text-xs tracking-wider uppercase"
                     >
                       {t('desktop.webServer.label')}
                     </Label>
-                    <p className="text-muted-foreground text-xs">
-                      {t('desktop.webServer.description')}
-                    </p>
                   </div>
                   <button
                     id="web-server-switch"
@@ -1183,25 +1116,28 @@ function TaskDisclosure({
   onOpenChange: (open: boolean) => void
   children: React.ReactNode
 }) {
+  const { t } = useTranslation('settings')
   return (
     <details
       id={id}
       tabIndex={-1}
       open={open}
-      onToggle={(event) => onOpenChange(event.currentTarget.open)}
+      onToggle={(event) => {
+        if (event.target !== event.currentTarget) return
+        onOpenChange(event.currentTarget.open)
+      }}
       className="native-panel focus-visible:ring-ring group min-w-0 scroll-mt-4 overflow-hidden focus-visible:ring-2 focus-visible:outline-none"
     >
-      <summary className="focus-visible:ring-ring flex min-h-20 cursor-pointer list-none items-center gap-3 p-5 focus-visible:ring-2 focus-visible:outline-none sm:p-6 [&::-webkit-details-marker]:hidden">
+      <summary className="focus-visible:ring-ring flex min-h-11 cursor-pointer list-none items-center gap-3 p-4 focus-visible:ring-2 focus-visible:outline-none sm:p-5 [&::-webkit-details-marker]:hidden">
         <div className="border-accent/20 bg-accent/10 text-accent flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border">
           {icon}
         </div>
         <span className="min-w-0 flex-1">
           <span className="block text-base font-semibold break-words">{title}</span>
-          <span className="text-muted-foreground mt-1 block text-xs leading-relaxed">
-            {description}
-          </span>
           {summary ? (
-            <span className="text-accent mt-1 block text-xs font-medium">{summary}</span>
+            <span className="text-accent mt-0.5 block text-xs font-medium break-words">
+              {summary}
+            </span>
           ) : null}
         </span>
         <ChevronRight
@@ -1210,26 +1146,81 @@ function TaskDisclosure({
           aria-hidden="true"
         />
       </summary>
-      <div className="border-border border-t p-5 sm:p-6">{children}</div>
+      <div className="border-border space-y-4 border-t p-5 sm:p-6">
+        <MethodNote label={t('methodDetails')}>{description}</MethodNote>
+        {children}
+      </div>
     </details>
   )
 }
 
-function SettingsGroupTitle({
-  id,
-  title,
-  description,
-}: {
-  id: string
-  title: string
-  description: string
-}) {
+function SettingsGroupTitle({ id, title }: { id: string; title: string }) {
   return (
     <div className="px-1 pt-3">
-      <h2 id={id} className="text-foreground text-lg font-semibold tracking-tight">
+      <h2 id={id} className="text-foreground text-lg font-semibold tracking-tight break-words">
         {title}
       </h2>
-      <p className="text-muted-foreground mt-1 text-xs leading-relaxed">{description}</p>
+    </div>
+  )
+}
+
+function MethodNote({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <details className="group">
+      <summary className="text-muted-foreground focus-visible:ring-ring inline-flex min-h-11 cursor-pointer list-none items-center gap-1.5 rounded-md px-1 text-xs font-medium focus-visible:ring-2 focus-visible:outline-none [&::-webkit-details-marker]:hidden">
+        <Info size={14} aria-hidden="true" />
+        {label}
+      </summary>
+      <div className="text-muted-foreground max-w-2xl pb-1 text-xs leading-relaxed">{children}</div>
+    </details>
+  )
+}
+
+function SavedCurrencyStatus({
+  mainCurrency,
+  suggestion,
+  statusLabel,
+  notConfiguredLabel,
+  manageLabel,
+}: {
+  mainCurrency: string | null
+  suggestion: string
+  statusLabel: string
+  notConfiguredLabel: string
+  manageLabel: string
+}) {
+  return (
+    <div
+      id="main-currency-summary"
+      className={`flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border px-3 py-2 ${
+        mainCurrency ? 'border-border' : 'border-warning/40 bg-warning/10'
+      }`}
+    >
+      {mainCurrency ? (
+        <BadgeDollarSign size={16} className="text-accent shrink-0" aria-hidden="true" />
+      ) : (
+        <AlertTriangle size={16} className="text-warning shrink-0" aria-hidden="true" />
+      )}
+      <div className="min-w-0">
+        <p className="text-muted-foreground text-[11px]">{statusLabel}</p>
+        <p
+          className={`text-sm font-semibold break-words tabular-nums ${
+            mainCurrency ? '' : 'text-warning'
+          }`}
+        >
+          {mainCurrency ?? notConfiguredLabel}
+        </p>
+      </div>
+      {!mainCurrency ? (
+        <p className="text-muted-foreground min-w-0 text-xs break-words">{suggestion}</p>
+      ) : null}
+      <Link
+        to="/settings?section=money#main-currency"
+        className="text-accent focus-visible:ring-ring inline-flex min-h-11 items-center gap-1 rounded-md px-1 text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none"
+      >
+        {manageLabel}
+        <ChevronRight size={14} aria-hidden="true" />
+      </Link>
     </div>
   )
 }

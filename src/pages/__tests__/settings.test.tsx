@@ -25,6 +25,17 @@ const storageMocks = vi.hoisted(() => ({
   save: vi.fn(),
 }))
 
+const currencyState = vi.hoisted(() => ({
+  mainCurrency: null as string | null,
+  preferredCurrency: 'USD',
+  manualRates: [] as unknown[],
+  isLoading: false,
+  error: null as string | null,
+  loadRates: vi.fn().mockResolvedValue(undefined),
+  setPreferredCurrency: vi.fn(),
+  saveExchangeRate: vi.fn(),
+}))
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => key,
@@ -39,22 +50,10 @@ vi.mock('sonner', () => ({
   },
 }))
 
-vi.mock('@/stores/currency-store', () => {
-  const state = {
-    mainCurrency: null,
-    preferredCurrency: 'USD',
-    manualRates: [],
-    isLoading: false,
-    error: null,
-    loadRates: vi.fn().mockResolvedValue(undefined),
-    setPreferredCurrency: vi.fn(),
-    saveExchangeRate: vi.fn(),
-  }
-  return {
-    useCurrencyStore: (selector?: (value: typeof state) => unknown) =>
-      selector ? selector(state) : state,
-  }
-})
+vi.mock('@/stores/currency-store', () => ({
+  useCurrencyStore: (selector?: (value: typeof currencyState) => unknown) =>
+    selector ? selector(currencyState) : currencyState,
+}))
 
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
@@ -137,6 +136,8 @@ describe('SettingsPage', () => {
     storageMocks.get.mockResolvedValue('')
     storageMocks.set.mockResolvedValue(undefined)
     storageMocks.save.mockResolvedValue(undefined)
+    currencyState.mainCurrency = null
+    currencyState.preferredCurrency = 'USD'
     mockGetWebServerStatus.mockResolvedValue({ running: false, port: null, error: null })
     mockApplyWebServerSettings.mockResolvedValue({ running: false, port: null, error: null })
     mockGetRuntimeDiagnostics.mockResolvedValue({
@@ -156,7 +157,14 @@ describe('SettingsPage', () => {
     renderSettings()
 
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
-    expect(screen.getByText('settingsDescription')).toBeInTheDocument()
+    expect(screen.queryByText('settingsDescription')).not.toBeInTheDocument()
+    expect(screen.queryByText('general.description')).not.toBeInTheDocument()
+    expect(screen.queryByText('language.description')).not.toBeInTheDocument()
+    expect(screen.getByText('general.notConfigured')).toBeVisible()
+    expect(screen.getByRole('link', { name: 'general.manageCurrency' })).toHaveAttribute(
+      'href',
+      '/settings?section=money#main-currency'
+    )
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'navigation.general' })).toBeVisible()
     expect(screen.getByRole('heading', { name: 'navigation.money' })).toBeVisible()
@@ -175,6 +183,26 @@ describe('SettingsPage', () => {
     expect(select).toBeInTheDocument()
     expect(screen.getByText('Español')).toBeInTheDocument()
     expect(await screen.findByText('0.1.0')).toBeInTheDocument()
+  })
+
+  it('shows the saved main currency, not an unsaved suggestion, and keeps method copy on demand', async () => {
+    const user = userEvent.setup()
+    currencyState.mainCurrency = 'MXN'
+    currencyState.preferredCurrency = 'USD'
+    renderSettings()
+
+    const status = document.getElementById('main-currency-summary')
+    expect(status).toHaveTextContent('MXN')
+    expect(status).not.toHaveTextContent('USD')
+    expect(status).not.toHaveTextContent('general.notConfigured')
+    expect(screen.queryByText('general.notConfigured')).not.toBeInTheDocument()
+
+    const method = screen.getByText('updates.description').closest('details')
+    expect(method).not.toHaveAttribute('open')
+    expect(screen.getByText('updates.description')).not.toBeVisible()
+    expect(screen.getByText('data.description')).toBeVisible()
+    await user.click(method!.querySelector('summary')!)
+    expect(screen.getByText('updates.description')).toBeVisible()
   })
 
   it('renders theme settings', async () => {

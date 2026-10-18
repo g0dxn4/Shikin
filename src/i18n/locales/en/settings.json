@@ -292,6 +292,7 @@
     "summary": "Keys are optional; direct reporting FX rates are managed separately."
   },
   "settingsDescription": "Language, currency, updates, backups, and local app controls.",
+  "methodDetails": "Details",
   "navigation": {
     "label": "Settings sections",
     "general": "General",

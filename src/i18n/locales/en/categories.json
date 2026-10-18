@@ -52,6 +52,24 @@
     "selectColor": "Select {{color}} color",
     "selectIcon": "Select {{icon}} icon"
   },
+  "colors": {
+    "green": "Green",
+    "amber": "Amber",
+    "blue": "Blue",
+    "purple": "Purple",
+    "red": "Red",
+    "cyan": "Cyan",
+    "pink": "Pink",
+    "gray": "Gray",
+    "orange": "Orange",
+    "violet": "Violet",
+    "seededPurple": "Seeded purple",
+    "emerald": "Emerald",
+    "teal": "Teal",
+    "darkEmerald": "Dark emerald",
+    "indigo": "Indigo",
+    "custom": "Custom"
+  },
   "toast": {
     "nameRequired": "Category name is required",
     "created": "Category created",

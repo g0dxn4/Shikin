@@ -3,7 +3,7 @@
   "description": "Local tools and integrations available with your Shikin data.",
   "capabilitiesTitle": "Available capabilities",
   "capabilitiesDescription": "Open the existing workflow or setting for each capability.",
-  "status": { "ready": "Ready", "configure": "Configure" },
+  "status": { "ready": "Ready", "configure": "Configure", "desktop": "Desktop" },
   "items": {
     "csvImport": {
       "title": "Statement import",

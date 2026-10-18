@@ -255,10 +255,19 @@ test.describe('read-only app data preservation', () => {
     await expect(
       page.getByRole('button', { name: new RegExp(`^${PREFIX} Split Ledger(?: |$)`) })
     ).toBeVisible()
-    await page.getByLabel('Transaction views').selectOption({ label: 'Timeline' })
-    await page.getByLabel('Transaction views').selectOption({ label: 'Ledger' })
+    const transactionViews = page.getByRole('tablist', {
+      name: 'Transaction views',
+      exact: true,
+    })
+    await transactionViews.getByRole('tab', { name: 'Timeline', exact: true }).click()
+    await transactionViews.getByRole('tab', { name: 'Ledger', exact: true }).click()
     if ((page.viewportSize()?.width ?? 0) < 768) {
-      await page.getByRole('button', { name: 'Advanced filters' }).click()
+      // aria-label is "Advanced filters" or "Advanced filters (N)" when advanced filters are active.
+      const advancedFilters = page.getByRole('button', {
+        name: /^Advanced filters(?: \(\d+\))?$/,
+      })
+      await expect(advancedFilters).toBeVisible()
+      await advancedFilters.click()
     }
     await page.getByLabel('Account', { exact: true }).selectOption(IDS.savings)
     await expect(
@@ -267,17 +276,20 @@ test.describe('read-only app data preservation', () => {
     await page.getByLabel('Currency').selectOption('USD')
     await page.getByLabel('Account', { exact: true }).selectOption('all')
     await page.getByLabel('Status').selectOption('pending')
-    await page.getByLabel('Transaction views').selectOption({ label: 'Review' })
+    await transactionViews.getByRole('tab', { name: 'Review', exact: true }).click()
 
     // The 19 pending fixtures are indices 0, 3, ..., 54. Review sorts by date DESC,
     // then ID ASC, unlike the preceding ledger result. Old rows remain during reads;
     // require this latest result before a possibly cached document networkidle state.
+    // ReviewView lists each result in [data-review-row]. The description is that row's
+    // content paragraph, not the single [data-review-inspector] copy and not a note <p>.
     const pendingReviewDescriptions = Array.from({ length: 19 }, (_, index) => index * 3)
       .sort((a, b) => (b % 27) - (a % 27) || a - b)
       .map((index) => `${PREFIX} Ledger ${String(index).padStart(3, '0')}`)
-    await expect(page.locator('#transactions-review-panel article h2')).toHaveText(
-      pendingReviewDescriptions
-    )
+    await expect(
+      page.locator('#transactions-review-panel [data-review-row] > div > div > p')
+    ).toHaveText(pendingReviewDescriptions)
+    await expect(page.locator('#transactions-review-panel [data-review-inspector]')).toHaveCount(1)
     await routeReads.wait()
 
     for (const path of [
@@ -309,10 +321,22 @@ test.describe('read-only app data preservation', () => {
 
     await page.goto('/settings')
     await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Theme & Appearance' })).toBeVisible()
-    const darkAppearance = page.getByRole('radio', { name: /^Dark / })
+    const generalSettings = page.locator('#settings-general')
+    const appearance = generalSettings.getByRole('radiogroup', {
+      name: 'Appearance',
+      exact: true,
+    })
+    const lightAppearance = appearance.getByRole('radio', { name: 'Light', exact: true })
+    const darkAppearance = appearance.getByRole('radio', { name: 'Dark', exact: true })
+    await expect(
+      generalSettings.getByRole('heading', { name: 'General', exact: true })
+    ).toBeVisible()
+    await expect(appearance).toBeVisible()
+    await expect(lightAppearance).toBeVisible()
+    await expect(darkAppearance).toBeVisible()
+    await expect(appearance.getByRole('radio', { name: 'Saved custom', exact: true })).toBeVisible()
     const wasDark = (await darkAppearance.getAttribute('aria-checked')) === 'true'
-    await page.getByRole('radio', { name: wasDark ? /^Light / : /^Dark / }).click()
+    await (wasDark ? lightAppearance : darkAppearance).click()
     await expect(page.locator('html')).toHaveAttribute(
       'data-appearance',
       wasDark ? 'native-light' : 'native-dark'

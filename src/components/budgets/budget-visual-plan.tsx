@@ -39,11 +39,11 @@ function Amount({
   emphasis?: boolean
 }) {
   return (
-    <div className="flex max-w-full min-w-0 items-baseline gap-1.5">
+    <div className="flex w-max shrink-0 items-baseline gap-1.5">
       <dt className="text-muted-foreground shrink-0 text-xs">{label}</dt>
       <dd
         className={cn(
-          'max-w-full min-w-0 overflow-x-auto text-sm font-medium whitespace-nowrap tabular-nums',
+          'w-max shrink-0 text-sm font-medium whitespace-nowrap tabular-nums',
           emphasis ? 'text-destructive' : 'text-foreground'
         )}
       >
@@ -154,7 +154,11 @@ export function BudgetVisualPlan({
         </span>
       </div>
       <BudgetUsageTrack visual={visual} className="col-start-2" />
-      <dl className="col-start-2 flex min-w-0 items-baseline gap-x-4 overflow-x-auto">
+      <dl
+        data-budget-amounts=""
+        tabIndex={0}
+        className="focus-visible:ring-ring col-start-2 flex max-w-full min-w-0 flex-wrap items-baseline gap-x-4 gap-y-1 overflow-x-auto overscroll-x-contain focus-visible:ring-2 focus-visible:outline-none"
+      >
         <Amount label={t('card.spent')} value={spent} />
         <Amount label={t('visual.limit')} value={limit} />
         <Amount

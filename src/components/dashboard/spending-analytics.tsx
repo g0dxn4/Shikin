@@ -2,6 +2,7 @@ import { useRef, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import type { TFunction } from 'i18next'
+import { Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ConversionState, DashboardAnalyticsResult } from '@/lib/dashboard-analytics'
 import { OverviewCashFlow } from './overview-cash-flow'
@@ -101,11 +102,33 @@ export function SpendingAnalytics({
               {t('charts.drilldownTransactions')}
             </Link>
           </div>
-          <p className="text-muted-foreground mt-1 max-w-2xl text-[11px] leading-relaxed">
-            {analytics?.preferredCurrency
-              ? t('analytics.datedManualFx', { currency: analytics.preferredCurrency })
-              : t('analytics.datedManualFxUnconfigured')}
-          </p>
+          {analytics ? (
+            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5">
+              {analytics.preferredCurrency ? (
+                <span className="border-border bg-muted text-foreground inline-flex h-5 max-w-full items-center rounded-full border px-1.5 text-[10px] font-semibold tracking-wide">
+                  {analytics.preferredCurrency}
+                </span>
+              ) : (
+                <span
+                  role="status"
+                  className="border-warning/40 bg-warning/10 text-warning inline-flex min-h-6 max-w-full items-center rounded-full border px-2 text-[10px] font-semibold"
+                >
+                  {t('analytics.currencyUnconfigured')}
+                </span>
+              )}
+              <details className="min-w-0">
+                <summary className="text-accent focus-visible:ring-ring inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-md px-1 text-[11px] font-semibold focus-visible:ring-2 focus-visible:outline-none sm:min-h-8 [&::-webkit-details-marker]:hidden">
+                  <Info size={13} aria-hidden="true" />
+                  {t('analytics.rateBasis')}
+                </summary>
+                <p className="text-muted-foreground mt-1 max-w-prose text-[11px] leading-snug">
+                  {analytics.preferredCurrency
+                    ? t('analytics.datedManualFx', { currency: analytics.preferredCurrency })
+                    : t('analytics.datedManualFxUnconfigured')}
+                </p>
+              </details>
+            </div>
+          ) : null}
         </div>
 
         <div className="flex min-w-0 flex-1 items-center justify-between gap-3 lg:flex-none lg:justify-end">

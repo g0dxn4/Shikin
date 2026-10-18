@@ -38,11 +38,15 @@ export function OverviewCategories({
   return (
     <NativePanel className="p-5 sm:p-6" aria-labelledby="overview-categories-heading">
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <h2 id="overview-categories-heading" className="text-base font-semibold">
             {t('overview.spendingByCategory')}
           </h2>
-          <p className="text-muted-foreground mt-1 text-xs">{t('overview.categoryHint')}</p>
+          {!unavailable && displayCurrency ? (
+            <span className="border-border bg-muted text-foreground inline-flex h-5 max-w-full items-center rounded-full border px-1.5 text-[10px] font-semibold tracking-wide">
+              {displayCurrency}
+            </span>
+          ) : null}
         </div>
         <div className="max-w-full min-w-0 text-right">
           <p className="text-[17px] font-semibold [overflow-wrap:anywhere] tabular-nums">

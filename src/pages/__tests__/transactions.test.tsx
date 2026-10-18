@@ -70,7 +70,7 @@ vi.mock('@/lib/classification-type-service', () => ({
 
 let accounts: unknown[] = []
 let categories: unknown[] = []
-let pageResult: TransactionPageResult
+let pageResult: TransactionPageResult & { isLoading: boolean; error: string | null }
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
@@ -142,7 +142,7 @@ function setRows(rows: TransactionPageRow[], total = rows.length) {
     },
     isLoading: false,
     error: null,
-  } as TransactionPageResult
+  }
 }
 
 describe('Transactions', () => {
@@ -345,14 +345,78 @@ describe('Transactions', () => {
     )
   })
 
-  it('uses a single compact mobile row for matching, review, and currency stats', () => {
+  it('replaces the count cards with a ledger attention bar and keeps book currencies in the filter', () => {
+    window.history.replaceState(null, '', '/transactions?view=ledger&currency=USD')
+    setRows([makeRow({ amount: 1234 })], 10)
+    pageResult.currencies = ['EUR', 'USD']
+    pageResult.reviewCounts.all = 3
+
     render(<Transactions />)
 
-    const summary = screen.getByLabelText('summary.label')
-    expect(summary).toHaveAttribute('data-mobile-layout', 'compact')
-    expect(summary).toHaveClass('!grid-cols-3')
-    expect(summary.children).toHaveLength(3)
-    expect(summary.firstElementChild).toHaveClass('p-2.5')
+    const summary = screen.getByLabelText('summary.attention')
+    expect(summary).toHaveAttribute('data-kind', 'ledger-split')
+    expect(summary).toHaveTextContent('summary.flagged')
+    expect(summary).toHaveTextContent('3')
+    expect(summary).toHaveTextContent('summary.otherMatching')
+    expect(summary).toHaveTextContent('7')
+    expect(summary).toHaveTextContent('summary.notVerified')
+    expect(summary).not.toHaveTextContent('approved')
+    expect(summary).not.toHaveTextContent('$')
+    expect(summary).not.toHaveTextContent('12.34')
+    expect(screen.queryByText('summary.currencies')).not.toBeInTheDocument()
+    expect(screen.queryByText('summary.results')).not.toBeInTheDocument()
+    const currency = screen.getByLabelText('filters.currency') as HTMLSelectElement
+    expect(Array.from(currency.options).map((option) => option.value)).toEqual(
+      expect.arrayContaining(['EUR', 'USD'])
+    )
+  })
+
+  it('does not present review pending as a fraction of the base flagged count', () => {
+    window.history.replaceState(null, '', '/transactions?view=review&reviewReason=pending')
+    setRows([makeRow({ status: 'pending' })], 1)
+    pageResult.reviewCounts = {
+      all: 55,
+      'needs-category': 10,
+      pending: 1,
+      placeholder: 4,
+      staged: 2,
+      unclassified: 40,
+    }
+
+    render(<Transactions />)
+
+    const summary = screen.getByLabelText('summary.attention')
+    expect(summary).toHaveAttribute('data-kind', 'review-reasons')
+    expect(summary.querySelector('[data-testid="ledger-flagged-bar"]')).toBeNull()
+    expect(summary).not.toHaveAttribute('data-total')
+    expect(summary.textContent).not.toMatch(/1\s*\/\s*55|55\s*\/\s*1|\bof 55\b/)
+    expect(summary).toHaveTextContent('summary.overlap')
+    expect(screen.getByTestId('review-reason-pending')).toHaveTextContent('1')
+    expect(screen.getByTestId('review-reason-pending')).not.toHaveTextContent('55')
+    expect(screen.getByTestId('review-reason-unclassified')).toHaveTextContent('40')
+    expect(screen.getByTestId('review-flagged-union')).toHaveTextContent('55')
+    expect(summary).not.toHaveTextContent('57')
+  })
+
+  it('hides the review graphic while loading, in error, or when both counts are zero', () => {
+    window.history.replaceState(null, '', '/transactions?view=ledger')
+    setRows([makeRow()], 10)
+    pageResult.reviewCounts.all = 3
+    pageResult.isLoading = true
+    const { rerender } = render(<Transactions />)
+    expect(screen.queryByLabelText('summary.attention')).not.toBeInTheDocument()
+
+    pageResult.isLoading = false
+    pageResult.error = 'Could not load'
+    rerender(<Transactions />)
+    expect(screen.queryByLabelText('summary.attention')).not.toBeInTheDocument()
+
+    pageResult.error = null
+    pageResult.total = 0
+    pageResult.reviewCounts.all = 0
+    rerender(<Transactions />)
+    expect(screen.queryByLabelText('summary.attention')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('ledger-flagged-bar')).not.toBeInTheDocument()
   })
 
   it('keeps custom date labels usable and titles long selected filter values', async () => {

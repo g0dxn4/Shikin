@@ -25,11 +25,15 @@ export function OverviewCashFlow({
 
   const body = (
     <>
-      <div className={cn('shrink-0', embedded ? 'mb-3' : 'mb-4')}>
+      <div className={cn('flex min-w-0 flex-wrap items-center gap-2', embedded ? 'mb-3' : 'mb-4')}>
         <h2 id="overview-cashflow-heading" className="text-base font-semibold">
           {t('overview.cashFlow')}
         </h2>
-        <p className="text-muted-foreground mt-1 text-xs">{t('overview.cashFlowSubtitle')}</p>
+        {!unavailable && displayCurrency ? (
+          <span className="border-border bg-muted text-foreground inline-flex h-5 max-w-full items-center rounded-full border px-1.5 text-[10px] font-semibold tracking-wide">
+            {displayCurrency}
+          </span>
+        ) : null}
       </div>
 
       {unavailable ? (

@@ -33,7 +33,9 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
-import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
+import { NativePanel, PageToolbar } from '@/components/ui/native-layout'
+import { transactionAttentionStatus } from '@/components/transactions/transaction-review-summary'
+import { TransactionReviewSummary } from '@/components/transactions/transaction-review-summary-panel'
 import { useUIStore } from '@/stores/ui-store'
 import { useTransactionStore } from '@/stores/transaction-store'
 import type { ReviewFieldUpdate } from '@/stores/transaction-store'
@@ -543,30 +545,18 @@ export function Transactions() {
         }
       />
 
-      <MetricStrip
-        aria-label={t('summary.label')}
-        className="!grid-cols-3"
-        data-mobile-layout="compact"
-      >
-        <MetricItem
-          className="p-2.5 sm:p-3.5 [&>span:first-child]:text-[11px] sm:[&>span:first-child]:text-xs [&>span:last-child]:hidden sm:[&>span:last-child]:block [&>strong]:text-base sm:[&>strong]:text-xl"
-          label={t('summary.results')}
-          value={pageQuery.total}
-          detail={t('summary.resultsDetail')}
-        />
-        <MetricItem
-          className="p-2.5 sm:p-3.5 [&>span:first-child]:text-[11px] sm:[&>span:first-child]:text-xs [&>span:last-child]:hidden sm:[&>span:last-child]:block [&>strong]:text-base sm:[&>strong]:text-xl"
-          label={t('summary.review')}
-          value={pageQuery.reviewCounts.all}
-          detail={t('summary.reviewDetail')}
-        />
-        <MetricItem
-          className="p-2.5 sm:p-3.5 [&>span:first-child]:text-[11px] sm:[&>span:first-child]:text-xs [&>span:last-child]:hidden sm:[&>span:last-child]:block [&>strong]:text-base sm:[&>strong]:text-xl"
-          label={t('summary.currencies')}
-          value={pageQuery.currencies.length}
-          detail={t('summary.currenciesDetail')}
-        />
-      </MetricStrip>
+      <TransactionReviewSummary
+        view={urlState.view}
+        reviewReasonApplied={urlState.view === 'review'}
+        total={pageQuery.total}
+        reviewCounts={pageQuery.reviewCounts}
+        status={transactionAttentionStatus({
+          isLoading: pageQuery.isLoading,
+          error: pageQuery.error,
+          search: urlState.search,
+          deferredSearch,
+        })}
+      />
 
       <TransactionFilters
         t={t}

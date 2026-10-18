@@ -159,6 +159,8 @@
     "categoriesUnavailable": "El análisis por categoría no está disponible hasta cargar las divisiones de transacciones",
     "datedManualFx": "Los totales en {{currency}} usan tasas manuales vigentes en la fecha de cada transacción.",
     "datedManualFxUnconfigured": "Los totales por fecha requieren una moneda principal y tasas manuales configuradas.",
+    "rateBasis": "Base de tasas",
+    "currencyUnconfigured": "Falta la moneda",
     "fallbackCurrency": "Mostrando {{currency}}; la conversión a {{target}} no está disponible.",
     "invalidCategoryAllocations": "Informe de categorías incompleto: las divisiones no coinciden con la transacción.",
     "splitIntegrityNotice": "Los totales de división difieren de los totales de transacción para {{count}} transacción(es)."

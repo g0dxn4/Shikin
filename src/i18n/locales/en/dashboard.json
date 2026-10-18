@@ -159,6 +159,8 @@
     "categoriesUnavailable": "Category analytics are unavailable until transaction splits can be loaded",
     "datedManualFx": "{{currency}} totals use manual rates effective on each transaction date.",
     "datedManualFxUnconfigured": "Dated totals require a configured main currency and manual rates.",
+    "rateBasis": "Rate basis",
+    "currencyUnconfigured": "Currency required",
     "fallbackCurrency": "Showing {{currency}}; {{target}} conversion is unavailable.",
     "invalidCategoryAllocations": "Category report incomplete: split allocations do not reconcile.",
     "splitIntegrityNotice": "Split totals differ from transaction totals for {{count}} transaction(s)."

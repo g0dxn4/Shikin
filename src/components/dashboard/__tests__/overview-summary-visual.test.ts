@@ -3,6 +3,11 @@ import {
   reconcileSummaryComposition,
   recordedSnapshotLine,
   selectSummaryVisual,
+  summaryEndpointAmount,
+  summaryRecordedValueDomain,
+  SUMMARY_MIN_PAD_CENTAVOS,
+  SUMMARY_SPAN_PAD_RATIO,
+  SUMMARY_VALUE_FLOOR_RATIO,
   type SummaryCompositionAccount,
   type SummaryVisualInput,
 } from '@/components/dashboard/overview-summary-visual'
@@ -270,5 +275,74 @@ describe('selectSummaryVisual', () => {
         })
       )
     ).toEqual({ kind: 'plain', reason: 'current-only' })
+  })
+})
+
+describe('summaryRecordedValueDomain', () => {
+  it('pads a real range by about 12% of the span and does not include zero', () => {
+    const domain = summaryRecordedValueDomain([100_000, 200_000])
+    expect(domain).toEqual([88_000, 212_000])
+    const span = 100_000
+    const pad = span * SUMMARY_SPAN_PAD_RATIO
+    expect(domain?.[0]).toBe(100_000 - pad)
+    expect(domain?.[1]).toBe(200_000 + pad)
+    expect(domain?.[0]).toBeGreaterThan(0)
+    expect(span / (domain![1] - domain![0])).toBeGreaterThan(0.7)
+  })
+
+  it('floors a one-cent move so it cannot fill the plot', () => {
+    const values = [1_000_000, 1_000_001]
+    const domain = summaryRecordedValueDomain(values)
+    expect(domain).not.toBeNull()
+    const averageAbsolute = (1_000_000 + 1_000_001) / 2
+    const pad = Math.max(
+      1 * SUMMARY_SPAN_PAD_RATIO,
+      averageAbsolute * SUMMARY_VALUE_FLOOR_RATIO,
+      SUMMARY_MIN_PAD_CENTAVOS
+    )
+    expect(pad).toBeGreaterThan(1)
+    expect(domain?.[0]).toBeCloseTo(values[0] - pad)
+    expect(domain?.[1]).toBeCloseTo(values[1] + pad)
+    expect(domain![0]).toBeGreaterThan(0)
+    expect((values[1] - values[0]) / (domain![1] - domain![0])).toBeLessThan(0.001)
+  })
+
+  it('keeps a flat series flat inside a symmetric pad instead of a zero baseline', () => {
+    expect(summaryRecordedValueDomain([50_000, 50_000, 50_000])).toEqual([49_250, 50_750])
+    expect(summaryRecordedValueDomain([0, 0])).toEqual([-1, 1])
+  })
+
+  it('does not snap a negative range to zero', () => {
+    const domain = summaryRecordedValueDomain([-200, -100])
+    expect(domain).toEqual([-212, -88])
+    expect(domain?.[1]).toBeLessThan(0)
+  })
+
+  it('refuses a domain for fewer than two safe integer values', () => {
+    expect(summaryRecordedValueDomain([])).toBeNull()
+    expect(summaryRecordedValueDomain([100])).toBeNull()
+    expect(summaryRecordedValueDomain([100, 100.5])).toBeNull()
+    expect(summaryRecordedValueDomain([Number.NaN, 100])).toBeNull()
+  })
+})
+
+describe('summaryEndpointAmount', () => {
+  it('uses compact values when they still show the range', () => {
+    const start = summaryEndpointAmount(100_000, 200_000, 'USD', 'en-US')
+    const end = summaryEndpointAmount(200_000, 100_000, 'USD', 'en-US')
+    expect(start).not.toBe(end)
+    expect(start).not.toContain('1,000.00')
+    expect(end).not.toContain('2,000.00')
+  })
+
+  it('uses the full amount when compact rounding would hide a real difference', () => {
+    expect(summaryEndpointAmount(1_000_000, 1_000_001, 'USD', 'en-US')).toBe('$10,000.00')
+    expect(summaryEndpointAmount(1_000_001, 1_000_000, 'USD', 'en-US')).toBe('$10,000.01')
+  })
+
+  it('keeps one compact label when the series is flat', () => {
+    const amount = summaryEndpointAmount(50_000, 50_000, 'USD', 'en-US')
+    expect(summaryEndpointAmount(50_000, 50_000, 'USD', 'en-US')).toBe(amount)
+    expect(amount).not.toBe('$500.00')
   })
 })

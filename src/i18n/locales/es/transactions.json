@@ -313,7 +313,22 @@
     "review": "Necesitan revisión",
     "reviewDetail": "Con los filtros actuales",
     "currencies": "Monedas",
-    "currenciesDetail": "Disponibles en el libro mayor"
+    "currenciesDetail": "Disponibles en el libro mayor",
+    "attention": "Atención de revisión",
+    "flagged": "Marcados",
+    "otherMatching": "Otros coincidentes",
+    "notVerified": "No verificado",
+    "overlap": "Se solapan, no se suman",
+    "count": "Cantidad",
+    "ledgerCaption": "Registros marcados y otros coincidentes. Los otros coincidentes no están verificados.",
+    "reviewCaption": "Conteos de revisión independientes. Los motivos se solapan y no se suman.",
+    "reasons": {
+      "needs-category": "Categoría",
+      "pending": "Pendiente",
+      "placeholder": "Marcador",
+      "staged": "Preparado",
+      "unclassified": "Sin clasificar"
+    }
   },
   "loadError": {
     "title": "No se pudieron cargar las transacciones"

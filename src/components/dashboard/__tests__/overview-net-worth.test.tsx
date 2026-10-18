@@ -2,6 +2,10 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { OverviewNetWorth } from '@/components/dashboard/overview-net-worth'
+import {
+  summaryEndpointAmount,
+  summaryRecordedValueDomain,
+} from '@/components/dashboard/overview-summary-visual'
 import type { Account } from '@/types/database'
 
 vi.mock('react-i18next', () => ({
@@ -55,7 +59,25 @@ vi.mock('recharts', () => ({
       data-hide={hide ? 'true' : 'false'}
     />
   ),
-  YAxis: () => <div data-testid="y-axis" />,
+  YAxis: ({
+    hide,
+    domain,
+    width,
+    allowDataOverflow,
+  }: {
+    hide?: boolean
+    domain?: readonly number[]
+    width?: number
+    allowDataOverflow?: boolean
+  }) => (
+    <div
+      data-testid="y-axis"
+      data-hide={hide ? 'true' : 'false'}
+      data-width={width ?? ''}
+      data-overflow={allowDataOverflow ? 'true' : 'false'}
+      data-domain={Array.isArray(domain) ? domain.join('|') : ''}
+    />
+  ),
   Tooltip: ({
     labelFormatter,
     formatter,
@@ -386,6 +408,17 @@ describe('Overview summary visual', () => {
     expect(table.caption?.textContent).toContain('overview.period.6m')
     expect(summary.querySelector('[role="group"]')).toBeNull()
     expect(screen.queryByRole('button', { name: 'overview.period.6m' })).not.toBeInTheDocument()
+    const caption = document.getElementById('overview-summary-recorded-caption')
+    expect(caption).toHaveClass('sr-only')
+    expect(caption).toHaveTextContent('Jan 1, 2026')
+    expect(caption).toHaveTextContent('Mar 1, 2026')
+    const endpoints = summary.querySelector('[data-testid="overview-summary-endpoints"]')
+    expect(endpoints).toHaveAttribute('aria-hidden', 'true')
+    expect(endpoints?.querySelector('time[datetime="2026-01-01"]')).toHaveTextContent('Jan 1')
+    expect(endpoints?.querySelector('time[datetime="2026-03-01"]')).toHaveTextContent('Mar 1')
+    expect(endpoints).toHaveTextContent(summaryEndpointAmount(100_000, 115_000, 'USD'))
+    expect(endpoints).toHaveTextContent(summaryEndpointAmount(115_000, 100_000, 'USD'))
+    expect(endpoints).not.toHaveTextContent('overview.summaryRecorded')
   })
 
   it('binds summary tooltip dates to recorded snapshots without a visible axis', () => {
@@ -408,7 +441,13 @@ describe('Overview summary visual', () => {
     expect(axis).toHaveAttribute('data-key', 'date')
     expect(axis).toHaveAttribute('data-hide', 'true')
     expect(chart?.querySelectorAll('[data-testid="x-axis"]')).toHaveLength(1)
-    expect(chart?.querySelector('[data-testid="y-axis"]')).toBeNull()
+    const yAxis = chart?.querySelector('[data-testid="y-axis"]')
+    const domain = summaryRecordedValueDomain([100_000, 123_400, 150_050])
+    expect(yAxis).toHaveAttribute('data-hide', 'true')
+    expect(yAxis).toHaveAttribute('data-width', '0')
+    expect(yAxis).toHaveAttribute('data-overflow', 'true')
+    expect(yAxis).toHaveAttribute('data-domain', domain?.join('|'))
+    expect(Number(domain?.[0])).toBeGreaterThan(0)
     const tooltip = chart?.querySelector('[data-testid="tooltip-binding"]')
     expect(tooltip).toHaveAttribute('data-sample-label', 'Jun 15, 2026')
     expect(tooltip).toHaveAttribute('data-sample-amount', '$1,234.00')
@@ -506,5 +545,66 @@ describe('Overview summary visual', () => {
       'data-reason',
       'composition-unproven'
     )
+  })
+
+  it('pads a flat and one-cent summary line without resizing history', () => {
+    const { rerender } = render(
+      <OverviewNetWorth
+        {...baseProps}
+        history={[
+          { date: '2026-01-01', netWorth: 1_000_000 },
+          { date: '2026-02-01', netWorth: 1_000_001 },
+        ]}
+      />
+    )
+    const summary = document.getElementById('overview-summary-panel')!
+    const summaryAxis = summary.querySelector('[data-testid="y-axis"]')
+    const oneCent = summaryRecordedValueDomain([1_000_000, 1_000_001])
+    expect(summaryAxis).toHaveAttribute('data-hide', 'true')
+    expect(summaryAxis).toHaveAttribute('data-domain', oneCent?.join('|'))
+    expect(Number(oneCent?.[0])).toBeGreaterThan(0)
+    expect(
+      summary.querySelector('[data-testid="overview-summary-endpoint-end"]')
+    ).toHaveTextContent('$10,000.01')
+
+    rerender(
+      <OverviewNetWorth
+        {...baseProps}
+        history={[
+          { date: '2025-12-31', netWorth: 50_000 },
+          { date: '2026-01-02', netWorth: 50_000 },
+        ]}
+      />
+    )
+    const flat = summaryRecordedValueDomain([50_000, 50_000])
+    expect(summary.querySelector('[data-testid="y-axis"]')).toHaveAttribute(
+      'data-domain',
+      flat?.join('|')
+    )
+    expect(summary.querySelector('time[datetime="2025-12-31"]')).toHaveTextContent('2025')
+    expect(summary.querySelector('time[datetime="2026-01-02"]')).toHaveTextContent('2026')
+
+    const historyAxis = document
+      .getElementById('overview-history-panel')
+      ?.querySelector('[data-testid="y-axis"]')
+    expect(historyAxis).toHaveAttribute('data-domain', '')
+    expect(historyAxis).toHaveAttribute('data-hide', 'false')
+  })
+
+  it('keeps all three overview tabs readable in a three-column wrap grid', () => {
+    renderOverview()
+    const tablist = screen.getByRole('tablist', { name: 'overview.viewsLabel' })
+    expect(tablist).toHaveClass('grid', 'grid-cols-3', 'w-full')
+    expect(tablist.className).not.toContain('overflow-x-auto')
+    for (const name of [
+      'overview.views.summary',
+      'overview.views.history',
+      'overview.views.comparison',
+    ]) {
+      const tab = screen.getByRole('tab', { name })
+      expect(tab).toHaveClass('min-h-11', 'break-words', 'whitespace-normal', 'min-w-0')
+      expect(tab).not.toHaveClass('truncate', 'shrink-0', 'overflow-hidden', 'whitespace-nowrap')
+      expect(tab).toHaveTextContent(name)
+    }
   })
 })

@@ -19,6 +19,8 @@ import type { ComparisonDisplayMode } from '@/components/dashboard/overview-acco
 import { OverviewAccountComparison } from '@/components/dashboard/overview-account-comparison'
 import {
   selectSummaryVisual,
+  summaryEndpointAmount,
+  summaryRecordedValueDomain,
   type SummaryCompositionAccount,
   type SummaryPlainReason,
 } from '@/components/dashboard/overview-summary-visual'
@@ -141,7 +143,7 @@ export function OverviewNetWorth({
           {t('overview.financeOverview')}
         </h2>
         <div
-          className="border-border bg-muted flex max-w-full overflow-x-auto rounded-lg border p-0.5"
+          className="border-border bg-muted grid w-full min-w-0 grid-cols-3 gap-0.5 rounded-lg border p-0.5 sm:flex sm:w-auto sm:max-w-full"
           role="tablist"
           aria-label={t('overview.viewsLabel')}
         >
@@ -160,7 +162,7 @@ export function OverviewNetWorth({
               onClick={() => setView(item)}
               onKeyDown={(event) => selectTabFromKeyboard(event, index)}
               className={cn(
-                'min-h-10 shrink-0 rounded-md px-3 py-2 text-xs font-semibold sm:min-h-0 sm:py-1.5',
+                'min-h-11 min-w-0 rounded-md px-1.5 py-1 text-center text-[11px] leading-tight font-semibold break-words whitespace-normal sm:min-h-8 sm:w-auto sm:px-3 sm:py-1.5 sm:text-xs',
                 view === item
                   ? 'bg-surface text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
@@ -460,6 +462,10 @@ function formatSnapshotDate(date: string) {
   return dayjs(date).format('MMM D, YYYY')
 }
 
+function formatEndpointDate(date: string, includeYear: boolean) {
+  return dayjs(date).format(includeYear ? 'MMM D, YYYY' : 'MMM D')
+}
+
 function SummaryVisualSlot({
   visual,
   periodLabel,
@@ -467,7 +473,8 @@ function SummaryVisualSlot({
   visual: ReturnType<typeof selectSummaryVisual>
   periodLabel: string
 }) {
-  const { t } = useTranslation('dashboard')
+  const { t, i18n } = useTranslation('dashboard')
+  const locale = i18n?.resolvedLanguage ?? i18n?.language
 
   if (visual.kind === 'line') {
     const start = visual.points[0]!
@@ -478,6 +485,10 @@ function SummaryVisualSlot({
       start: formatSnapshotDate(start.date),
       end: formatSnapshotDate(end.date),
     })
+    const valueDomain = summaryRecordedValueDomain(visual.points.map((point) => point.netWorth))
+    const includeYear = start.date.slice(0, 4) !== end.date.slice(0, 4)
+    const startAmount = summaryEndpointAmount(start.netWorth, end.netWorth, visual.currency, locale)
+    const endAmount = summaryEndpointAmount(end.netWorth, start.netWorth, visual.currency, locale)
     return (
       <div className="shrink-0">
         <div className="h-28 min-w-0" data-testid="overview-summary-recorded-line">
@@ -491,6 +502,17 @@ function SummaryVisualSlot({
               <LineChart data={visual.points} margin={{ top: 12, right: 8, left: 8, bottom: 4 }}>
                 {/* Bind tooltip labels to snapshot dates; hide keeps the axis off the summary. */}
                 <XAxis dataKey="date" hide />
+                {valueDomain ? (
+                  <YAxis
+                    hide
+                    width={0}
+                    domain={[valueDomain[0], valueDomain[1]]}
+                    allowDataOverflow
+                    tick={false}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                ) : null}
                 <Line
                   type="linear"
                   dataKey="netWorth"
@@ -517,10 +539,29 @@ function SummaryVisualSlot({
             </SafeChart>
           </div>
         </div>
-        <p
-          id={SUMMARY_RECORDED_CAPTION_ID}
-          className="text-muted-foreground mt-2 text-xs leading-snug break-words"
+        <div
+          className="text-muted-foreground mt-1 grid min-w-0 grid-cols-2 gap-x-3 text-[10px] leading-tight"
+          data-testid="overview-summary-endpoints"
+          aria-hidden="true"
         >
+          <span className="min-w-0" data-testid="overview-summary-endpoint-start">
+            <time dateTime={start.date} className="block tabular-nums">
+              {formatEndpointDate(start.date, includeYear)}
+            </time>
+            <span className="text-foreground mt-0.5 block font-medium break-all tabular-nums">
+              {startAmount}
+            </span>
+          </span>
+          <span className="min-w-0 text-right" data-testid="overview-summary-endpoint-end">
+            <time dateTime={end.date} className="block tabular-nums">
+              {formatEndpointDate(end.date, includeYear)}
+            </time>
+            <span className="text-foreground mt-0.5 block font-medium break-all tabular-nums">
+              {endAmount}
+            </span>
+          </span>
+        </div>
+        <p id={SUMMARY_RECORDED_CAPTION_ID} className="sr-only">
           {caption}
         </p>
         <div className="sr-only">

@@ -160,4 +160,122 @@ describe('Overview summary recorded tooltip', () => {
       expect(table).toHaveTextContent(snapshot.amount)
     }
   })
+
+  it('keeps a flat recorded series horizontal and off a zero baseline', async () => {
+    render(
+      <OverviewNetWorth
+        currentComplete
+        currentAmount={100_000}
+        currentCurrency="USD"
+        income="$0.00"
+        spent="$0.00"
+        saved="$0.00"
+        savedTone="muted"
+        monthlySummaryLabel="All time"
+        currentAsOfLabel="Current value"
+        historyAsOfLabel=""
+        history={[
+          { date: '2026-01-01', netWorth: 100_000 },
+          { date: '2026-06-01', netWorth: 100_000 },
+          { date: '2026-10-01', netWorth: 100_000 },
+        ]}
+        historyComplete
+        period="all"
+        onPeriodChange={() => {}}
+        historyCurrency="USD"
+        emptyHistoryMessage="No history"
+        accounts={[]}
+        preferredCurrency={null}
+      />
+    )
+
+    const summary = document.getElementById('overview-summary-panel')!
+    const dots = await waitFor(() => {
+      const nodes = [...summary.querySelectorAll('.recharts-line-dot')]
+      expect(nodes).toHaveLength(3)
+      return nodes
+    })
+    const ys = dots.map((dot) => Number(dot.getAttribute('cy')))
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(0.5)
+    expect(ys[0]).toBeGreaterThan(60)
+    expect(ys[0]).toBeLessThan(220)
+    expect(summary.querySelector('.recharts-yAxis')).toBeNull()
+    expect(summary.querySelector('.recharts-xAxis')).toBeNull()
+  })
+
+  it('uses the recorded range instead of a zero baseline or a one-cent slope', async () => {
+    const { rerender } = render(
+      <OverviewNetWorth
+        currentComplete
+        currentAmount={1_200_000}
+        currentCurrency="USD"
+        income="$0.00"
+        spent="$0.00"
+        saved="$0.00"
+        savedTone="muted"
+        monthlySummaryLabel="All time"
+        currentAsOfLabel="Current value"
+        historyAsOfLabel=""
+        history={[
+          { date: '2026-01-01', netWorth: 1_000_000 },
+          { date: '2026-06-01', netWorth: 1_200_000 },
+        ]}
+        historyComplete
+        period="all"
+        onPeriodChange={() => {}}
+        historyCurrency="USD"
+        emptyHistoryMessage="No history"
+        accounts={[]}
+        preferredCurrency={null}
+      />
+    )
+
+    const summary = document.getElementById('overview-summary-panel')!
+    const rangeDots = await waitFor(() => {
+      const nodes = [...summary.querySelectorAll('.recharts-line-dot')]
+      expect(nodes).toHaveLength(2)
+      return nodes
+    })
+    const rangeDelta = Math.abs(
+      Number(rangeDots[0]!.getAttribute('cy')) - Number(rangeDots[1]!.getAttribute('cy'))
+    )
+    expect(rangeDelta).toBeGreaterThan(120)
+    expect(summary.querySelector('.recharts-yAxis')).toBeNull()
+
+    rerender(
+      <OverviewNetWorth
+        currentComplete
+        currentAmount={1_000_001}
+        currentCurrency="USD"
+        income="$0.00"
+        spent="$0.00"
+        saved="$0.00"
+        savedTone="muted"
+        monthlySummaryLabel="All time"
+        currentAsOfLabel="Current value"
+        historyAsOfLabel=""
+        history={[
+          { date: '2026-01-01', netWorth: 1_000_000 },
+          { date: '2026-06-01', netWorth: 1_000_001 },
+        ]}
+        historyComplete
+        period="all"
+        onPeriodChange={() => {}}
+        historyCurrency="USD"
+        emptyHistoryMessage="No history"
+        accounts={[]}
+        preferredCurrency={null}
+      />
+    )
+    const centDots = await waitFor(() => {
+      const nodes = [...summary.querySelectorAll('.recharts-line-dot')]
+      expect(nodes).toHaveLength(2)
+      return nodes
+    })
+    const centDelta = Math.abs(
+      Number(centDots[0]!.getAttribute('cy')) - Number(centDots[1]!.getAttribute('cy'))
+    )
+    expect(centDelta).toBeLessThan(3)
+    expect(centDelta).toBeLessThan(rangeDelta / 8)
+  })
 })

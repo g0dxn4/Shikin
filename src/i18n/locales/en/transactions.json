@@ -313,7 +313,22 @@
     "review": "Needs review",
     "reviewDetail": "Across current filters",
     "currencies": "Currencies",
-    "currenciesDetail": "Available in the ledger"
+    "currenciesDetail": "Available in the ledger",
+    "attention": "Review attention",
+    "flagged": "Flagged",
+    "otherMatching": "Other matching",
+    "notVerified": "Not verified",
+    "overlap": "Overlapping, not added",
+    "count": "Count",
+    "ledgerCaption": "Flagged and other matching records. Other matching is not verified.",
+    "reviewCaption": "Independent review counts. Reasons overlap and are not added.",
+    "reasons": {
+      "needs-category": "Category",
+      "pending": "Pending",
+      "placeholder": "Placeholder",
+      "staged": "Staged",
+      "unclassified": "Unclassified"
+    }
   },
   "loadError": {
     "title": "Couldn’t load transactions"

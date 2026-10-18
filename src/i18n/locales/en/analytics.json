@@ -21,6 +21,8 @@
     "historyPeriod": "Net worth date range",
     "viewChartData": "View chart data",
     "currentContext": "Live totals. Not the last recorded snapshot.",
+    "live": "Live",
+    "recorded": "Recorded",
     "lastRecorded": "Last recorded",
     "recordedChange": "Recorded change",
     "recordedAssets": "Recorded assets",
@@ -62,8 +64,11 @@
       "info": "Info"
     },
     "comparisonChart": "Month comparison",
+    "comparisonChartYear": "Year comparison",
     "comparisonChartCaption": "Current and previous category spending",
-    "comparisonTableCaption": "Month comparison by category"
+    "comparisonChartCaptionYear": "Current and year-ago category spending",
+    "comparisonTableCaption": "Month comparison by category",
+    "mode": "Comparison"
   },
   "spendingHeatmap": {
     "title": "Spending Heatmap",
@@ -172,7 +177,12 @@
     "notCharted": "Not charted",
     "asOf": "As of",
     "uncategorized": "Uncategorized",
-    "allGroups": "All in scope"
+    "allGroups": "All in scope",
+    "filters": "Filters",
+    "details": "Details",
+    "invalidScope": "Invalid scope",
+    "scopeCount_one": "{{count}} scope filter",
+    "scopeCount_other": "{{count}} scope filters"
   },
   "reportingFx": {
     "unconfigured": "Set a main currency in Settings to view converted totals.",

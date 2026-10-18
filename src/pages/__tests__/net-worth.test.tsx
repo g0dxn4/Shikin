@@ -153,12 +153,16 @@ describe('NetWorth page', () => {
     expect(mockRefresh).toHaveBeenCalledWith('1y')
     expect(screen.getByRole('button', { name: 'netWorth.periods.1y' })).toHaveClass('min-h-11')
     expect(screen.getByRole('img', { name: 'netWorth.chartTitle' })).toBeInTheDocument()
-    expect(screen.getByRole('table', { name: 'netWorth.chartTableCaption' })).toHaveTextContent(
-      '$1,000.00'
-    )
-    expect(screen.getByRole('table', { name: 'netWorth.chartTableCaption' })).toHaveTextContent(
-      '$1,500.00'
-    )
+    const historyTable = screen.getByRole('table', { name: 'netWorth.chartTableCaption' })
+    expect(historyTable).toHaveTextContent('$1,000.00')
+    expect(historyTable).toHaveTextContent('$1,500.00')
+    expect(historyTable.parentElement).toHaveClass('sr-only')
+    expect(screen.getAllByText('netWorth.currentNetWorth')).toHaveLength(1)
+    expect(screen.queryByText('netWorth.description')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'netWorth.viewChartData' }))
+    expect(
+      screen.getByRole('table', { name: 'netWorth.chartTableCaption' }).parentElement
+    ).not.toHaveClass('sr-only')
     const axisLabel = axisLabels[axisLabels.length - 1]
     expect(axisLabel).toBe(formatCompactChartMoney(150000, 'USD'))
     expect(axisLabel).not.toBe(formatMoney(150000, 'USD'))
@@ -377,6 +381,9 @@ describe('NetWorth page', () => {
     expect(enAnalytics.netWorth.unresolvedOwnership_one).toContain('{{count}}')
     expect(enAnalytics.netWorth.unresolvedOwnership_other).toContain('{{count}}')
     expect(enAnalytics.netWorth.unavailable.length).toBeGreaterThan(0)
+    expect(enAnalytics.netWorth.live).toBe('Live')
+    expect(esAnalytics.netWorth.live).toBe('En vivo')
+    expect(esAnalytics.netWorth.recorded.length).toBeGreaterThan(0)
     expect(enAnalytics.netWorth.incompleteHoldings_one.toLowerCase()).not.toMatch(/quote/)
     expect(enAnalytics.netWorth.incompleteHoldings_other.toLowerCase()).not.toMatch(/quote/)
 

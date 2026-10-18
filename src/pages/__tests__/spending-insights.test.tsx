@@ -137,8 +137,22 @@ describe('SpendingInsights', () => {
     expect(screen.getAllByText('$200.00').length).toBeGreaterThan(0)
     expect(document.querySelector('[class*="min-w-[520px]"]')).not.toBeInTheDocument()
 
+    expect(screen.getByRole('button', { name: 'spendingInsights.tabs.mom' })).toHaveClass(
+      'min-h-11'
+    )
+    expect(screen.getByRole('button', { name: 'spendingInsights.tabs.yoy' })).toHaveClass(
+      'min-h-11'
+    )
+
     await user.click(screen.getByText('spendingInsights.tabs.yoy'))
     expect(screen.getByText('spendingInsights.noData')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('img', { name: 'spendingInsights.comparisonChart' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('table', { name: 'spendingInsights.comparisonTableCaption' })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('$200.00')).not.toBeInTheDocument()
     expect(mockLoadRates).toHaveBeenCalled()
   })
 

@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
 import type {
@@ -21,6 +21,7 @@ import {
 } from '@/lib/constants'
 import { formatMoney } from '@/lib/money'
 import type { ScopedReferences } from '@/lib/scoped-report-read'
+import { cn } from '@/lib/utils'
 
 type ActualField = keyof ScopedReportAmounts
 
@@ -72,6 +73,40 @@ function groupName(
   return key ?? labels.allGroups
 }
 
+function scopeChip(scope: unknown, allGroups: string, invalidScope: string, counted: string) {
+  if (!scope || typeof scope !== 'object') return { label: invalidScope, invalid: true }
+  const count = Object.values(scope).reduce<number>(
+    (sum, value) => sum + (Array.isArray(value) ? value.length : 0),
+    0
+  )
+  if (count === 0) return { label: allGroups, invalid: false }
+  return { label: counted, invalid: false }
+}
+
+function Chip({
+  children,
+  warning = false,
+  status = false,
+}: {
+  children: ReactNode
+  warning?: boolean
+  status?: boolean
+}) {
+  return (
+    <span
+      role={status ? 'status' : undefined}
+      className={cn(
+        'inline-flex max-w-full items-center overflow-x-auto rounded-full border px-2 py-0.5 text-[11px] font-medium whitespace-nowrap',
+        warning
+          ? 'border-warning/40 bg-warning/10 text-warning'
+          : 'border-border text-muted-foreground'
+      )}
+    >
+      {children}
+    </span>
+  )
+}
+
 function MeasureBars({
   rows,
   currency,
@@ -92,7 +127,17 @@ function MeasureBars({
   const describedBy = useId()
   const height = horizontal ? Math.min(420, Math.max(168, rows.length * 36 + 24)) : 224
   return (
-    <div className="mt-4 min-w-0">
+    <div className="mt-3 min-w-0">
+      <ul className="mb-2 flex flex-wrap gap-3 text-[11px]" aria-label={label}>
+        <li className="text-muted-foreground flex items-center gap-1.5">
+          <span
+            aria-hidden="true"
+            className="h-2 w-2 rounded-sm"
+            style={{ backgroundColor: fill }}
+          />
+          {amountLabel}
+        </li>
+      </ul>
       <div
         className="min-w-0 overflow-hidden"
         role="img"
@@ -193,7 +238,7 @@ function AmountList({
   labelFor: (field: ActualField) => string
 }) {
   return (
-    <dl className="mt-3 grid min-w-0 gap-2 sm:grid-cols-2">
+    <dl className="grid min-w-0 gap-2 sm:grid-cols-2">
       {fields.map((field) => (
         <div key={field} className="flex min-w-0 items-baseline justify-between gap-3">
           <dt className="text-muted-foreground text-xs">{labelFor(field)}</dt>
@@ -212,6 +257,7 @@ function ActualHero({
   categories,
 }: ScopedReferences & { result: ScopedReportResult }) {
   const { t } = useTranslation('analytics')
+  const { t: tBudgets } = useTranslation('budgets')
   const measure = result.budgetUsage.measure
   const labels = {
     uncategorized: t('reportHero.uncategorized'),
@@ -244,65 +290,46 @@ function ActualHero({
     result.classificationComplete === null
       ? t('reportHero.classificationNotRequired')
       : t(result.classificationComplete ? 'reportHero.complete' : 'reportHero.incomplete')
+  const selectedScope = scopeChip(
+    result.scope,
+    t('reportHero.allGroups'),
+    t('reportHero.invalidScope'),
+    t('reportHero.scopeCount', {
+      count:
+        result.scope && typeof result.scope === 'object'
+          ? Object.values(result.scope).reduce<number>(
+              (sum, value) => sum + (Array.isArray(value) ? value.length : 0),
+              0
+            )
+          : 0,
+    })
+  )
 
   return (
-    <div className="border-border mb-5 min-w-0 border-b pb-5">
-      <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
-            {t('reportHero.activeMeasure')}
-          </p>
-          <h2 className="mt-1 text-sm font-semibold">{labelFor(measure)}</h2>
-          <p className="mt-1 text-3xl font-medium tracking-tight tabular-nums">
-            {moneyOrDash(result.totals[measure], result.currency)}
-          </p>
-        </div>
-        <dl className="grid min-w-0 gap-1 text-xs sm:text-right">
-          <div>
-            <dt className="text-muted-foreground">{t('reportHero.window')}</dt>
-            <dd className="tabular-nums">
-              {result.window.start} – {result.window.end}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">{t('reportHero.timeZone')}</dt>
-            <dd>
-              {result.window.timeZone} · {result.currency}
-            </dd>
-          </div>
-        </dl>
+    <div className="min-w-0">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <Chip>
+          <span className="tabular-nums">
+            {result.window.start} – {result.window.end}
+          </span>
+        </Chip>
+        <Chip>
+          {result.window.timeZone} · {result.currency}
+        </Chip>
+        <Chip warning={selectedScope.invalid}>{selectedScope.label}</Chip>
+        <Chip warning={!result.complete} status={!result.complete}>
+          {result.complete ? t('reportHero.complete') : t('reportHero.incomplete')}
+        </Chip>
       </div>
-      <div className="mt-4 min-w-0">
+      <div className="mt-4 flex min-w-0 items-end justify-between gap-3">
         <p className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
-          {t('reportHero.scope')}
+          {labelFor(measure)}
         </p>
-        <ScopeSummary result={result} accounts={accounts} categories={categories} />
+        <p className="max-w-full overflow-x-auto text-3xl font-medium tracking-tight whitespace-nowrap tabular-nums">
+          {moneyOrDash(result.totals[measure], result.currency)}
+        </p>
       </div>
-      <p className="text-muted-foreground mt-2 text-xs">
-        {t('reportHero.coverage')}: {coverage}
-        {' · '}
-        {t('reportHero.classification')}: {classification}
-      </p>
-      {result.basis === 'net_consumption' ? (
-        <AmountList
-          fields={netFields}
-          values={result.totals}
-          currency={result.currency}
-          labelFor={labelFor}
-        />
-      ) : null}
-      {result.groupBy === 'none' ? (
-        <div className="mt-4">
-          <h3 className="text-sm font-semibold">{t('reportHero.basisMetrics')}</h3>
-          <p className="text-muted-foreground mt-1 text-xs">{t('reportHero.basisMetricsHelp')}</p>
-          <AmountList
-            fields={fields}
-            values={result.totals}
-            currency={result.currency}
-            labelFor={labelFor}
-          />
-        </div>
-      ) : chartRows ? (
+      {chartRows ? (
         <MeasureBars
           rows={chartRows}
           currency={result.currency}
@@ -312,11 +339,41 @@ function ActualHero({
           groupLabel={t('reportHero.group')}
           fill="var(--color-chart-3)"
         />
-      ) : (
-        <p className="text-muted-foreground mt-4 text-sm">
+      ) : result.groupBy === 'none' ? null : (
+        <p
+          className={cn('mt-4 text-sm', result.complete ? 'text-muted-foreground' : 'text-warning')}
+          role="status"
+        >
           {result.complete ? t('reportHero.noGroups') : t('reportHero.noChart')}
         </p>
       )}
+      {!result.scope ? (
+        <p className="text-warning mt-3 text-xs" role="alert">
+          {tBudgets('scoped.invalidScope')}
+        </p>
+      ) : null}
+      <details className="mt-2">
+        <summary className="text-accent focus-visible:ring-ring flex min-h-11 cursor-pointer items-center text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none">
+          {t('reportHero.details')}
+        </summary>
+        <div className="space-y-3 pb-1">
+          <p className="text-muted-foreground text-xs">
+            {t('reportHero.coverage')}: {coverage}
+            {' · '}
+            {t('reportHero.classification')}: {classification}
+          </p>
+          <ScopeSummary result={result} accounts={accounts} categories={categories} />
+          {result.groupBy === 'none' ? (
+            <p className="text-muted-foreground text-xs">{t('reportHero.basisMetricsHelp')}</p>
+          ) : null}
+          <AmountList
+            fields={result.basis === 'net_consumption' ? netFields : fields}
+            values={result.totals}
+            currency={result.currency}
+            labelFor={labelFor}
+          />
+        </div>
+      </details>
     </div>
   )
 }
@@ -329,6 +386,7 @@ function EstimateSourcePanel({
   currency,
   accounts,
   categories,
+  fill,
 }: {
   title: string
   chartLabel: string
@@ -337,6 +395,7 @@ function EstimateSourcePanel({
   currency: string
   accounts: ScopedReferences['accounts']
   categories: ScopedReferences['categories']
+  fill: string
 }) {
   const { t } = useTranslation('analytics')
   const labels = {
@@ -363,32 +422,35 @@ function EstimateSourcePanel({
   const describedBy = useId()
 
   return (
-    <article className="bg-surface min-w-0 p-4">
-      <h3 className="text-sm font-semibold">{title}</h3>
-      <p
-        className={
-          source.complete ? 'text-muted-foreground mt-1 text-xs' : 'text-warning mt-1 text-xs'
-        }
-        role="status"
-      >
-        {source.complete ? t('reportHero.complete') : t('reportHero.incomplete')}
+    <article className="border-border min-w-0 border-t pt-4 first:border-t-0 first:pt-0 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-4 lg:first:border-l-0 lg:first:pl-0">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <h3 className="min-w-0 text-sm font-semibold">{title}</h3>
+        <Chip warning={!source.complete} status>
+          {source.complete ? t('reportHero.complete') : t('reportHero.incomplete')}
+        </Chip>
+      </div>
+      <p className="mt-3 max-w-full overflow-x-auto text-2xl font-medium tracking-tight whitespace-nowrap tabular-nums">
+        {moneyOrDash(source.monthlyCentavos, currency)}
       </p>
-      <dl className="mt-3 grid gap-2 text-sm">
-        <div className="flex items-baseline justify-between gap-3">
-          <dt className="text-muted-foreground text-xs">{t('reportHero.monthly')}</dt>
-          <dd className="overflow-x-auto font-medium whitespace-nowrap tabular-nums">
-            {moneyOrDash(source.monthlyCentavos, currency)}
-          </dd>
-        </div>
-        <div className="flex items-baseline justify-between gap-3">
-          <dt className="text-muted-foreground text-xs">{t('reportHero.yearly')}</dt>
-          <dd className="overflow-x-auto font-medium whitespace-nowrap tabular-nums">
-            {moneyOrDash(source.yearlyCentavos, currency)}
-          </dd>
-        </div>
-      </dl>
+      <p className="text-muted-foreground text-[11px]">{t('reportHero.monthly')}</p>
+      <p className="text-muted-foreground mt-2 flex min-w-0 items-baseline justify-between gap-3 text-xs">
+        <span>{t('reportHero.yearly')}</span>
+        <span className="text-foreground overflow-x-auto font-medium whitespace-nowrap tabular-nums">
+          {moneyOrDash(source.yearlyCentavos, currency)}
+        </span>
+      </p>
       {chartRows ? (
         <div className="mt-3 min-w-0">
+          <ul className="mb-2 flex items-center gap-1.5 text-[11px]">
+            <li className="text-muted-foreground flex items-center gap-1.5">
+              <span
+                aria-hidden="true"
+                className="h-2 w-2 rounded-sm"
+                style={{ backgroundColor: fill }}
+              />
+              {t('reportHero.monthly')}
+            </li>
+          </ul>
           <div
             className="min-w-0 overflow-hidden"
             role="img"
@@ -430,7 +492,7 @@ function EstimateSourcePanel({
                 />
                 <Bar
                   dataKey="amount"
-                  fill="var(--color-chart-1)"
+                  fill={fill}
                   maxBarSize={12}
                   radius={[0, 2, 2, 0]}
                   isAnimationActive={false}
@@ -452,13 +514,11 @@ function EstimateSourcePanel({
             }))}
           />
         </div>
-      ) : (
-        <p className="text-muted-foreground mt-3 text-xs">
-          {source.complete && (groupBy === 'none' || groupBy === 'month')
-            ? t('reportHero.notOccurrenceHistory')
-            : t('reportHero.notCharted')}
+      ) : source.complete ? (
+        <p className="text-muted-foreground mt-3 text-xs" role="status">
+          {t('reportHero.notCharted')}
         </p>
-      )}
+      ) : null}
     </article>
   )
 }
@@ -470,38 +530,38 @@ function EstimateHero({
   categories,
 }: ScopedReferences & { result: ScopedRecurringEstimateResult; window: ReportWindow }) {
   const { t } = useTranslation('analytics')
+  const selectedScope = scopeChip(
+    result.scope,
+    t('reportHero.allGroups'),
+    t('reportHero.invalidScope'),
+    t('reportHero.scopeCount', {
+      count:
+        result.scope && typeof result.scope === 'object'
+          ? Object.values(result.scope).reduce<number>(
+              (sum, value) => sum + (Array.isArray(value) ? value.length : 0),
+              0
+            )
+          : 0,
+    })
+  )
   return (
-    <div className="border-border mb-5 min-w-0 border-b pb-5">
-      <p className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
-        {t('reportHero.asOf')}
-      </p>
-      <h2 className="mt-1 text-sm font-semibold">{t('reportHero.separateSources')}</h2>
-      <p className="text-muted-foreground mt-1 text-xs">{t('reportHero.separateSourcesHelp')}</p>
-      <dl className="mt-3 grid gap-1 text-xs">
-        <div>
-          <dt className="text-muted-foreground">{t('reportHero.window')}</dt>
-          <dd className="tabular-nums">
+    <div className="min-w-0">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <Chip>
+          <span className="tabular-nums">
             {window.start} – {window.end}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">{t('reportHero.timeZone')}</dt>
-          <dd>{window.timeZone}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">{t('reportHero.asOf')}</dt>
-          <dd className="tabular-nums">
+          </span>
+        </Chip>
+        <Chip>{window.timeZone}</Chip>
+        <Chip>
+          <span className="tabular-nums">
             {result.asOf} · {result.currency}
-          </dd>
-        </div>
-      </dl>
-      <div className="mt-3">
-        <p className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
-          {t('reportHero.scope')}
-        </p>
-        <ScopeSummary result={result} accounts={accounts} categories={categories} />
+          </span>
+        </Chip>
+        <Chip warning={selectedScope.invalid}>{selectedScope.label}</Chip>
+        <Chip warning>{t('reportHero.separateSources')}</Chip>
       </div>
-      <div className="border-border bg-border mt-4 grid min-w-0 gap-px overflow-hidden rounded-lg border lg:grid-cols-2">
+      <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-2">
         <EstimateSourcePanel
           title={t('reportHero.rulesSource')}
           chartLabel={t('reportHero.rulesChartLabel')}
@@ -510,6 +570,7 @@ function EstimateHero({
           currency={result.currency}
           accounts={accounts}
           categories={categories}
+          fill="var(--color-chart-1)"
         />
         <EstimateSourcePanel
           title={t('reportHero.subscriptionsSource')}
@@ -519,8 +580,19 @@ function EstimateHero({
           currency={result.currency}
           accounts={accounts}
           categories={categories}
+          fill="var(--color-chart-3)"
         />
       </div>
+      <details className="mt-2">
+        <summary className="text-accent focus-visible:ring-ring flex min-h-11 cursor-pointer items-center text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none">
+          {t('reportHero.details')}
+        </summary>
+        <div className="text-muted-foreground space-y-2 pb-1 text-xs">
+          <p>{t('reportHero.separateSourcesHelp')}</p>
+          <p>{t('reportHero.notOccurrenceHistory')}</p>
+          <ScopeSummary result={result} accounts={accounts} categories={categories} />
+        </div>
+      </details>
     </div>
   )
 }

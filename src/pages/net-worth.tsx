@@ -8,7 +8,7 @@ import { StatRow } from '@/components/ui/stat-row'
 import { ProgressBar } from '@/components/ui/progress-bar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { MoneyChartTable } from '@/components/insights/money-chart-table'
-import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
+import { NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { useCurrencyStore } from '@/stores/currency-store'
 import { currencyAuthorityKey } from '@/stores/currency-authority'
 import { useNetWorthStore } from '@/stores/net-worth-store'
@@ -46,7 +46,9 @@ function formatNativeSnapshotEvidence(snapshot: {
 export function NetWorth() {
   const { t } = useTranslation('analytics')
   const historyTableId = useId()
+  const liveContextId = useId()
   const [period, setPeriod] = useState('1y')
+  const [showHistoryTable, setShowHistoryTable] = useState(false)
   const {
     totalAssets,
     totalLiabilities,
@@ -121,10 +123,9 @@ export function NetWorth() {
   return (
     <div className="page-content min-w-0">
       <PageToolbar
-        leading={<p className="text-muted-foreground text-sm">{t('netWorth.description')}</p>}
         actions={
           <div
-            className="border-border bg-muted flex rounded-lg border p-0.5"
+            className="border-border bg-muted flex max-w-full flex-wrap rounded-lg border p-0.5"
             role="group"
             aria-label={t('netWorth.historyPeriod')}
           >
@@ -157,50 +158,32 @@ export function NetWorth() {
       ) : (
         <>
           <NativePanel className="min-w-0 p-4 sm:p-6">
-            <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
-                  {t('netWorth.currentNetWorth')}
-                </p>
-                <p className="mt-1 text-3xl font-medium tracking-tight tabular-nums">
+            <div className="flex min-w-0 flex-wrap items-end justify-between gap-3">
+              <div className="min-w-0" aria-describedby={liveContextId}>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="border-border text-foreground inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase">
+                    {t('netWorth.live')}
+                  </span>
+                  <span className="sr-only">{t('netWorth.currentNetWorth')}</span>
+                  {totalsComplete && preferredCurrency ? (
+                    <span className="border-border text-muted-foreground inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide">
+                      {preferredCurrency}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-1 max-w-full overflow-x-auto text-3xl font-medium tracking-tight whitespace-nowrap tabular-nums">
                   {currentValue}
                 </p>
-                <p className="text-muted-foreground mt-1 max-w-md text-xs">
+                <p id={liveContextId} className="sr-only">
                   {t('netWorth.currentContext')}
                 </p>
               </div>
-              {lastPoint && historyDisplayCurrency ? (
-                <div className="min-w-0 sm:text-right">
-                  <p className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
-                    {t('netWorth.lastRecorded')}
-                  </p>
-                  <p className="mt-1 text-sm font-medium tabular-nums">
-                    {dayjs(lastPoint.date).format('MMM D, YYYY')} ·{' '}
-                    {formatMoney(lastPoint.netWorth, historyDisplayCurrency)}
-                  </p>
-                  <p
-                    className={cn(
-                      'mt-1 text-xs tabular-nums',
-                      changeAmount > 0
-                        ? 'text-success'
-                        : changeAmount < 0
-                          ? 'text-destructive'
-                          : 'text-muted-foreground'
-                    )}
-                  >
-                    {changeAmount > 0 ? (
-                      <TrendingUp size={12} className="mr-1 inline" aria-hidden="true" />
-                    ) : changeAmount < 0 ? (
-                      <TrendingDown size={12} className="mr-1 inline" aria-hidden="true" />
-                    ) : null}
-                    {t('netWorth.recordedChange')}: {isPositiveChange ? '+' : ''}
-                    {formatMoney(Math.round(changeAmount), historyDisplayCurrency)} ({changePercent}
-                    %)
-                  </p>
-                </div>
-              ) : firstPoint && historyDisplayCurrency ? (
-                <p className="text-muted-foreground text-xs">
-                  {t('netWorth.lastRecorded')}: {dayjs(firstPoint.date).format('MMM D, YYYY')} ·{' '}
+              {!recordedSeriesReady && firstPoint && historyDisplayCurrency ? (
+                <p className="text-muted-foreground min-w-0 text-xs tabular-nums">
+                  <span className="text-foreground font-semibold">{t('netWorth.recorded')}</span>
+                  {' · '}
+                  {dayjs(firstPoint.date).format('MMM D, YYYY')}
+                  {' · '}
                   {formatMoney(firstPoint.netWorth, historyDisplayCurrency)}
                 </p>
               ) : null}
@@ -242,10 +225,10 @@ export function NetWorth() {
               </div>
             ) : null}
 
-            {recordedSeriesReady && historyDisplayCurrency ? (
+            {recordedSeriesReady && historyDisplayCurrency && firstPoint && lastPoint ? (
               <>
                 <div
-                  className="mt-5 h-56 min-w-0"
+                  className="mt-5 h-64 min-w-0 sm:h-72"
                   role="img"
                   aria-label={t('netWorth.chartTitle')}
                   aria-describedby={historyTableId}
@@ -253,7 +236,7 @@ export function NetWorth() {
                   <SafeChart>
                     <LineChart
                       data={displayableHistory}
-                      margin={{ top: 8, right: 8, bottom: 0, left: 0 }}
+                      margin={{ top: 12, right: 8, bottom: 0, left: 0 }}
                     >
                       <CartesianGrid
                         vertical={false}
@@ -320,12 +303,63 @@ export function NetWorth() {
                         name="netWorth"
                         stroke="var(--color-chart-1)"
                         strokeWidth={2}
-                        dot={false}
+                        dot={(props) => {
+                          const last = displayableHistory.length - 1
+                          if (
+                            typeof props.cx !== 'number' ||
+                            typeof props.cy !== 'number' ||
+                            (props.index !== 0 && props.index !== last)
+                          ) {
+                            return <g />
+                          }
+                          return (
+                            <circle
+                              cx={props.cx}
+                              cy={props.cy}
+                              r={2.5}
+                              fill="var(--color-chart-1)"
+                            />
+                          )
+                        }}
                         isAnimationActive={false}
                         connectNulls={false}
                       />
                     </LineChart>
                   </SafeChart>
+                </div>
+                <div
+                  className="text-muted-foreground mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] tabular-nums"
+                  aria-label={t('netWorth.recordedChange')}
+                >
+                  <span className="text-foreground font-semibold">{t('netWorth.recorded')}</span>
+                  <span className="min-w-0 overflow-x-auto whitespace-nowrap">
+                    {dayjs(firstPoint.date).format('MMM D')} ·{' '}
+                    {formatMoney(firstPoint.netWorth, historyDisplayCurrency)}
+                  </span>
+                  <span aria-hidden="true" className="bg-border h-px min-w-4 flex-1" />
+                  <span className="min-w-0 overflow-x-auto whitespace-nowrap">
+                    {dayjs(lastPoint.date).format('MMM D')} ·{' '}
+                    {formatMoney(lastPoint.netWorth, historyDisplayCurrency)}
+                  </span>
+                  <span
+                    className={cn(
+                      'max-w-full overflow-x-auto font-medium whitespace-nowrap',
+                      changeAmount > 0
+                        ? 'text-success'
+                        : changeAmount < 0
+                          ? 'text-destructive'
+                          : 'text-muted-foreground'
+                    )}
+                  >
+                    {changeAmount > 0 ? (
+                      <TrendingUp size={12} className="mr-1 inline" aria-hidden="true" />
+                    ) : changeAmount < 0 ? (
+                      <TrendingDown size={12} className="mr-1 inline" aria-hidden="true" />
+                    ) : null}
+                    {isPositiveChange ? '+' : ''}
+                    {formatMoney(Math.round(changeAmount), historyDisplayCurrency)} ·{' '}
+                    {changePercent}%
+                  </span>
                 </div>
                 <ul className="text-muted-foreground mt-3 flex flex-wrap gap-4 text-[11px]">
                   <li className="flex items-center gap-1.5">
@@ -353,10 +387,19 @@ export function NetWorth() {
                     {t('netWorth.recordedLiabilities')}
                   </li>
                 </ul>
+                <button
+                  type="button"
+                  className="text-accent focus-visible:ring-ring mt-1 min-h-11 rounded-md text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none"
+                  aria-expanded={showHistoryTable}
+                  aria-controls={historyTableId}
+                  onClick={() => setShowHistoryTable((open) => !open)}
+                >
+                  {t('netWorth.viewChartData')}
+                </button>
                 <MoneyChartTable
                   id={historyTableId}
                   caption={t('netWorth.chartTableCaption')}
-                  visible
+                  visible={showHistoryTable}
                   columns={[
                     t('netWorth.date'),
                     t('netWorth.title'),
@@ -383,14 +426,53 @@ export function NetWorth() {
             ) : null}
           </NativePanel>
 
-          <MetricStrip>
-            <MetricItem label={t('netWorth.currentNetWorth')} value={currentValue} />
-            <MetricItem label={t('netWorth.assets')} value={assetTotal} />
-            <MetricItem label={t('netWorth.liabilities')} value={liabilityTotal} />
-          </MetricStrip>
-
           {hasData ? (
             <NativePanel className="divide-border min-w-0 divide-y p-0">
+              {totalsComplete &&
+              totalAssets !== null &&
+              totalLiabilities !== null &&
+              totalAssetsAbs + totalLiabilitiesAbs > 0 ? (
+                <div className="space-y-2 p-4 sm:px-5 sm:pt-5">
+                  <div
+                    className="bg-muted flex h-3 overflow-hidden rounded-full"
+                    role="img"
+                    aria-label={`${t('netWorth.assets')} ${assetTotal}. ${t('netWorth.liabilities')} ${liabilityTotal}`}
+                  >
+                    <span
+                      className="h-full"
+                      style={{
+                        width: `${(totalAssetsAbs / (totalAssetsAbs + totalLiabilitiesAbs)) * 100}%`,
+                        backgroundColor: 'var(--color-success)',
+                      }}
+                    />
+                    <span
+                      className="h-full"
+                      style={{
+                        width: `${(totalLiabilitiesAbs / (totalAssetsAbs + totalLiabilitiesAbs)) * 100}%`,
+                        backgroundColor: 'var(--color-destructive)',
+                      }}
+                    />
+                  </div>
+                  <ul className="text-muted-foreground flex flex-wrap gap-3 text-[11px]">
+                    <li className="flex items-center gap-1.5">
+                      <span
+                        aria-hidden="true"
+                        className="h-2 w-2 rounded-sm"
+                        style={{ backgroundColor: 'var(--color-success)' }}
+                      />
+                      {t('netWorth.assets')}
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <span
+                        aria-hidden="true"
+                        className="h-2 w-2 rounded-sm"
+                        style={{ backgroundColor: 'var(--color-destructive)' }}
+                      />
+                      {t('netWorth.liabilities')}
+                    </li>
+                  </ul>
+                </div>
+              ) : null}
               <section className="space-y-4 p-4 sm:p-5">
                 <div className="flex min-w-0 items-center justify-between gap-3">
                   <div className="flex items-center gap-2">

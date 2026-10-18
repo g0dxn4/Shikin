@@ -20,6 +20,7 @@ import type { ScopedReadInput, ScopedReferences } from '@/lib/scoped-report-read
 
 export function ReportsPage() {
   const { t } = useTranslation('budgets')
+  const { t: tAnalytics } = useTranslation('analytics')
   const [basis, setBasis] = useState<ScopedReadInput['basis']>('gross_cashflow')
   const [scope, setScope] = useState(() => normalizeReportScope())
   const [currency, setCurrency] = useState('')
@@ -40,51 +41,12 @@ export function ReportsPage() {
     <div className="page-content min-w-0">
       <PageToolbar
         className="flex-col items-stretch sm:flex-row sm:items-center"
-        leading={<p className="text-muted-foreground text-sm">{t('scoped.reportDescription')}</p>}
         actions={
-          <Button variant="outline" onClick={refresh}>
+          <Button variant="outline" className="min-h-11" onClick={refresh}>
             {t('scoped.refresh')}
           </Button>
         }
       />
-      <NativePanel className="min-w-0 space-y-3 p-4 sm:p-5">
-        <div className="grid min-w-0 gap-3 sm:grid-cols-3">
-          <label className="grid gap-1 text-sm">
-            {t('scoped.basis')}
-            <select
-              className={scopedSelectClass}
-              value={basis}
-              onChange={(e) => setBasis(e.target.value as ScopedReadInput['basis'])}
-            >
-              {(['gross_cashflow', 'net_consumption', 'recurring_estimate'] as const).map(
-                (value) => (
-                  <option key={value} value={value}>
-                    {t(`scoped.${value}`)}
-                  </option>
-                )
-              )}
-            </select>
-          </label>
-          <CurrencyControl allowDefault value={currency} onChange={setCurrency} />
-          <label className="grid gap-1 text-sm">
-            {t('scoped.groupBy')}
-            <select
-              className={scopedSelectClass}
-              value={groupBy}
-              onChange={(e) => setGroupBy(e.target.value as ScopedReportGroupBy)}
-            >
-              {(['category', 'account', 'month', 'none'] as const).map((value) => (
-                <option key={value} value={value}>
-                  {t(`scoped.group.${value}`)}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <ScopeControls scope={scope} onChange={setScope} {...references} />
-        <WindowControls value={window} onChange={setWindow} />
-        <p className="text-muted-foreground text-xs">{t('scoped.currentDefinition')}</p>
-      </NativePanel>
       <NativePanel className="min-w-0 p-4 sm:p-5" aria-busy={loading}>
         {loading ? (
           <p role="status">{t('scoped.loading')}</p>
@@ -93,30 +55,75 @@ export function ReportsPage() {
             {error}
           </p>
         ) : data ? (
-          <>
-            <ReportResultHero
+          <ReportResultHero
+            result={data.result}
+            window={data.window}
+            accounts={data.accounts}
+            categories={data.categories}
+          />
+        ) : null}
+      </NativePanel>
+      <details className="border-border bg-surface min-w-0 rounded-xl border px-4 py-1">
+        <summary className="focus-visible:ring-ring flex min-h-11 cursor-pointer items-center text-sm font-semibold focus-visible:ring-2 focus-visible:outline-none">
+          {tAnalytics('reportHero.filters')}
+        </summary>
+        <div className="min-w-0 space-y-3 pb-4">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-3">
+            <label className="grid gap-1 text-sm">
+              {t('scoped.basis')}
+              <select
+                className={scopedSelectClass}
+                value={basis}
+                onChange={(e) => setBasis(e.target.value as ScopedReadInput['basis'])}
+              >
+                {(['gross_cashflow', 'net_consumption', 'recurring_estimate'] as const).map(
+                  (value) => (
+                    <option key={value} value={value}>
+                      {t(`scoped.${value}`)}
+                    </option>
+                  )
+                )}
+              </select>
+            </label>
+            <CurrencyControl allowDefault value={currency} onChange={setCurrency} />
+            <label className="grid gap-1 text-sm">
+              {t('scoped.groupBy')}
+              <select
+                className={scopedSelectClass}
+                value={groupBy}
+                onChange={(e) => setGroupBy(e.target.value as ScopedReportGroupBy)}
+              >
+                {(['category', 'account', 'month', 'none'] as const).map((value) => (
+                  <option key={value} value={value}>
+                    {t(`scoped.group.${value}`)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <ScopeControls scope={scope} onChange={setScope} {...references} />
+          <WindowControls value={window} onChange={setWindow} />
+          <p className="text-muted-foreground text-xs">{t('scoped.currentDefinition')}</p>
+        </div>
+      </details>
+      {!loading && data ? (
+        <NativePanel className="min-w-0 p-4 sm:p-5">
+          {data.result.basis === 'recurring_estimate' ? (
+            <ScopedEstimateResult
               result={data.result}
-              window={data.window}
               accounts={data.accounts}
               categories={data.categories}
             />
-            {data.result.basis === 'recurring_estimate' ? (
-              <ScopedEstimateResult
-                result={data.result}
-                accounts={data.accounts}
-                categories={data.categories}
-              />
-            ) : (
-              <ScopedActualResult
-                key={JSON.stringify([scope, window, basis, currency, groupBy])}
-                result={data.result}
-                accounts={data.accounts}
-                categories={data.categories}
-              />
-            )}
-          </>
-        ) : null}
-      </NativePanel>
+          ) : (
+            <ScopedActualResult
+              key={JSON.stringify([scope, window, basis, currency, groupBy])}
+              result={data.result}
+              accounts={data.accounts}
+              categories={data.categories}
+            />
+          )}
+        </NativePanel>
+      ) : null}
     </div>
   )
 }

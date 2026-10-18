@@ -16,7 +16,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
-import { NativePanel, PageToolbar } from '@/components/ui/native-layout'
+import { NativePanel } from '@/components/ui/native-layout'
 import { ComparisonBars } from '@/components/insights/comparison-bars'
 import { useSpendingInsightsStore } from '@/stores/spending-insights-store'
 import type { SpendingComparison, SpendingInsight } from '@/stores/spending-insights-store'
@@ -25,11 +25,11 @@ import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import dayjs from 'dayjs'
 
-type Tab = 'insights' | 'mom' | 'yoy'
+type Mode = 'mom' | 'yoy'
 
 export function SpendingInsights() {
   const { t } = useTranslation('analytics')
-  const [tab, setTab] = useState<Tab>('insights')
+  const [mode, setMode] = useState<Mode>('mom')
   const {
     momComparisons,
     momCurrentTotal,
@@ -62,13 +62,29 @@ export function SpendingInsights() {
     storedComplete &&
     authority?.mainCurrency === mainCurrency &&
     authority?.manualRates === manualRates
-
-  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'insights', label: t('spendingInsights.tabs.insights'), icon: <Lightbulb size={14} /> },
-    { id: 'mom', label: t('spendingInsights.tabs.mom'), icon: <Calendar size={14} /> },
-    { id: 'yoy', label: t('spendingInsights.tabs.yoy'), icon: <CalendarRange size={14} /> },
-  ]
-  const showMonthChart = complete && !error && momComparisons.length > 0 && currency.length > 0
+  const active =
+    mode === 'yoy'
+      ? {
+          comparisons: yoyComparisons,
+          currentTotal: yoyCurrentTotal,
+          previousTotal: yoyPreviousTotal,
+          currentLabel: dayjs().format('MMMM YYYY'),
+          previousLabel: dayjs().subtract(1, 'year').format('MMMM YYYY'),
+          title: t('spendingInsights.comparisonChartYear'),
+          caption: t('spendingInsights.comparisonChartCaptionYear'),
+        }
+      : {
+          comparisons: momComparisons,
+          currentTotal: momCurrentTotal,
+          previousTotal: momPreviousTotal,
+          currentLabel: dayjs().format('MMMM YYYY'),
+          previousLabel: dayjs().subtract(1, 'month').format('MMMM YYYY'),
+          title: t('spendingInsights.comparisonChart'),
+          caption: t('spendingInsights.comparisonTableCaption'),
+        }
+  const showChart = active.comparisons.length > 0 && currency.length > 0
+  const hasTotals = active.currentTotal !== null && active.previousTotal !== null
+  const totalChange = hasTotals ? active.currentTotal! - active.previousTotal! : null
 
   if (isLoading) {
     return (
@@ -82,12 +98,6 @@ export function SpendingInsights() {
 
   return (
     <div className="page-content min-w-0">
-      <PageToolbar
-        leading={
-          <p className="text-muted-foreground text-sm">{t('spendingInsights.description')}</p>
-        }
-      />
-
       {error ? (
         <ErrorState title={t('spendingInsights.loadError')} description={error} />
       ) : !complete ? (
@@ -123,90 +133,104 @@ export function SpendingInsights() {
         </div>
       ) : (
         <>
-          {showMonthChart ? (
-            <NativePanel className="min-w-0 p-4 sm:p-5">
-              <div className="mb-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <NativePanel className="min-w-0 p-4 sm:p-5">
+            <div
+              className="border-border bg-muted mb-4 flex max-w-full flex-wrap gap-1 rounded-lg border p-0.5"
+              role="group"
+              aria-label={t('spendingInsights.mode')}
+            >
+              {(
+                [
+                  ['mom', t('spendingInsights.tabs.mom'), Calendar],
+                  ['yoy', t('spendingInsights.tabs.yoy'), CalendarRange],
+                ] as const
+              ).map(([id, label, Icon]) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={mode === id}
+                  onClick={() => setMode(id)}
+                  className={cn(
+                    'focus-visible:ring-ring flex min-h-11 flex-1 basis-28 items-center justify-center gap-1.5 rounded-md px-3 text-xs font-semibold focus-visible:ring-2 focus-visible:outline-none',
+                    mode === id
+                      ? 'bg-surface text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  <Icon size={14} aria-hidden="true" />
+                  {label}
+                </button>
+              ))}
+            </div>
+            {showChart ? (
+              <div className="mb-3 flex min-w-0 flex-wrap items-end justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
-                    {t('spendingInsights.comparisonChart')}
+                    {active.currentLabel}
                   </p>
-                  <p className="mt-1 text-3xl font-medium tracking-tight tabular-nums">
-                    {momCurrentTotal === null
+                  <p className="mt-1 max-w-full overflow-x-auto text-3xl font-medium tracking-tight whitespace-nowrap tabular-nums">
+                    {active.currentTotal === null
                       ? '—'
-                      : formatMoney(Math.round(momCurrentTotal), currency)}
+                      : formatMoney(Math.round(active.currentTotal), currency)}
                   </p>
-                  <p className="text-muted-foreground text-xs">{t('spendingInsights.current')}</p>
                 </div>
-                <div className="min-w-0 sm:text-right">
-                  <p className="text-muted-foreground text-xs">{t('spendingInsights.previous')}</p>
-                  <p className="text-lg font-medium tabular-nums">
-                    {momPreviousTotal === null
+                <div className="min-w-0 text-left sm:text-right">
+                  <p className="text-muted-foreground text-[11px]">{active.previousLabel}</p>
+                  <p className="overflow-x-auto text-sm font-medium whitespace-nowrap tabular-nums">
+                    {active.previousTotal === null
                       ? '—'
-                      : formatMoney(Math.round(momPreviousTotal), currency)}
+                      : formatMoney(Math.round(active.previousTotal), currency)}
                   </p>
+                  {totalChange !== null ? (
+                    <p
+                      className={cn(
+                        'text-xs font-medium tabular-nums',
+                        totalChange > 0
+                          ? 'text-destructive'
+                          : totalChange < 0
+                            ? 'text-success'
+                            : 'text-muted-foreground'
+                      )}
+                    >
+                      {totalChange > 0 ? '+' : ''}
+                      {formatMoney(Math.round(totalChange), currency)}
+                      {hasTotals && active.previousTotal! > 0
+                        ? ` · ${totalChange > 0 ? '+' : ''}${((totalChange / active.previousTotal!) * 100).toFixed(1)}%`
+                        : ''}
+                    </p>
+                  ) : null}
                 </div>
               </div>
-              <ComparisonBars
-                comparisons={momComparisons}
-                currency={currency}
-                title={t('spendingInsights.comparisonChart')}
-                caption={t('spendingInsights.comparisonTableCaption')}
-                currentLabel={t('spendingInsights.current')}
-                previousLabel={t('spendingInsights.previous')}
-                categoryLabel={t('spendingInsights.category')}
-              />
-            </NativePanel>
-          ) : null}
+            ) : (
+              <p className="text-muted-foreground text-sm">{t('spendingInsights.noData')}</p>
+            )}
+            {showChart ? (
+              <>
+                <ComparisonBars
+                  comparisons={active.comparisons}
+                  currency={currency}
+                  title={active.title}
+                  caption={active.caption}
+                  currentLabel={active.currentLabel}
+                  previousLabel={active.previousLabel}
+                  categoryLabel={t('spendingInsights.category')}
+                />
+                <ul className="divide-border mt-4 divide-y">
+                  {active.comparisons.map((comp) => (
+                    <ComparisonRow
+                      key={comp.categoryName}
+                      comp={comp}
+                      currency={currency}
+                      currentLabel={active.currentLabel}
+                      previousLabel={active.previousLabel}
+                    />
+                  ))}
+                </ul>
+              </>
+            ) : null}
+          </NativePanel>
 
           <InsightsTab insights={insights} currency={currency} />
-
-          <div
-            className="border-border bg-muted flex flex-wrap gap-1 rounded-xl border p-1"
-            role="group"
-            aria-label={t('spendingInsights.title')}
-          >
-            {tabs.map((tItem) => (
-              <button
-                key={tItem.id}
-                type="button"
-                aria-pressed={tab === tItem.id}
-                onClick={() => setTab(tItem.id)}
-                className={cn(
-                  'flex min-h-11 flex-1 basis-28 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-semibold transition-colors',
-                  'focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
-                  tab === tItem.id
-                    ? 'bg-surface text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                <span aria-hidden="true">{tItem.icon}</span>
-                {tItem.label}
-              </button>
-            ))}
-          </div>
-
-          <div role="region" aria-label={tabs.find((item) => item.id === tab)?.label}>
-            {tab === 'mom' ? (
-              <ComparisonTab
-                comparisons={momComparisons}
-                currentTotal={momCurrentTotal}
-                previousTotal={momPreviousTotal}
-                currentLabel={dayjs().format('MMMM YYYY')}
-                previousLabel={dayjs().subtract(1, 'month').format('MMMM YYYY')}
-                currency={currency}
-              />
-            ) : null}
-            {tab === 'yoy' ? (
-              <ComparisonTab
-                comparisons={yoyComparisons}
-                currentTotal={yoyCurrentTotal}
-                previousTotal={yoyPreviousTotal}
-                currentLabel={dayjs().format('MMMM YYYY')}
-                previousLabel={dayjs().subtract(1, 'year').format('MMMM YYYY')}
-                currency={currency}
-              />
-            ) : null}
-          </div>
         </>
       )}
     </div>
@@ -238,7 +262,10 @@ function InsightsTab({ insights, currency }: { insights: SpendingInsight[]; curr
   }
 
   return (
-    <NativePanel className="min-w-0 px-4 py-2 sm:px-5">
+    <NativePanel
+      className="min-w-0 px-4 py-2 sm:px-5"
+      aria-label={t('spendingInsights.tabs.insights')}
+    >
       <ul>
         {insights.map((insight) => (
           <InsightCard key={insight.id} insight={insight} currency={currency} />
@@ -312,110 +339,24 @@ function InsightCard({ insight, currency }: { insight: SpendingInsight; currency
   )
 }
 
-function ComparisonTab({
-  comparisons,
-  currentTotal,
-  previousTotal,
+function ComparisonRow({
+  comp,
+  currency,
   currentLabel,
   previousLabel,
-  currency,
 }: {
-  comparisons: SpendingComparison[]
-  currentTotal: number | null
-  previousTotal: number | null
+  comp: SpendingComparison
+  currency: string
   currentLabel: string
   previousLabel: string
-  currency: string
 }) {
-  const { t } = useTranslation('analytics')
-  const hasTotals = currentTotal !== null && previousTotal !== null
-  const totalChange = hasTotals ? currentTotal - previousTotal : null
-  const totalChangePercent =
-    hasTotals && previousTotal > 0 ? (totalChange! / previousTotal) * 100 : 0
-
-  return (
-    <div className="min-w-0 space-y-3">
-      <NativePanel className="min-w-0 p-4 sm:p-5">
-        <div className="flex min-w-0 flex-col justify-between gap-4 sm:flex-row sm:items-end">
-          <div className="min-w-0">
-            <span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
-              {t('spendingInsights.totalChange')}
-            </span>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <span
-                className={cn(
-                  'text-2xl font-medium tracking-tight tabular-nums',
-                  totalChange !== null && totalChange > 0
-                    ? 'text-destructive'
-                    : totalChange !== null && totalChange < 0
-                      ? 'text-success'
-                      : ''
-                )}
-              >
-                {totalChange === null
-                  ? '—'
-                  : `${totalChange > 0 ? '+' : ''}${formatMoney(Math.round(totalChange), currency)}`}
-              </span>
-              {hasTotals ? (
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    'font-mono text-[10px]',
-                    totalChange !== null && totalChange > 0
-                      ? 'border-destructive/30 text-destructive'
-                      : 'border-success/30 text-success'
-                  )}
-                >
-                  {totalChange !== null && totalChange > 0 ? '+' : ''}
-                  {totalChangePercent.toFixed(1)}%
-                </Badge>
-              ) : null}
-            </div>
-          </div>
-          <div className="min-w-0 sm:text-right">
-            <div className="text-muted-foreground text-xs">{currentLabel}</div>
-            <div className="overflow-x-auto font-medium whitespace-nowrap tabular-nums">
-              {currentTotal === null ? '—' : formatMoney(Math.round(currentTotal), currency)}
-            </div>
-            <div className="text-muted-foreground text-xs">{previousLabel}</div>
-            <div className="text-muted-foreground overflow-x-auto text-sm whitespace-nowrap tabular-nums">
-              {previousTotal === null ? '—' : formatMoney(Math.round(previousTotal), currency)}
-            </div>
-          </div>
-        </div>
-      </NativePanel>
-
-      {comparisons.length === 0 ? (
-        <NativePanel className="flex h-32 items-center justify-center p-5">
-          <p className="text-muted-foreground text-sm">{t('spendingInsights.noData')}</p>
-        </NativePanel>
-      ) : (
-        <NativePanel className="min-w-0 overflow-hidden p-0">
-          <div className="text-muted-foreground hidden grid-cols-[minmax(0,1.4fr)_7.5rem_7.5rem_5.5rem] gap-2 px-4 py-3 text-[10px] font-semibold tracking-wider uppercase sm:grid">
-            <span>{t('spendingInsights.category')}</span>
-            <span className="text-right">{t('spendingInsights.current')}</span>
-            <span className="text-right">{t('spendingInsights.previous')}</span>
-            <span className="text-right">{t('spendingInsights.change')}</span>
-          </div>
-          <ul className="divide-border divide-y">
-            {comparisons.map((comp) => (
-              <ComparisonRow key={comp.categoryName} comp={comp} currency={currency} />
-            ))}
-          </ul>
-        </NativePanel>
-      )}
-    </div>
-  )
-}
-
-function ComparisonRow({ comp, currency }: { comp: SpendingComparison; currency: string }) {
   const { t } = useTranslation('analytics')
   const isIncrease = comp.change > 0
   const isDecrease = comp.change < 0
   const isSignificant = Math.abs(comp.changePercent) > 20
 
   return (
-    <li className="grid min-w-0 gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1.4fr)_7.5rem_7.5rem_5.5rem] sm:items-center">
+    <li className="grid min-w-0 gap-2 py-3 sm:grid-cols-[minmax(0,1.4fr)_7.5rem_7.5rem_5.5rem] sm:items-center">
       <div className="flex min-w-0 items-center gap-2">
         <div
           className="h-2.5 w-2.5 shrink-0 rounded-full"
@@ -426,7 +367,7 @@ function ComparisonRow({ comp, currency }: { comp: SpendingComparison; currency:
       <div className="grid grid-cols-1 gap-1 sm:contents">
         <div className="flex items-baseline justify-between gap-3 sm:block sm:text-right">
           <span className="text-muted-foreground text-[10px] font-semibold tracking-wide uppercase sm:sr-only">
-            {t('spendingInsights.current')}
+            {currentLabel}
           </span>
           <span className="overflow-x-auto font-mono text-sm whitespace-nowrap">
             {formatMoney(Math.round(comp.current), currency)}
@@ -434,7 +375,7 @@ function ComparisonRow({ comp, currency }: { comp: SpendingComparison; currency:
         </div>
         <div className="flex items-baseline justify-between gap-3 sm:block sm:text-right">
           <span className="text-muted-foreground text-[10px] font-semibold tracking-wide uppercase sm:sr-only">
-            {t('spendingInsights.previous')}
+            {previousLabel}
           </span>
           <span className="text-muted-foreground overflow-x-auto font-mono text-sm whitespace-nowrap">
             {formatMoney(Math.round(comp.previous), currency)}

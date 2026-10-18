@@ -149,7 +149,7 @@ describe('SpendingHeatmap page', () => {
     expect(mockFetchRows).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps the range toolbar wrapping instead of shrinking the description', async () => {
+  it('keeps the range toolbar wrapping at 44px without a leading description', async () => {
     render(<SpendingHeatmap />)
 
     await waitFor(() => {
@@ -158,10 +158,21 @@ describe('SpendingHeatmap page', () => {
 
     const toolbar = document.querySelector('.page-toolbar')
     expect(toolbar?.className).toMatch(/max-sm:flex-col/)
-    expect(screen.getByText('spendingHeatmap.description').className).toMatch(/sm:min-w-\[12rem\]/)
-    expect(screen.getByRole('group', { name: 'spendingHeatmap.timeRange' }).className).toMatch(
-      /flex-wrap/
+    expect(screen.queryByText('spendingHeatmap.description')).not.toBeInTheDocument()
+    const range = screen.getByRole('group', { name: 'spendingHeatmap.timeRange' })
+    expect(range.className).toMatch(/flex-wrap/)
+    expect(screen.getByRole('button', { name: 'spendingHeatmap.ranges.3months' })).toHaveClass(
+      'min-h-11'
     )
+    const frame = document.querySelector('[data-heatmap-frame]')
+    expect(frame?.className).toContain('w-full')
+    expect(frame?.getAttribute('style') ?? '').toMatch(/min-width:/)
+    expect(frame?.getAttribute('style') ?? '').not.toMatch(/(^|;|\s)width:/)
+    expect(
+      screen
+        .getByRole('grid', { name: 'spendingHeatmap.dailyActivity' })
+        .compareDocumentPosition(screen.getByText('spendingHeatmap.totalSpending'))
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
   })
 
   it('does not stick on loading when the active heatmap range is selected again', async () => {

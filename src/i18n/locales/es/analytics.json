@@ -21,6 +21,8 @@
     "historyPeriod": "Rango de patrimonio neto",
     "viewChartData": "Ver datos del gráfico",
     "currentContext": "Totales en vivo. No es el último registro guardado.",
+    "live": "En vivo",
+    "recorded": "Registrado",
     "lastRecorded": "Último registro",
     "recordedChange": "Cambio registrado",
     "recordedAssets": "Activos registrados",
@@ -62,8 +64,11 @@
       "info": "Info"
     },
     "comparisonChart": "Comparación del mes",
+    "comparisonChartYear": "Comparación del año",
     "comparisonChartCaption": "Gasto actual y anterior por categoría",
-    "comparisonTableCaption": "Comparación del mes por categoría"
+    "comparisonChartCaptionYear": "Gasto actual y de hace un año por categoría",
+    "comparisonTableCaption": "Comparación del mes por categoría",
+    "mode": "Comparación"
   },
   "spendingHeatmap": {
     "title": "Mapa de Calor de Gastos",
@@ -172,7 +177,12 @@
     "notCharted": "Sin gráfico",
     "asOf": "A fecha de",
     "uncategorized": "Sin categoría",
-    "allGroups": "Todo el alcance"
+    "allGroups": "Todo el alcance",
+    "filters": "Filtros",
+    "details": "Detalles",
+    "invalidScope": "Alcance no válido",
+    "scopeCount_one": "{{count}} filtro de alcance",
+    "scopeCount_other": "{{count}} filtros de alcance"
   },
   "reportingFx": {
     "unconfigured": "Configura una moneda principal en Ajustes para ver los totales convertidos.",

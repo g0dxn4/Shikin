@@ -64,12 +64,19 @@ beforeEach(() => {
   useCurrencyStore.setState({ mainCurrency: 'MXN', preferredCurrency: 'USD', manualRates: [] })
   useUIStore.setState({ openTransactionDialog: vi.fn() })
 })
+async function openFilters() {
+  const summary = screen.getByText(/^(Filters|Filtros)$/)
+  const details = summary.closest('details')
+  if (details && !details.open) fireEvent.click(summary)
+}
+
 describe('scoped Reports UI', () => {
   it('renders Spanish labels without changing the captured measure contract', async () => {
     await i18n.changeLanguage('es')
     try {
       render(<ReportsPage />)
-      await screen.findByText('Completo')
+      await screen.findAllByText('Completo')
+      openFilters()
       expect(screen.getByLabelText('Medida')).toHaveValue('gross_cashflow')
       expect(screen.getByRole('option', { name: 'Neto clasificado' })).toHaveValue(
         'net_consumption'
@@ -88,7 +95,12 @@ describe('scoped Reports UI', () => {
   it('exposes gross/net/estimates, account/category/tag scope and grouping without unscoped metrics', async () => {
     const user = userEvent.setup()
     render(<ReportsPage />)
-    await screen.findByText('Complete')
+    await screen.findAllByText('Complete')
+    const chart = screen.getByRole('img', { name: 'Complete groups for the active measure' })
+    expect(chart.compareDocumentPosition(screen.getByText('Filters'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    )
+    openFilters()
     expect(screen.getByLabelText('Measure')).toHaveValue('gross_cashflow')
     expect(screen.queryByText('Total Balance')).not.toBeInTheDocument()
     await user.click(screen.getByText('Advanced scope · accounts, categories & tags'))
@@ -121,7 +133,7 @@ describe('scoped Reports UI', () => {
     }
     const user = userEvent.setup()
     render(<ReportsPage />)
-    await screen.findByText('Complete')
+    await screen.findAllByText('Complete')
     await user.click(screen.getByText(/Inspect contributing transactions/))
     const parents = screen.getAllByRole('button', { name: /2026-01-10 · expense/ })
     expect(parents).toHaveLength(1)
@@ -142,7 +154,8 @@ describe('scoped Reports UI', () => {
   it('resolves custom/as-of/week/timezone/through with the same controls', async () => {
     const user = userEvent.setup()
     render(<ReportsPage />)
-    await screen.findByText('Complete')
+    await screen.findAllByText('Complete')
+    openFilters()
     await user.click(screen.getByText('Dates & window'))
     fireEvent.change(screen.getByLabelText('As of'), { target: { value: '2026-01-12' } })
     await user.selectOptions(screen.getByLabelText('Include through'), 'period_end')
@@ -168,14 +181,15 @@ describe('scoped Reports UI', () => {
   it('withholds old results during rapid currency changes and ignores late/unmounted responses', async () => {
     const user = userEvent.setup()
     const { unmount } = render(<ReportsPage />)
-    await screen.findByText('Complete')
+    await screen.findAllByText('Complete')
+    openFilters()
     const old = deferred<ScopedRead>()
     read.mockReturnValueOnce(old.promise)
     await user.selectOptions(screen.getByLabelText('Currency'), 'USD')
     expect(screen.getByRole('status')).toHaveTextContent('Loading snapshot')
     expect(screen.queryByText('Actual expenses')).not.toBeInTheDocument()
     await user.selectOptions(screen.getByLabelText('Currency'), 'MXN')
-    await screen.findByText('Complete')
+    await screen.findAllByText('Complete')
     await act(async () => old.resolve(projection({ basis: 'gross_cashflow', currency: 'USD' })))
     expect(screen.queryByText(/Incomplete · totals/)).not.toBeInTheDocument()
     const pending = deferred<ScopedRead>()
@@ -214,7 +228,8 @@ describe('scoped Reports UI', () => {
     }
     const user = userEvent.setup()
     render(<ReportsPage />)
-    await screen.findByText('Complete')
+    await screen.findAllByText('Complete')
+    openFilters()
     await user.selectOptions(screen.getByLabelText('Measure'), 'recurring_estimate')
     await screen.findByRole('heading', { name: 'Recurring rules · separate source' })
     expect(
@@ -252,7 +267,7 @@ describe('scoped Reports UI', () => {
   it('charts complete category groups with exact money and withholds the chart when net is incomplete', async () => {
     const user = userEvent.setup()
     render(<ReportsPage />)
-    await screen.findByText('Complete')
+    await screen.findAllByText('Complete')
     const chart = screen.getByRole('img', { name: 'Complete groups for the active measure' })
     expect(chart).toHaveAttribute('aria-describedby')
     const table = screen.getByRole('table', { name: 'Complete groups for the active measure' })
@@ -261,6 +276,7 @@ describe('scoped Reports UI', () => {
     expect(screen.getAllByText(/2026-01-01/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/UTC/).length).toBeGreaterThan(0)
 
+    openFilters()
     await user.selectOptions(screen.getByLabelText('Measure'), 'net_consumption')
     await screen.findAllByText('Net consumption')
     expect(
@@ -273,8 +289,10 @@ describe('scoped Reports UI', () => {
   it('labels basis totals instead of inventing months when grouping is none', async () => {
     const user = userEvent.setup()
     render(<ReportsPage />)
-    await screen.findByText('Complete')
+    await screen.findAllByText('Complete')
+    openFilters()
     await user.selectOptions(screen.getByLabelText('Group by'), 'none')
+    await user.click(screen.getByText('Details'))
     await screen.findByText('No grouping. These are labeled totals, not a time series.')
     expect(
       screen.queryByRole('img', { name: 'Complete groups for the active measure' })
@@ -286,7 +304,8 @@ describe('scoped Reports UI', () => {
   it('charts only returned months on the temporal axis', async () => {
     const user = userEvent.setup()
     render(<ReportsPage />)
-    await screen.findByText('Complete')
+    await screen.findAllByText('Complete')
+    openFilters()
     await user.selectOptions(screen.getByLabelText('Group by'), 'month')
     const table = await screen.findByRole('table', {
       name: 'Complete groups for the active measure',
@@ -303,5 +322,9 @@ describe('scoped Reports UI', () => {
     expect(esAnalytics.reportHero.chartLabel.length).toBeGreaterThan(0)
     expect(esAnalytics.reportHero.separateSourcesHelp).not.toMatch(/No combined total/)
     expect(esAnalytics.reportHero.noChart).not.toMatch(/\$0/)
+    expect(enAnalytics.reportHero.filters).toBe('Filters')
+    expect(esAnalytics.reportHero.filters).toBe('Filtros')
+    expect(esAnalytics.reportHero.details.length).toBeGreaterThan(0)
+    expect(esAnalytics.reportHero.scopeCount_other).toContain('{{count}}')
   })
 })

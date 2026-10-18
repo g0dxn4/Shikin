@@ -32,9 +32,28 @@ export const ACCOUNT_COLOR_SWATCHES = [
   { value: '#8a6a3b', key: 'sand' },
 ] as const
 
+export const ACCOUNT_RAIL_WIDTH_PX = 3
+
 export function accountAccentColor(color: string | null | undefined): string {
   const value = color?.trim()
   return value ? value : 'var(--color-accent)'
+}
+
+/** Persisted account color only. Never invents a type color. */
+export function accountRailColor(color: string | null | undefined): string | null {
+  const value = color?.trim()
+  return value ? value : null
+}
+
+export function accountIconAccentStyle(
+  color: string | null | undefined
+): CSSProperties | undefined {
+  const value = accountRailColor(color)
+  if (!value) return undefined
+  return {
+    backgroundColor: `color-mix(in srgb, ${value} 16%, var(--color-surface))`,
+    color: value,
+  }
 }
 
 export function accountCardSurfaceStyle(

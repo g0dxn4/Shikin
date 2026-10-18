@@ -7,6 +7,7 @@ import {
   Suspense,
   useCallback,
   type FormEvent,
+  type ReactNode,
 } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -40,11 +41,20 @@ import {
 } from '@/components/ui/select'
 import { MetricItem, MetricStrip, NativePanel, PageToolbar } from '@/components/ui/native-layout'
 import { AccountMaintenanceDialog } from '@/components/accounts/account-maintenance-dialog'
-import { CardStatementsDialog } from '@/components/accounts/card-statements-dialog'
+import { AccountSparkline } from '@/components/accounts/account-sparkline'
+import { buildLiquidComposition } from '@/components/accounts/account-composition'
 import {
+  canDrawHistory,
+  type AccountHistoryPoint,
+} from '@/components/accounts/account-history-batch'
+import { CardStatementsDialog } from '@/components/accounts/card-statements-dialog'
+import { LiquidCompositionPanel } from '@/components/accounts/liquid-composition-panel'
+import { useAccountHistoryBatch } from '@/components/accounts/use-account-history-batch'
+import {
+  ACCOUNT_RAIL_WIDTH_PX,
   ACCOUNT_TYPE_ICONS,
-  accountAccentColor,
-  accountCardSurfaceStyle,
+  accountIconAccentStyle,
+  accountRailColor,
 } from '@/components/accounts/account-visuals'
 import { useUIStore } from '@/stores/ui-store'
 import { useAccountStore } from '@/stores/account-store'
@@ -256,13 +266,6 @@ export function Accounts() {
     mainCurrency,
     manualRates,
   ])
-  const primaryAccount = useMemo(
-    () =>
-      depositAccounts.find((account) => account.is_primary === 1) ??
-      [...depositAccounts].sort((a, b) => b.balance - a.balance)[0] ??
-      liquidAccounts[0],
-    [depositAccounts, liquidAccounts]
-  )
   const paymentSourceAccounts = useMemo(() => {
     if (!paymentCard) return []
     return depositAccounts.filter(
@@ -274,25 +277,59 @@ export function Accounts() {
     [paymentSourceAccounts, paymentSourceId]
   )
 
-  const mixItems = useMemo(
-    () => [
-      { key: 'checking' as const, label: t('mix.checking'), total: pageTotals.mix.checking },
-      { key: 'savings' as const, label: t('mix.savings'), total: pageTotals.mix.savings },
-      { key: 'credit' as const, label: t('mix.credit'), total: pageTotals.mix.credit },
-    ],
-    [pageTotals.mix.checking, pageTotals.mix.credit, pageTotals.mix.savings, t]
+  const composition = useMemo(
+    () =>
+      buildLiquidComposition({
+        accounts: liquidAccounts.map((account) => ({
+          id: account.id,
+          type: account.type,
+          currency: account.currency,
+          balance: account.balance,
+        })),
+        convertToPreferred,
+        authorityNet: pageTotals.net,
+        groupedNet: pageTotals.groupedNet,
+      }),
+    [convertToPreferred, liquidAccounts, pageTotals.groupedNet, pageTotals.net]
   )
-  const mixMax =
-    pageTotals.mix.checking.complete &&
-    pageTotals.mix.savings.complete &&
-    pageTotals.mix.credit.complete
-      ? Math.max(
-          1,
-          pageTotals.mix.checking.amountCentavos +
-            pageTotals.mix.savings.amountCentavos +
-            pageTotals.mix.credit.amountCentavos
-        )
-      : null
+  const historyAccountIds = useMemo(() => {
+    const ids = liquidAccounts.map((account) => account.id)
+    if (showArchived) ids.push(...archivedLiquidAccounts.map((account) => account.id))
+    if (showInvestments) {
+      ids.push(
+        ...investmentLikeAccounts.map((account) => account.id),
+        ...archivedInvestmentLikeAccounts.map((account) => account.id)
+      )
+    }
+    return ids
+  }, [
+    archivedInvestmentLikeAccounts,
+    archivedLiquidAccounts,
+    investmentLikeAccounts,
+    liquidAccounts,
+    showArchived,
+    showInvestments,
+  ])
+  const historyRefreshKey = useMemo(
+    () =>
+      [
+        ...liquidAccounts,
+        ...(showArchived ? archivedLiquidAccounts : []),
+        ...(showInvestments ? investmentLikeAccounts : []),
+        ...(showInvestments ? archivedInvestmentLikeAccounts : []),
+      ]
+        .map((account) => `${account.id}:${account.balance}`)
+        .join('|'),
+    [
+      archivedInvestmentLikeAccounts,
+      archivedLiquidAccounts,
+      investmentLikeAccounts,
+      liquidAccounts,
+      showArchived,
+      showInvestments,
+    ]
+  )
+  const historyBatch = useAccountHistoryBatch(historyAccountIds, historyRefreshKey)
 
   const handleDelete = async () => {
     if (!deleteId) return
@@ -462,7 +499,7 @@ export function Accounts() {
       ) : accounts.length === 0 && archivedAccounts.length === 0 ? (
         <NativePanel className="flex flex-col items-center justify-center px-6 py-16 text-center">
           <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-xl">
-            <Landmark size={28} className="text-primary" />
+            <Landmark size={28} className="text-accent" />
           </div>
           <h2 className="mb-2 text-lg font-semibold">{t('empty.title')}</h2>
           <p className="text-muted-foreground mb-4 max-w-sm text-sm">{t('empty.description')}</p>
@@ -507,14 +544,22 @@ export function Accounts() {
                   value={formatConverted(pageTotals.net)}
                   detail={
                     pageTotals.net.complete
-                      ? pageTotals.net.preferredCurrency
+                      ? t('metrics.netDetail', {
+                          currency: pageTotals.net.preferredCurrency,
+                        })
                       : t('currency.unavailable')
                   }
                 />
                 <MetricItem
                   label={t('metrics.assets')}
                   value={formatConverted(pageTotals.assets)}
-                  detail={primaryAccount?.name}
+                  detail={
+                    pageTotals.assets.complete
+                      ? t('metrics.assetsDetail', {
+                          currency: pageTotals.assets.preferredCurrency,
+                        })
+                      : t('currency.unavailable')
+                  }
                 />
                 <MetricItem
                   label={t('metrics.liabilities')}
@@ -528,19 +573,13 @@ export function Accounts() {
                 />
               </MetricStrip>
 
-              <div className="flex flex-col gap-3">
-                <NativePanel className="p-0">
-                  <div className="border-border flex flex-col gap-1 border-b px-5 py-4 sm:flex-row sm:items-end sm:justify-between">
-                    <div>
-                      <h2 className="text-base font-semibold">{t('list.title')}</h2>
-                      <p className="text-muted-foreground text-sm">{t('list.subtitle')}</p>
-                    </div>
-                    <p className="text-muted-foreground text-xs tabular-nums">
-                      {t('metrics.active', { count: liquidAccounts.length })}
-                    </p>
-                  </div>
+              <div className="flex min-w-0 flex-col gap-3">
+                <section className="min-w-0" aria-labelledby="accounts-collection-heading">
+                  <h2 id="accounts-collection-heading" className="sr-only">
+                    {t('list.title')}
+                  </h2>
                   {liquidAccounts.length > 0 ? (
-                    <div className="grid grid-cols-1 items-start gap-3 p-4 sm:px-5 sm:pb-5 xl:grid-cols-2">
+                    <div className="grid min-w-0 grid-cols-1 items-stretch gap-3 xl:grid-cols-2">
                       {liquidAccounts.map((account) => (
                         <AccountCard
                           key={account.id}
@@ -558,72 +597,22 @@ export function Accounts() {
                           }
                           onArchive={() => setArchiveId(account.id)}
                           onDelete={() => setDeleteId(account.id)}
+                          historyPoints={historyBatch.series.get(account.id)}
+                          historyStatus={historyBatch.status}
                           t={t}
                         />
                       ))}
                     </div>
                   ) : (
-                    <div className="px-5 py-6">
+                    <div className="px-1 py-2">
                       <h3 className="text-sm font-semibold">{t('list.empty')}</h3>
                       <p className="text-muted-foreground mt-1 text-sm">
                         {t('list.emptyDescription')}
                       </p>
                     </div>
                   )}
-                </NativePanel>
-
-                <NativePanel className="p-4 sm:px-5 sm:py-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h2 className="text-base font-semibold">{t('mix.title')}</h2>
-                      <p className="text-muted-foreground mt-1 text-sm">{t('mix.subtitle')}</p>
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:text-right">
-                      <div>
-                        <p className="text-muted-foreground text-xs">{t('mix.spendable')}</p>
-                        <p className="mt-0.5 text-sm font-semibold tabular-nums">
-                          {formatConverted(pageTotals.assets)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground text-xs">{t('mix.cardDebt')}</p>
-                        <p className="text-warning mt-0.5 text-sm font-semibold tabular-nums">
-                          {formatConverted(pageTotals.liabilities)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    {mixItems.map((item) => (
-                      <div key={item.key}>
-                        <div className="mb-2 flex items-center justify-between gap-4">
-                          <span className="text-sm font-medium">{item.label}</span>
-                          <span className="text-sm font-semibold tabular-nums">
-                            {formatConverted(item.total)}
-                          </span>
-                        </div>
-                        <div className="bg-muted h-2 overflow-hidden rounded-full">
-                          <div
-                            className="bg-accent h-full rounded-full"
-                            style={{
-                              width: `${
-                                mixMax && item.total.complete
-                                  ? Math.max(
-                                      item.total.amountCentavos > 0 ? 8 : 0,
-                                      Math.min(
-                                        100,
-                                        Math.round((item.total.amountCentavos / mixMax) * 100)
-                                      )
-                                    )
-                                  : 0
-                              }%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </NativePanel>
+                </section>
+                <LiquidCompositionPanel model={composition} t={t} />
               </div>
             </>
           ) : (
@@ -662,7 +651,7 @@ export function Accounts() {
               {showInvestments ? (
                 <div className="space-y-3">
                   {investmentLikeAccounts.length > 0 ? (
-                    <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-2">
+                    <div className="grid min-w-0 grid-cols-1 items-stretch gap-3 xl:grid-cols-2">
                       {investmentLikeAccounts.map((account) => (
                         <AccountCard
                           key={account.id}
@@ -675,6 +664,8 @@ export function Accounts() {
                           isSettingPrimary={settingPrimaryId === account.id}
                           onArchive={() => setArchiveId(account.id)}
                           onDelete={() => setDeleteId(account.id)}
+                          historyPoints={historyBatch.series.get(account.id)}
+                          historyStatus={historyBatch.status}
                           t={t}
                         />
                       ))}
@@ -683,7 +674,7 @@ export function Accounts() {
                   {archivedInvestmentLikeAccounts.length > 0 ? (
                     <div className="space-y-2">
                       <h3 className="text-sm font-semibold">{t('list.investmentsArchived')}</h3>
-                      <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-2">
+                      <div className="grid min-w-0 grid-cols-1 items-stretch gap-3 xl:grid-cols-2">
                         {archivedInvestmentLikeAccounts.map((account) => (
                           <AccountCard
                             key={account.id}
@@ -698,6 +689,8 @@ export function Accounts() {
                             onDelete={() => setDeleteId(account.id)}
                             archiveLabel={t('unarchiveAccount')}
                             archived
+                            historyPoints={historyBatch.series.get(account.id)}
+                            historyStatus={historyBatch.status}
                             t={t}
                           />
                         ))}
@@ -730,7 +723,7 @@ export function Accounts() {
                 </Button>
               </div>
               {showArchived && (
-                <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-2">
+                <div className="grid min-w-0 grid-cols-1 items-stretch gap-3 xl:grid-cols-2">
                   {archivedLiquidAccounts.map((account) => (
                     <AccountCard
                       key={account.id}
@@ -745,6 +738,8 @@ export function Accounts() {
                       onDelete={() => setDeleteId(account.id)}
                       archiveLabel={t('unarchiveAccount')}
                       archived
+                      historyPoints={historyBatch.series.get(account.id)}
+                      historyStatus={historyBatch.status}
                       t={t}
                     />
                   ))}
@@ -860,6 +855,14 @@ export function Accounts() {
   )
 }
 
+const EMPTY_HISTORY: readonly AccountHistoryPoint[] = []
+
+function utilizationTone(utilization: number): 'destructive' | 'warning' | 'success' {
+  if (utilization > 75) return 'destructive'
+  if (utilization > 50) return 'warning'
+  return 'success'
+}
+
 function AccountCard({
   account,
   linked = false,
@@ -873,6 +876,8 @@ function AccountCard({
   onDelete,
   archiveLabel,
   archived = false,
+  historyPoints,
+  historyStatus,
   t,
 }: {
   account: Account
@@ -887,22 +892,22 @@ function AccountCard({
   onDelete: () => void
   archiveLabel?: string
   archived?: boolean
+  historyPoints?: readonly AccountHistoryPoint[]
+  historyStatus: 'loading' | 'ready' | 'error'
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   t: any
 }) {
   const navigate = useNavigate()
   const { t: tHistory } = useTranslation('accountHistory')
   const { t: tStatements } = useTranslation('cardPayments')
-  const { loadBalanceHistory, balanceHistory } = useAccountStore()
   const refreshAccounts = useAccountStore((state) => state.fetch)
   const [maintenanceOpen, setMaintenanceOpen] = useState(false)
   const [statementsOpen, setStatementsOpen] = useState(false)
   const [showCreditDetails, setShowCreditDetails] = useState(false)
-  const [historyLoading, setHistoryLoading] = useState(
-    isExpanded && !balanceHistory.get(account.id)
-  )
 
-  const accentColor = accountAccentColor(account.color)
+  const railColor = accountRailColor(account.color)
+  const seriesColor = railColor ?? 'var(--color-chart-1)'
+  const iconStyle = accountIconAccentStyle(account.color)
   const TypeIcon = ACCOUNT_TYPE_ICONS[account.type] ?? Landmark
   const isCreditCard = account.type === 'credit_card'
   const canSetPrimary =
@@ -914,23 +919,18 @@ function AccountCard({
     creditLimit !== null
       ? Math.min(100, Math.round((Math.abs(account.balance) / creditLimit) * 100))
       : null
+  const utilizationColor = utilization === null ? 'success' : utilizationTone(utilization)
 
-  const history = balanceHistory.get(account.id)
-
-  useEffect(() => {
-    if (!isExpanded || history) return
-    loadBalanceHistory(account.id, 6)
-      .catch(() => {})
-      .finally(() => setHistoryLoading(false))
-  }, [isExpanded, history, account.id, loadBalanceHistory])
+  const points = historyPoints ?? EMPTY_HISTORY
+  const showLine = canDrawHistory(points)
 
   const chartData = useMemo(() => {
-    if (!history || history.length === 0) return []
-    return history.map((p) => ({
+    if (points.length === 0) return []
+    return points.map((p) => ({
       date: p.date,
       balance: fromCentavos(p.balance),
     }))
-  }, [history])
+  }, [points])
 
   const nameId = `account-${account.id}-name`
   const locatedId = `account-${account.id}-located`
@@ -979,6 +979,60 @@ function AccountCard({
     }
   )
 
+  let visualSlot: ReactNode
+  if (historyStatus === 'error' && !showLine) {
+    visualSlot = (
+      <p className="account-visual-slot text-muted-foreground mt-auto flex h-12 min-w-0 items-center text-xs">
+        {t('history.slotUnavailable')}
+      </p>
+    )
+  } else if (historyStatus === 'loading' && !showLine) {
+    visualSlot = (
+      <div
+        className="account-visual-slot bg-muted/50 mt-auto h-12 min-w-0 rounded-md"
+        aria-hidden="true"
+      />
+    )
+  } else if (showLine) {
+    visualSlot = (
+      <AccountSparkline
+        points={points}
+        color={seriesColor}
+        currency={account.currency}
+        label={`${t('history.sparkline')} ${account.name}`}
+      />
+    )
+  } else if (isCreditCard && creditLimit !== null && utilization !== null) {
+    visualSlot = (
+      <div className="account-visual-slot mt-auto flex h-12 min-w-0 items-center gap-3">
+        <ProgressBar
+          value={utilization}
+          size="sm"
+          color={utilizationColor}
+          ariaLabel={t('utilization.label')}
+          className="min-w-0 flex-1"
+        />
+        <span
+          className={`shrink-0 text-xs font-medium tabular-nums ${
+            utilizationColor === 'destructive'
+              ? 'text-destructive'
+              : utilizationColor === 'warning'
+                ? 'text-warning'
+                : 'text-success'
+          }`}
+        >
+          {utilization}%
+        </span>
+      </div>
+    )
+  } else {
+    visualSlot = (
+      <p className="account-visual-slot text-muted-foreground mt-auto flex h-12 min-w-0 items-center text-xs">
+        {t('history.slotEmpty')}
+      </p>
+    )
+  }
+
   return (
     <article
       id={`account-${account.id}`}
@@ -986,21 +1040,25 @@ function AccountCard({
       aria-labelledby={nameId}
       aria-describedby={linked ? locatedId : undefined}
       aria-current={linked ? 'true' : undefined}
-      className={`group border-border focus-visible:ring-ring relative min-w-0 rounded-[var(--radius-xl)] border px-4 py-4 outline-none focus-visible:ring-2 sm:px-5 ${archived && !account.color?.trim() ? 'bg-muted/30' : 'bg-surface'} ${linked ? 'ring-ring ring-2' : ''}`}
-      style={accountCardSurfaceStyle(account.color, archived)}
+      className={`group border-border bg-surface focus-visible:ring-ring relative flex h-full min-w-0 flex-col rounded-[var(--radius-xl)] border px-4 py-4 outline-none focus-visible:ring-2 sm:px-5 ${linked ? 'ring-ring ring-2' : ''}`}
     >
+      {railColor ? (
+        <span
+          data-account-rail=""
+          aria-hidden="true"
+          className="absolute inset-y-0 left-0 w-[3px]"
+          style={{ width: ACCOUNT_RAIL_WIDTH_PX, backgroundColor: railColor }}
+        />
+      ) : null}
       {linked ? (
         <span id={locatedId} className="sr-only">
           {t('link.located')}
         </span>
       ) : null}
-      <div className="flex items-start gap-3">
+      <div className="flex min-w-0 items-start gap-3">
         <div
-          className="account-type-mark mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
-          style={{
-            backgroundColor: `color-mix(in srgb, ${accentColor} 18%, var(--color-surface))`,
-            color: accentColor,
-          }}
+          className={`account-type-mark mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${iconStyle ? '' : 'bg-accent-muted text-accent'}`}
+          style={iconStyle}
           aria-hidden="true"
         >
           <TypeIcon size={18} />
@@ -1040,7 +1098,7 @@ function AccountCard({
             />
           </div>
           <div className="mt-3 flex min-w-0 flex-wrap items-baseline gap-x-1.5">
-            <p className="text-foreground max-w-full min-w-0 shrink-0 text-xl font-semibold tracking-tight break-words tabular-nums min-[380px]:text-2xl">
+            <p className="text-foreground max-w-full min-w-0 shrink-0 text-xl font-medium tracking-tight break-words tabular-nums min-[380px]:text-2xl">
               {formatMoney(account.balance, account.currency)}
             </p>
             <p className="text-muted-foreground shrink-0 text-xs tabular-nums">
@@ -1050,24 +1108,27 @@ function AccountCard({
         </div>
       </div>
 
-      {isCreditCard && creditLimit !== null && (
-        <div className="mt-4 grid min-w-0 grid-cols-2 gap-x-4 gap-y-1">
-          <div className="min-w-0">
-            <p className="text-muted-foreground text-xs">{t('credit.limit')}</p>
-            <p className="text-foreground mt-1 max-w-full min-w-0 text-sm font-semibold break-words tabular-nums">
-              {formatMoney(creditLimit, account.currency)}
-            </p>
+      <div className="mt-auto flex min-w-0 flex-col pt-3">
+        {isCreditCard && creditLimit !== null && (
+          <div className="mb-3 grid min-w-0 grid-cols-2 gap-x-4 gap-y-1">
+            <div className="min-w-0">
+              <p className="text-muted-foreground text-xs">{t('credit.limit')}</p>
+              <p className="text-foreground mt-1 max-w-full min-w-0 text-sm font-medium break-words tabular-nums">
+                {formatMoney(creditLimit, account.currency)}
+              </p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-muted-foreground text-xs">{t('credit.available')}</p>
+              <p
+                className={`mt-1 max-w-full min-w-0 text-sm font-medium break-words tabular-nums ${availableCredit !== null && availableCredit < 0 ? 'text-destructive' : 'text-success'}`}
+              >
+                {formatMoney(availableCredit ?? 0, account.currency)}
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <p className="text-muted-foreground text-xs">{t('credit.available')}</p>
-            <p
-              className={`mt-1 max-w-full min-w-0 text-sm font-semibold break-words tabular-nums ${availableCredit !== null && availableCredit < 0 ? 'text-destructive' : 'text-success'}`}
-            >
-              {formatMoney(availableCredit ?? 0, account.currency)}
-            </p>
-          </div>
-        </div>
-      )}
+        )}
+        {visualSlot}
+      </div>
 
       {showCreditDetails && isCreditCard && creditLimit !== null && (
         <div className="mt-3 min-w-0">
@@ -1086,9 +1147,9 @@ function AccountCard({
             <span className="flex items-center gap-1.5">
               <span
                 className={`text-xs font-medium tabular-nums ${
-                  utilization > 75
+                  utilizationColor === 'destructive'
                     ? 'text-destructive'
-                    : utilization > 50
+                    : utilizationColor === 'warning'
                       ? 'text-warning'
                       : 'text-success'
                 }`}
@@ -1097,9 +1158,9 @@ function AccountCard({
               </span>
               <span
                 className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${
-                  utilization > 75
+                  utilizationColor === 'destructive'
                     ? 'bg-destructive/10 text-destructive'
-                    : utilization > 50
+                    : utilizationColor === 'warning'
                       ? 'bg-warning/10 text-warning'
                       : 'bg-success/10 text-success'
                 }`}
@@ -1115,24 +1176,28 @@ function AccountCard({
           <ProgressBar
             value={utilization}
             size="sm"
-            color={utilization > 75 ? 'destructive' : utilization > 50 ? 'warning' : 'success'}
+            color={utilizationColor}
             ariaLabel={t('utilization.label')}
           />
         </div>
       )}
 
       {isExpanded && (
-        <div className="border-border mt-3 border-t pt-3 pb-1">
-          {historyLoading ? (
+        <div className="border-border mt-3 min-w-0 border-t pt-3 pb-1">
+          {historyStatus === 'loading' && points.length === 0 ? (
             <Skeleton className="h-32 w-full" />
+          ) : historyStatus === 'error' && points.length < 2 ? (
+            <div className="flex h-32 items-center justify-center">
+              <p className="text-muted-foreground text-xs">{t('history.slotUnavailable')}</p>
+            </div>
           ) : chartData.length > 1 ? (
             <div
-              className="h-32"
+              className="h-32 min-w-0"
               role="img"
               aria-label={`${t('history.show')} for ${account.name}`}
             >
               <span className="sr-only">
-                {(history ?? [])
+                {points
                   .map(
                     (p) =>
                       `${dayjs(p.date).format('MMM D')}: ${formatMoney(p.balance, account.currency)}`
@@ -1143,8 +1208,8 @@ function AccountCard({
                 <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id={`grad-${account.id}`} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={accentColor} stopOpacity={0.28} />
-                      <stop offset="95%" stopColor={accentColor} stopOpacity={0} />
+                      <stop offset="5%" stopColor={seriesColor} stopOpacity={0.28} />
+                      <stop offset="95%" stopColor={seriesColor} stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <XAxis
@@ -1170,10 +1235,10 @@ function AccountCard({
                     ]}
                   />
                   <Area
-                    type="monotone"
+                    type="linear"
                     dataKey="balance"
                     isAnimationActive={false}
-                    stroke={accentColor}
+                    stroke={seriesColor}
                     strokeWidth={2}
                     fill={`url(#grad-${account.id})`}
                   />
@@ -1219,23 +1284,17 @@ function AccountsSkeleton() {
           </div>
         ))}
       </div>
-      <div className="flex flex-col gap-3">
-        <NativePanel className="space-y-3 p-5">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="space-y-2">
-              <Skeleton className="h-4 w-28" />
-              <Skeleton className="h-8 w-32" />
-            </div>
-          ))}
-        </NativePanel>
-        <NativePanel className="space-y-3 p-4 sm:px-5 sm:py-4">
-          <Skeleton className="h-4 w-32" />
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
+      <div className="grid grid-cols-1 gap-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div
+            key={i}
+            className="border-border bg-surface space-y-3 rounded-[var(--radius-xl)] border p-4"
+          >
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-8 w-36" />
+            <Skeleton className="account-visual-slot h-12 w-full" />
           </div>
-        </NativePanel>
+        ))}
       </div>
     </>
   )

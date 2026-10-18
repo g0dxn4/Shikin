@@ -81,7 +81,10 @@
     "show": "Show balance history",
     "hide": "Hide balance history",
     "empty": "First snapshot recorded. Come back tomorrow for trend data.",
-    "none": "No history yet. Balance is recorded daily."
+    "none": "No history yet. Balance is recorded daily.",
+    "slotEmpty": "No recorded history",
+    "slotUnavailable": "History unavailable",
+    "sparkline": "Recorded balance"
   },
   "utilization": {
     "label": "Utilization",
@@ -115,20 +118,37 @@
   },
   "viewTransactions": "View transactions",
   "metrics": {
-    "net": "All accounts",
+    "net": "Bank and cards",
     "assets": "Assets",
     "liabilities": "Liabilities",
     "count": "Accounts",
-    "active": "{{count}} active"
+    "active": "{{count}} active",
+    "netDetail": "{{currency}} · excludes investments",
+    "assetsDetail": "Cash and bank balances · {{currency}}"
   },
   "mix": {
-    "title": "Asset and liability mix",
-    "subtitle": "Composition in your preferred currency",
+    "title": "Bank and card composition",
+    "subtitle": "Positive balances minus debt. Not total wealth.",
+    "scope": "Checking, savings, cash, other, and cards only. Investments are excluded; this is not total wealth.",
     "checking": "Checking",
     "savings": "Savings",
     "credit": "Credit cards",
-    "spendable": "Spendable",
-    "cardDebt": "Card debt"
+    "spendable": "Positive balances",
+    "cardDebt": "Card debt",
+    "debt": "Debt",
+    "otherDebt": "Other debt",
+    "net": "Net bank and cards",
+    "stackLabel": "Positive bank and card balances",
+    "unreconciled": "Composition can’t be drawn because the converted parts do not reconcile to the bank and card net.",
+    "groupedCaption": "Shown by currency. No converted mix while rates are incomplete.",
+    "emptyStack": "No positive bank or card balances to chart.",
+    "segments": {
+      "checking": "Checking",
+      "savings": "Savings",
+      "cash": "Cash",
+      "other": "Other",
+      "creditPositive": "Positive card balance"
+    }
   },
   "list": {
     "title": "Accounts",

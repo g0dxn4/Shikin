@@ -81,7 +81,10 @@
     "show": "Mostrar historial de balance",
     "hide": "Ocultar historial de balance",
     "empty": "Primera instantánea registrada. Vuelve mañana para ver tendencias.",
-    "none": "Sin historial aún. El balance se registra diariamente."
+    "none": "Sin historial aún. El balance se registra diariamente.",
+    "slotEmpty": "Sin historial registrado",
+    "slotUnavailable": "Historial no disponible",
+    "sparkline": "Saldo registrado"
   },
   "utilization": {
     "label": "Utilización",
@@ -115,20 +118,37 @@
   },
   "viewTransactions": "Ver transacciones",
   "metrics": {
-    "net": "Todas las cuentas",
+    "net": "Bancos y tarjetas",
     "assets": "Activos",
     "liabilities": "Pasivos",
     "count": "Cuentas",
-    "active": "{{count}} activas"
+    "active": "{{count}} activas",
+    "netDetail": "{{currency}} · excluye inversiones",
+    "assetsDetail": "Efectivo y bancos · {{currency}}"
   },
   "mix": {
-    "title": "Mezcla de activos y pasivos",
-    "subtitle": "Composición en tu moneda preferida",
+    "title": "Composición de bancos y tarjetas",
+    "subtitle": "Saldos positivos menos deuda. No es el patrimonio total.",
+    "scope": "Solo corriente, ahorros, efectivo, otras y tarjetas. Las inversiones quedan fuera; esto no es el patrimonio total.",
     "checking": "Corriente",
     "savings": "Ahorros",
     "credit": "Tarjetas de crédito",
-    "spendable": "Disponible",
-    "cardDebt": "Deuda de tarjetas"
+    "spendable": "Saldos positivos",
+    "cardDebt": "Deuda de tarjetas",
+    "debt": "Deuda",
+    "otherDebt": "Otra deuda",
+    "net": "Neto de bancos y tarjetas",
+    "stackLabel": "Saldos positivos de bancos y tarjetas",
+    "unreconciled": "No se puede dibujar la composición porque las partes convertidas no concilian con el neto de bancos y tarjetas.",
+    "groupedCaption": "Se muestra por moneda. No hay mezcla convertida mientras falten tipos de cambio.",
+    "emptyStack": "No hay saldos positivos de bancos o tarjetas para graficar.",
+    "segments": {
+      "checking": "Corriente",
+      "savings": "Ahorros",
+      "cash": "Efectivo",
+      "other": "Otro",
+      "creditPositive": "Saldo a favor en tarjeta"
+    }
   },
   "list": {
     "title": "Cuentas",

@@ -141,6 +141,11 @@ const mockUnarchive = vi.fn()
 const mockSetPrimary = vi.fn()
 const mockOpenAccountDialog = vi.fn()
 const mockAddTransaction = vi.fn()
+const mockQuery = vi.hoisted(() => vi.fn())
+
+vi.mock('@/lib/database', () => ({
+  query: (sql: string, params?: unknown[]) => mockQuery(sql, params),
+}))
 
 let mockAccounts: unknown[] = []
 let mockArchivedAccounts: unknown[] = []
@@ -207,6 +212,8 @@ describe('Accounts', () => {
     mockBalanceHistory = new Map()
     mockLoadBalanceHistory.mockReset()
     mockLoadBalanceHistory.mockResolvedValue([])
+    mockQuery.mockReset()
+    mockQuery.mockResolvedValue([])
     useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
   })
 
@@ -280,7 +287,14 @@ describe('Accounts', () => {
     const checking = screen.getByRole('article', { name: 'Checking' })
     const savings = screen.getByRole('article', { name: 'Savings' })
     expect(checking.parentElement).toBe(savings.parentElement)
-    expect(checking.parentElement).toHaveClass('grid-cols-1', 'items-start', 'xl:grid-cols-2')
+    expect(checking.parentElement).toHaveClass(
+      'grid-cols-1',
+      'items-stretch',
+      'min-w-0',
+      'xl:grid-cols-2'
+    )
+    expect(checking).toHaveClass('h-full', 'min-w-0')
+    expect(checking.closest('.native-panel')).toBeNull()
     expect(screen.getAllByText('$2,500.00').length).toBeGreaterThan(0)
     const checkingBalance = within(checking).getByText('$2,500.00')
     const checkingCurrency = within(checking).getByText('USD')
@@ -328,16 +342,23 @@ describe('Accounts', () => {
     renderAccounts()
 
     const checking = screen.getByRole('article', { name: 'Everyday Checking' })
-    expect(checking.getAttribute('style')).toContain('#3d6ea8')
-    expect(checking.getAttribute('style')).toContain('color-mix')
-    expect(checking.querySelector('.account-type-mark')).toBeInTheDocument()
+    const rail = checking.querySelector('[data-account-rail]')
+    expect(rail).toHaveClass('w-[3px]')
+    expect(rail).toHaveStyle({ width: '3px', backgroundColor: '#3d6ea8' })
+    expect(checking.getAttribute('style') ?? '').not.toContain('color-mix')
+    expect(checking.getAttribute('style') ?? '').not.toContain('background')
+    expect(checking.querySelector('.account-type-mark')?.getAttribute('style')).toContain('#3d6ea8')
     expect(within(checking).getByRole('heading', { level: 3 })).toHaveClass('break-words')
     expect(within(checking).getByText('$2,500.00')).toHaveClass('break-words')
     expect(checking).not.toHaveTextContent(/\*\*\*\*|••••|1234/)
+    expect(checking.querySelector('.account-visual-slot')).toHaveClass('h-12', 'min-w-0')
 
     const savings = screen.getByRole('article', { name: 'Emergency Savings' })
-    expect(savings.querySelector('.account-type-mark')).toBeInTheDocument()
-    expect(savings.getAttribute('style') ?? '').not.toContain('color-mix')
+    expect(savings.querySelector('.account-type-mark')).toHaveClass('text-accent')
+    expect(savings.querySelector('[data-account-rail]')).toBeNull()
+    expect(savings.querySelector('.account-type-mark')?.getAttribute('style') ?? '').not.toContain(
+      'color-mix'
+    )
   })
 
   it('renders accounts on native panels without a promotional page header', () => {
@@ -359,16 +380,17 @@ describe('Accounts', () => {
     renderAccounts()
     const listHeading = screen.getByRole('heading', { name: 'list.title' })
     const mixHeading = screen.getByRole('heading', { name: 'mix.title' })
+    const checking = screen.getByRole('article', { name: 'Checking' })
 
-    expect(listHeading.closest('.native-panel')?.parentElement).toHaveClass('flex-col')
-    expect(screen.getByRole('article', { name: 'Checking' }).parentElement).toHaveClass(
-      'grid-cols-1',
-      'items-start',
-      'xl:grid-cols-2'
-    )
+    expect(listHeading).toHaveClass('sr-only')
+    expect(listHeading.closest('.native-panel')).toBeNull()
+    expect(checking.closest('.native-panel')).toBeNull()
+    expect(checking.parentElement).toHaveClass('grid-cols-1', 'items-stretch', 'xl:grid-cols-2')
+    expect(mixHeading.closest('.native-panel')).toBeTruthy()
     expect(
-      listHeading.compareDocumentPosition(mixHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+      checking.compareDocumentPosition(mixHeading) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
+    expect(screen.getByText('mix.scope')).toBeInTheDocument()
     expect(screen.getByText('mix.spendable')).toBeInTheDocument()
     expect(screen.getByText('mix.cardDebt')).toBeInTheDocument()
     // The mobile-safe action trigger remains a full-size labelled target.
@@ -799,7 +821,7 @@ describe('Accounts', () => {
     expect(
       within(archivedCard).queryByRole('button', { name: 'actions.setPrimary' })
     ).not.toBeInTheDocument()
-    expect(archivedCard.parentElement).toHaveClass('grid-cols-1', 'items-start', 'xl:grid-cols-2')
+    expect(archivedCard.parentElement).toHaveClass('grid-cols-1', 'items-stretch', 'xl:grid-cols-2')
   })
 
   it('shows archived accounts when there are no active accounts', () => {
@@ -890,7 +912,7 @@ describe('Accounts', () => {
     expect(screen.getByText('currency.missingRates')).toBeInTheDocument()
     expect(screen.queryByText('$3,500.00')).not.toBeInTheDocument()
     expect(screen.getAllByText('$2,500.00').length).toBeGreaterThan(0)
-    expect(screen.getByText('EUR')).toBeInTheDocument()
+    expect(screen.getAllByText('EUR').length).toBeGreaterThan(0)
   })
 
   it('navigates from the disclosure to the encoded account ledger filter', async () => {
@@ -930,7 +952,7 @@ describe('Accounts', () => {
     )
     await user.click(within(checking).getByRole('button', { name: 'history.show' }))
     expect(more).toHaveFocus()
-    expect(within(checking).getByText('history.none')).toBeInTheDocument()
+    expect(await within(checking).findByText('history.none')).toBeInTheDocument()
     await user.click(more)
     expect(within(checking).getByRole('button', { name: 'history.hide' })).toHaveAttribute(
       'aria-expanded',
@@ -938,7 +960,17 @@ describe('Accounts', () => {
     )
     await user.click(within(checking).getByRole('button', { name: 'history.hide' }))
     expect(within(checking).queryByText('history.none')).not.toBeInTheDocument()
-    expect(mockLoadBalanceHistory).toHaveBeenCalledWith('acc-1', 6)
+    expect(mockLoadBalanceHistory).not.toHaveBeenCalled()
+    await waitFor(() => expect(mockQuery).toHaveBeenCalled())
+    const sql = String(mockQuery.mock.calls[0][0])
+    expect(sql).toContain('account_balance_history')
+    expect(sql).toContain('account_id IN ($1, $2)')
+    expect(sql).toContain('date >= $3')
+    expect(sql).not.toMatch(/\b(INSERT|UPDATE|DELETE)\b/i)
+    expect(mockQuery.mock.calls[0][1]).toEqual(expect.arrayContaining(['acc-1', 'acc-card']))
+    expect(mockQuery.mock.calls.every((call) => String(call[0]).includes('account_id IN'))).toBe(
+      true
+    )
   })
 
   it('announces balance-history points in original minor units', async () => {
@@ -960,26 +992,25 @@ describe('Accounts', () => {
         credit_limit: 500000,
       },
     ]
-    mockBalanceHistory = new Map([
-      [
-        'acc-checking',
-        [
-          { date: '2026-03-23', balance: 2578212 },
-          { date: '2026-09-20', balance: 4084885 },
-        ],
-      ],
-      [
-        'acc-card',
-        [
-          { date: '2026-09-18', balance: -158277 },
-          { date: '2026-09-20', balance: -157277 },
-        ],
-      ],
+    mockQuery.mockResolvedValue([
+      { account_id: 'acc-checking', date: '2026-03-23', balance: 2578212 },
+      { account_id: 'acc-checking', date: '2026-09-20', balance: 4084885 },
+      { account_id: 'acc-card', date: '2026-09-18', balance: -158277 },
+      { account_id: 'acc-card', date: '2026-09-20', balance: -157277 },
     ])
 
     renderAccounts()
 
     const checking = screen.getByRole('article', { name: 'Everyday Checking' })
+    const checkingSpark = await within(checking).findByRole('img', {
+      name: 'history.sparkline Everyday Checking',
+    })
+    expect(checkingSpark).toHaveTextContent('Sep 20: $40,848.85')
+    expect(checkingSpark).toHaveTextContent('Mar 23: $25,782.12')
+    expect(checkingSpark).not.toHaveTextContent('$408.49')
+    expect(checkingSpark).not.toHaveTextContent('$257.82')
+    expect(checkingSpark).toHaveAttribute('data-balances', '2578212,4084885')
+
     await chooseAccountAction(user, 'Everyday Checking', 'history.show')
     const checkingChart = within(checking).getByRole('img', {
       name: 'history.show for Everyday Checking',
@@ -1048,7 +1079,7 @@ describe('Accounts', () => {
     await user.click(screen.getByRole('button', { name: /list.investmentsShow/i }))
     const brokerage = screen.getByRole('article', { name: 'Brokerage' })
     expect(brokerage).toBeInTheDocument()
-    expect(brokerage.parentElement).toHaveClass('grid-cols-1', 'items-start', 'xl:grid-cols-2')
+    expect(brokerage.parentElement).toHaveClass('grid-cols-1', 'items-stretch', 'xl:grid-cols-2')
     expect(screen.getByText('$99,900.00')).toBeInTheDocument()
     await user.click(within(brokerage).getByRole('button', { name: 'actions.more — Brokerage' }))
     expect(within(brokerage).getByRole('button', { name: 'action' })).toBeInTheDocument()
@@ -1090,7 +1121,7 @@ describe('Accounts', () => {
     expect(screen.getByText('noActive.title')).toBeInTheDocument()
     expect(screen.queryByText('archived.title')).not.toBeInTheDocument()
     const oldBrokerage = await screen.findByRole('article', { name: 'Old Brokerage' })
-    expect(oldBrokerage.parentElement).toHaveClass('grid-cols-1', 'items-start', 'xl:grid-cols-2')
+    expect(oldBrokerage.parentElement).toHaveClass('grid-cols-1', 'items-stretch', 'xl:grid-cols-2')
   })
 
   it('focuses an active cash account from the account query after load', async () => {
@@ -1174,5 +1205,137 @@ describe('Accounts', () => {
     expect(card).not.toHaveAttribute('aria-current')
     expect(card).not.toHaveFocus()
     expect(screen.queryByText('link.located')).not.toBeInTheDocument()
+  })
+
+  it('batches history for visible accounts and keeps native centavos on the sparkline', async () => {
+    mockAccounts = [
+      {
+        id: 'acc-usd',
+        name: 'Everyday Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 4084885,
+      },
+      { id: 'acc-eur', name: 'Euro Cash', type: 'cash', currency: 'EUR', balance: 5000 },
+      {
+        id: 'acc-hidden',
+        name: 'Brokerage',
+        type: 'investment',
+        currency: 'USD',
+        balance: 9_990_000,
+      },
+    ]
+    mockQuery.mockResolvedValue([
+      { account_id: 'acc-usd', date: '2026-03-23', balance: 2578212 },
+      { account_id: 'acc-usd', date: '2026-09-20', balance: 4084885 },
+      { account_id: 'acc-eur', date: '2026-01-01', balance: 100 },
+      { account_id: 'acc-eur', date: '2026-02-01', balance: 250 },
+    ])
+
+    renderAccounts()
+
+    await waitFor(() => expect(mockQuery).toHaveBeenCalled())
+    expect(mockQuery.mock.calls.length).toBeLessThan(3)
+    for (const call of mockQuery.mock.calls) {
+      expect(String(call[0])).toContain('IN ($1, $2)')
+      expect(call[1]).toEqual(expect.arrayContaining(['acc-eur', 'acc-usd']))
+      expect(call[1]).not.toContain('acc-hidden')
+      expect(String(call[0])).not.toMatch(/\b(INSERT|UPDATE|DELETE)\b/i)
+    }
+
+    const euro = screen.getByRole('article', { name: 'Euro Cash' })
+    const spark = await within(euro).findByRole('img', { name: 'history.sparkline Euro Cash' })
+    expect(spark).toHaveTextContent('€1.00')
+    expect(spark).toHaveTextContent('€2.50')
+    expect(spark).not.toHaveTextContent('$1.00')
+    expect(spark).toHaveAttribute('data-balances', '100,250')
+    expect(screen.queryByRole('article', { name: 'Brokerage' })).not.toBeInTheDocument()
+  })
+
+  it('does not draw a history line from fewer than two recorded points', async () => {
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 100 },
+      {
+        id: 'acc-card',
+        name: 'Travel Card',
+        type: 'credit_card',
+        currency: 'USD',
+        balance: -10000,
+        credit_limit: 100000,
+      },
+    ]
+    mockQuery.mockResolvedValue([{ account_id: 'acc-1', date: '2026-09-20', balance: 100 }])
+
+    renderAccounts()
+
+    const checking = screen.getByRole('article', { name: 'Checking' })
+    expect(await within(checking).findByText('history.slotEmpty')).toBeInTheDocument()
+    expect(
+      within(checking).queryByRole('img', { name: /history.sparkline/ })
+    ).not.toBeInTheDocument()
+    expect(checking.querySelector('polyline')).not.toBeInTheDocument()
+
+    const card = screen.getByRole('article', { name: 'Travel Card' })
+    expect(within(card).queryByRole('img', { name: /history.sparkline/ })).not.toBeInTheDocument()
+    expect(card.querySelector('polyline')).not.toBeInTheDocument()
+    expect(within(card).getByRole('progressbar', { name: 'utilization.label' })).toBeInTheDocument()
+    expect(within(card).queryByText('utilization.label')).not.toBeInTheDocument()
+  })
+
+  it('keeps the account list mounted when the history batch fails', async () => {
+    mockQuery.mockRejectedValue(new Error('history read failed'))
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 250000 },
+    ]
+
+    renderAccounts()
+
+    expect(screen.getByRole('article', { name: 'Checking' })).toBeInTheDocument()
+    expect(screen.getAllByText('$2,500.00').length).toBeGreaterThan(0)
+    expect(await screen.findByText('history.slotUnavailable')).toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: /history.sparkline/ })).not.toBeInTheDocument()
+  })
+
+  it('puts cash and a positive card balance in the composition without an 8% floor', () => {
+    mockAccounts = [
+      { id: 'cash', name: 'Wallet', type: 'cash', currency: 'USD', balance: 1 },
+      { id: 'checking', name: 'Checking', type: 'checking', currency: 'USD', balance: 999 },
+      {
+        id: 'card',
+        name: 'Rewards',
+        type: 'credit_card',
+        currency: 'USD',
+        balance: 50,
+      },
+    ]
+
+    renderAccounts()
+
+    expect(screen.getByText('mix.segments.cash')).toBeInTheDocument()
+    expect(screen.getByText('mix.segments.creditPositive')).toBeInTheDocument()
+    const cash = screen.getByTestId('mix-segment-cash')
+    expect(cash.getAttribute('style')).toContain(`${(1 / 1050) * 100}%`)
+    expect(cash.getAttribute('style')).not.toContain('8%')
+    expect(cash.className).not.toMatch(/min-w-/)
+    const assets = screen.getByText('metrics.assets').closest('.metric-item')
+    expect(assets).toHaveTextContent('metrics.assetsDetail')
+    expect(assets).not.toHaveTextContent('Checking')
+    expect(assets).not.toHaveTextContent('Wallet')
+  })
+
+  it('does not draw a converted composition when exchange rates are incomplete', () => {
+    mockAccounts = [
+      { id: 'acc-1', name: 'Checking', type: 'checking', currency: 'USD', balance: 250000 },
+      { id: 'acc-2', name: 'Savings', type: 'savings', currency: 'EUR', balance: 100000 },
+    ]
+
+    renderAccounts()
+
+    expect(screen.queryByTestId('mix-stack')).not.toBeInTheDocument()
+    expect(screen.getByText('mix.groupedCaption')).toBeInTheDocument()
+    expect(screen.queryByText('$3,500.00')).not.toBeInTheDocument()
+    expect(screen.queryByText('€3,500.00')).not.toBeInTheDocument()
+    expect(screen.getAllByText('$2,500.00').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('€1,000.00').length).toBeGreaterThan(0)
   })
 })

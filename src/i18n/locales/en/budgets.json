@@ -57,6 +57,28 @@
   "progress": {
     "title": "Category progress"
   },
+  "visual": {
+    "title": "Plan usage",
+    "legend": "Usage colors",
+    "count_one": "{{count}} plan",
+    "count_other": "{{count}} plans",
+    "overCount_one": "{{count}} over plan",
+    "overCount_other": "{{count}} over plan",
+    "tightCount_one": "{{count}} near limit",
+    "tightCount_other": "{{count}} near limit",
+    "unavailableCount_one": "{{count}} reading unavailable",
+    "unavailableCount_other": "{{count}} readings unavailable",
+    "noPeriodMatch": "No plans match this period.",
+    "unavailable": "Usage unavailable",
+    "limit": "Limit",
+    "remaining": "Remaining",
+    "capped": "The ring stops at 100%. The percent and the remaining amount stay exact.",
+    "statusLine": "{{status}} · {{percent}}%",
+    "overLine": "{{status}} · {{amount}} · {{percent}}%",
+    "filledLabel": "{{name}}, {{category}}: {{percent}}% used. Spent {{spent}} of {{limit}}. Remaining {{remaining}}. {{status}}.",
+    "overLabel": "{{name}}, {{category}}: {{percent}}% used. Spent {{spent}} of {{limit}}. Remaining {{remaining}}. {{status}}. The ring is capped at 100%.",
+    "unfilledLabel": "{{name}}, {{category}}: usage unavailable. Spent {{spent}}. Limit {{limit}}. Remaining {{remaining}}."
+  },
   "intelligence": {
     "title": "Budget intelligence",
     "safeTitle": "Your budgets are holding steady.",

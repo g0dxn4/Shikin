@@ -1,10 +1,9 @@
-import { useBudgetDisplay, type DisplayBudget } from '@/components/budgets/use-budget-display'
+import { useBudgetDisplay } from '@/components/budgets/use-budget-display'
 import { useCurrencyStore } from '@/stores/currency-store'
 import { currencyAuthorityKey } from '@/stores/currency-authority'
 import { useSearchParams } from 'react-router'
 import type { ReportWindowInput } from '@shikin/finance-core'
 import { WindowControls } from '@/components/budgets/scoped-controls'
-import { ScopedActualResult } from '@/components/budgets/scoped-result'
 import {
   TRANSACTION_PAGE_INVALIDATION_EVENT,
   invalidateTransactionPage,
@@ -12,19 +11,22 @@ import {
 import { PageToolbar } from '@/components/ui/native-layout'
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
-import { PiggyBank, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Skeleton } from '@/components/ui/skeleton'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { ErrorState } from '@/components/ui/error-state'
 import { ShowMorePagination } from '@/components/shared/show-more-pagination'
 import { useUIStore } from '@/stores/ui-store'
 import { useBudgetStore } from '@/stores/budget-store'
-import { formatMoney } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
 import { CategorySpendingPanel } from '@/components/budgets/category-spending-panel'
+import { budgetUsageVisual } from '@/components/budgets/budget-visual-model'
+import {
+  BudgetVisualCollection,
+  BudgetVisualEmpty,
+  BudgetVisualSkeleton,
+} from '@/components/budgets/budget-visual-collection'
 
 const ConfirmDialog = lazy(() =>
   import('@/components/shared/confirm-dialog').then((m) => ({
@@ -33,116 +35,7 @@ const ConfirmDialog = lazy(() =>
 )
 
 const BUDGETS_PAGE_SIZE = 20
-
-function getProgressColor(percent: number | null): string {
-  if (percent === null) return 'var(--color-muted-foreground)'
-  if (percent > 100) return 'var(--color-destructive)'
-  if (percent > 80) return 'var(--color-destructive)'
-  if (percent > 60) return 'var(--color-warning)'
-  return 'var(--color-success)'
-}
-
-function CompactBudgetRow({
-  budget,
-  onEdit,
-  onDelete,
-}: {
-  budget: DisplayBudget
-  onEdit: () => void
-  onDelete: () => void
-}) {
-  const { t } = useTranslation('budgets')
-  const { t: tCommon } = useTranslation('common')
-  const displayPercent = Math.max(0, Math.min(budget.percentUsed ?? 0, 100))
-  const progressColor = getProgressColor(budget.percentUsed)
-  const money = (value: number | null) =>
-    value === null ? '—' : formatMoney(value, budget.currency)
-  const amount = budget.limitCentavos
-  const spent = budget.spent
-  const remaining = budget.remaining
-  const references = useBudgetStore((state) => state.references)
-
-  return (
-    <div className="group border-border bg-muted/50 hover:bg-muted/50 rounded-xl border p-4 transition-colors">
-      <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-base font-bold">
-            {budget.categoryName || t('scoped.allCategories')}
-          </p>
-          <p className="text-muted-foreground mt-1 truncate text-xs font-medium">
-            <span>{budget.name}</span> · {t(`periods.${budget.period}`)}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <Badge variant="secondary" className="text-[10px]" style={{ color: progressColor }}>
-            {budget.complete && budget.percentUsed !== null ? `${budget.percentUsed}%` : '—'}
-          </Badge>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-muted-foreground hover:text-foreground h-11 w-11 sm:h-10 sm:w-10"
-            onClick={onEdit}
-            aria-label={`${tCommon('actions.edit')} ${budget.name}`}
-          >
-            <Pencil size={12} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-destructive/80 hover:text-destructive h-11 w-11 sm:h-10 sm:w-10"
-            onClick={onDelete}
-            aria-label={`${tCommon('actions.delete')} ${budget.name}`}
-          >
-            <Trash2 size={12} />
-          </Button>
-        </div>
-      </div>
-      <div
-        className="bg-muted/50 h-2.5 overflow-hidden rounded-full"
-        role={budget.complete ? 'progressbar' : undefined}
-        aria-valuenow={budget.complete && budget.percentUsed !== null ? displayPercent : undefined}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={`${budget.name}: ${budget.complete && budget.percentUsed !== null ? `${budget.percentUsed}%` : '—'}`}
-      >
-        <div
-          className="h-full rounded-full transition-all duration-500 motion-reduce:transition-none"
-          style={{
-            width: `${budget.complete && budget.percentUsed !== null ? displayPercent : 0}%`,
-            background: progressColor,
-          }}
-        />
-      </div>
-      <div className="text-muted-foreground mt-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-        <span>
-          <span className="text-foreground font-semibold">{money(spent)}</span> {t('card.of')}{' '}
-          {money(amount)}
-        </span>
-        <span className={remaining !== null && remaining < 0 ? 'text-destructive' : 'text-success'}>
-          {remaining === null
-            ? '—'
-            : remaining < 0
-              ? `${money(Math.abs(remaining))} ${t('card.overBudget')}`
-              : `${money(remaining)} ${t('card.remaining')}`}
-        </span>
-      </div>
-      <div className="mt-3 space-y-2">
-        {!budget.is_active && (
-          <p className="text-muted-foreground text-xs">{t('scoped.inactive')}</p>
-        )}
-        {!budget.comparison.limitComparable && (
-          <p className="text-warning text-xs">{t('scoped.notComparable')}</p>
-        )}
-        <ScopedActualResult
-          key={JSON.stringify(budget.result.window)}
-          compact
-          result={budget.result}
-          {...references}
-        />
-      </div>
-    </div>
-  )
-}
+const EMPTY_REFERENCES = { accounts: [], categories: [] }
 
 export function Budgets() {
   const { t } = useTranslation('budgets')
@@ -155,7 +48,9 @@ export function Budgets() {
     fetch,
     remove,
     options: loadedOptions,
+    references: storedReferences,
   } = useBudgetStore()
+  const references = storedReferences ?? EMPTY_REFERENCES
   const [searchParams] = useSearchParams()
   const budgetId = searchParams.get('budget') ?? undefined
   const [includeInactive, setIncludeInactive] = useState(false)
@@ -195,7 +90,10 @@ export function Budgets() {
   const hasInitialLoadError = !!fetchError && budgets.length === 0
 
   const progressBudgets = useMemo(
-    () => [...scopedBudgets].sort((a, b) => (b.percentUsed ?? -1) - (a.percentUsed ?? -1)),
+    () =>
+      [...scopedBudgets].sort(
+        (a, b) => (budgetUsageVisual(b).percent ?? -1) - (budgetUsageVisual(a).percent ?? -1)
+      ),
     [scopedBudgets]
   )
 
@@ -233,13 +131,14 @@ export function Budgets() {
   }
 
   return (
-    <div className="page-content">
+    <div className="page-content min-w-0">
       <PageToolbar
+        className="min-w-0"
         leading={
-          <label className="text-muted-foreground flex items-center gap-2 text-xs">
+          <label className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-2 text-xs">
             {t('currentPeriodFilter')}
             <select
-              className="bg-background text-foreground border-border min-h-10 rounded-lg border px-3"
+              className="bg-background text-foreground border-border focus-visible:ring-ring min-h-11 max-w-full min-w-0 rounded-lg border px-3 focus-visible:ring-2 focus-visible:outline-none"
               value={period}
               onChange={(event) => {
                 setPeriod(event.target.value)
@@ -256,10 +155,14 @@ export function Budgets() {
         }
         actions={
           <>
-            <Button variant="outline" onClick={() => invalidateTransactionPage('store-refresh')}>
+            <Button
+              variant="outline"
+              className="min-h-11"
+              onClick={() => invalidateTransactionPage('store-refresh')}
+            >
               {t('scoped.refresh')}
             </Button>
-            <Button onClick={() => openBudgetDialog()}>
+            <Button className="min-h-11" onClick={() => openBudgetDialog()}>
               <Plus size={16} />
               {t('addBudget')}
             </Button>
@@ -273,12 +176,15 @@ export function Budgets() {
       <label className="flex min-h-11 items-center gap-2 text-sm">
         <input
           type="checkbox"
+          className="focus-visible:ring-ring size-4 focus-visible:ring-2 focus-visible:outline-none"
           checked={includeInactive}
           onChange={(event) => setIncludeInactive(event.target.checked)}
         />
         {t('scoped.includeInactive')}
       </label>
-      <WindowControls budget value={windowOptions} onChange={setWindowOptions} />
+      <div className="min-w-0">
+        <WindowControls budget value={windowOptions} onChange={setWindowOptions} />
+      </div>
       <ErrorBanner
         title={t('error.load')}
         message={displayError || (!hasInitialLoadError ? fetchError : null)}
@@ -287,27 +193,8 @@ export function Budgets() {
         }}
       />
 
-      <div hidden={categoryActuals.length === 0 || ownedKey === null}>
-        <CategorySpendingPanel categories={categoryActuals} />
-      </div>
       {isLoading ? (
-        <div role="status" aria-busy="true">
-          <span className="sr-only">{tCommon('status.loading')}</span>
-          <div className="flex flex-col gap-3">
-            <div className="native-panel space-y-3 p-5 sm:p-6">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="space-y-2">
-                  <Skeleton className="h-4 w-28" />
-                  <Skeleton className="h-3 w-full" />
-                </div>
-              ))}
-            </div>
-            <div className="native-panel space-y-3 p-4 sm:px-5 sm:py-4">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="h-4 w-3/4" />
-            </div>
-          </div>
-        </div>
+        <BudgetVisualSkeleton />
       ) : hasInitialLoadError ? (
         <ErrorState
           title={t('error.loadDetailed')}
@@ -317,80 +204,53 @@ export function Budgets() {
           }}
         />
       ) : budgets.length === 0 ? (
-        <div className="native-panel flex flex-col items-center justify-center py-16 text-center">
-          <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
-            <PiggyBank size={28} className="text-primary" />
-          </div>
-          <h2 className="mb-2 text-lg font-semibold">{t('empty.title')}</h2>
-          <p className="text-muted-foreground mb-4 text-sm">{t('empty.description')}</p>
-          <Button onClick={() => openBudgetDialog()}>
-            <Plus size={16} />
-            {t('addBudget')}
-          </Button>
-        </div>
+        <BudgetVisualEmpty onAdd={() => openBudgetDialog()} />
       ) : (
         <>
-          <p className="text-muted-foreground text-xs">
-            {t('scoped.currentDefinition')} {t('scoped.nonAdditive')}
-          </p>
-          <div className="flex flex-col gap-3">
-            <div className="native-panel p-5 sm:p-6">
-              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-base font-semibold">{t('progress.title')}</h2>
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary" className="text-[10px]">
-                    {scopedBudgets.length} {t('hero.budgetCount')}
-                  </Badge>
-                  <Button size="sm" variant="secondary" onClick={() => openBudgetDialog()}>
-                    <Plus size={13} />
-                    {t('addBudget')}
-                  </Button>
-                </div>
-              </div>
-              <div className="space-y-3">
-                {visibleProgressBudgets.map((budget) => (
-                  <CompactBudgetRow
-                    key={budget.id}
-                    budget={budget}
-                    onEdit={() => openBudgetDialog(budget.id)}
-                    onDelete={() => setDeleteId(budget.id)}
-                  />
-                ))}
-              </div>
-              <ShowMorePagination
-                shown={visibleProgressBudgets.length}
-                total={progressBudgets.length}
-                summaryLabel={tCommon('pagination.summary', {
-                  shown: visibleProgressBudgets.length,
-                  total: progressBudgets.length,
-                })}
-                showMoreLabel={tCommon('pagination.showMore', {
-                  count: Math.min(
-                    BUDGETS_PAGE_SIZE,
-                    progressBudgets.length - visibleProgressBudgets.length
-                  ),
-                })}
-                onShowMore={() => setVisibleBudgetCount((count) => count + BUDGETS_PAGE_SIZE)}
-                className="mt-4"
-              />
-            </div>
-          </div>
-
-          <Suspense>
-            <ConfirmDialog
-              open={!!deleteId}
-              onOpenChange={(open) => !open && setDeleteId(null)}
-              title={t('deleteBudget')}
-              description={t('deleteConfirm')}
-              confirmLabel={t('deleteBudget')}
-              cancelLabel={tCommon('actions.cancel')}
-              variant="destructive"
-              isLoading={isDeleting}
-              onConfirm={handleDelete}
-            />
-          </Suspense>
+          <BudgetVisualCollection
+            plans={scopedBudgets}
+            visiblePlans={visibleProgressBudgets}
+            references={references}
+            onEdit={(id) => openBudgetDialog(id)}
+            onDelete={setDeleteId}
+            onAdd={() => openBudgetDialog()}
+          />
+          <ShowMorePagination
+            shown={visibleProgressBudgets.length}
+            total={progressBudgets.length}
+            summaryLabel={tCommon('pagination.summary', {
+              shown: visibleProgressBudgets.length,
+              total: progressBudgets.length,
+            })}
+            showMoreLabel={tCommon('pagination.showMore', {
+              count: Math.min(
+                BUDGETS_PAGE_SIZE,
+                progressBudgets.length - visibleProgressBudgets.length
+              ),
+            })}
+            onShowMore={() => setVisibleBudgetCount((count) => count + BUDGETS_PAGE_SIZE)}
+          />
         </>
       )}
+      <div
+        hidden={isLoading || categoryActuals.length === 0 || ownedKey === null}
+        className="min-w-0"
+      >
+        <CategorySpendingPanel categories={categoryActuals} />
+      </div>
+      <Suspense>
+        <ConfirmDialog
+          open={!!deleteId}
+          onOpenChange={(open) => !open && setDeleteId(null)}
+          title={t('deleteBudget')}
+          description={t('deleteConfirm')}
+          confirmLabel={t('deleteBudget')}
+          cancelLabel={tCommon('actions.cancel')}
+          variant="destructive"
+          isLoading={isDeleting}
+          onConfirm={handleDelete}
+        />
+      </Suspense>
     </div>
   )
 }

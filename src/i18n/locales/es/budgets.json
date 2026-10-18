@@ -57,6 +57,28 @@
   "progress": {
     "title": "Progreso por categoría"
   },
+  "visual": {
+    "title": "Uso de los planes",
+    "legend": "Colores de uso",
+    "count_one": "{{count}} plan",
+    "count_other": "{{count}} planes",
+    "overCount_one": "{{count}} sobre el plan",
+    "overCount_other": "{{count}} sobre el plan",
+    "tightCount_one": "{{count}} cerca del límite",
+    "tightCount_other": "{{count}} cerca del límite",
+    "unavailableCount_one": "{{count}} lectura no disponible",
+    "unavailableCount_other": "{{count}} lecturas no disponibles",
+    "noPeriodMatch": "Ningún plan coincide con este período.",
+    "unavailable": "Uso no disponible",
+    "limit": "Límite",
+    "remaining": "Restante",
+    "capped": "El anillo se detiene en 100 %. El porcentaje y el importe restante siguen siendo exactos.",
+    "statusLine": "{{status}} · {{percent}}%",
+    "overLine": "{{status}} · {{amount}} · {{percent}}%",
+    "filledLabel": "{{name}}, {{category}}: {{percent}}% usado. Gastado {{spent}} de {{limit}}. Restante {{remaining}}. {{status}}.",
+    "overLabel": "{{name}}, {{category}}: {{percent}}% usado. Gastado {{spent}} de {{limit}}. Restante {{remaining}}. {{status}}. El anillo está limitado al 100 %.",
+    "unfilledLabel": "{{name}}, {{category}}: uso no disponible. Gastado {{spent}}. Límite {{limit}}. Restante {{remaining}}."
+  },
   "intelligence": {
     "title": "Inteligencia de presupuesto",
     "safeTitle": "Tus presupuestos se mantienen estables.",

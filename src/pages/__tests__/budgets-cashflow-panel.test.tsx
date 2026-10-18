@@ -55,10 +55,14 @@ describe('Budgets page scope', () => {
         <Budgets />
       </MemoryRouter>
     )
-    expect(await screen.findByRole('region', { name: 'category actuals' })).toBeInTheDocument()
+    const actuals = await screen.findByRole('region', { name: 'category actuals' })
+    const usage = screen.getByRole('heading', { name: 'visual.title' })
+    expect(actuals).toBeInTheDocument()
+    expect(usage.compareDocumentPosition(actuals) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByText(/scoped.currentDefinition/)).toBeInTheDocument()
-    expect(screen.getByText('progress.title')).toBeInTheDocument()
+    expect(screen.getByText(/scoped.nonAdditive/)).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: 'virtual buckets' })).not.toBeInTheDocument()
+    expect(screen.queryByText('progress.title')).not.toBeInTheDocument()
   })
 
   it('retains empty budget state without mounting virtual buckets', async () => {

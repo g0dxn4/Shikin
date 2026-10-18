@@ -63,10 +63,20 @@
     "progressLabel": "Progreso de la meta"
   },
   "hero": {
-    "featuredGoal": "Meta Destacada",
+    "featuredGoal": "Meta destacada",
     "expectedCompletion": "Finalización estimada",
-    "aggregateProgress": "Progreso General",
-    "goalCount": "meta(s)"
+    "aggregateProgress": "Progreso conjunto",
+    "goalCount": "meta(s)",
+    "collection": "Todas las metas",
+    "featuredBadge": "Destacada",
+    "currentAmount": "Importe actual",
+    "targetAmount": "Objetivo",
+    "monthlyPace": "Ritmo mensual",
+    "noMonthlyPace": "Sin ritmo mensual",
+    "statusCompleted": "El ahorro registrado alcanza este objetivo.",
+    "statusOverdue": "La fecha límite ya pasó y el objetivo sigue sin cumplirse.",
+    "statusDueToday": "La fecha límite es hoy y el objetivo sigue sin cumplirse.",
+    "statusNoDeadline": "Esta meta no tiene una fecha límite registrada."
   },
   "active": {
     "title": "Metas activas"

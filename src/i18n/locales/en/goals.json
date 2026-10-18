@@ -63,10 +63,20 @@
     "progressLabel": "Goal progress"
   },
   "hero": {
-    "featuredGoal": "Featured Goal",
+    "featuredGoal": "Featured goal",
     "expectedCompletion": "Expected completion",
-    "aggregateProgress": "Aggregate Progress",
-    "goalCount": "goal(s)"
+    "aggregateProgress": "Aggregate progress",
+    "goalCount": "goal(s)",
+    "collection": "All goals",
+    "featuredBadge": "Featured",
+    "currentAmount": "Current amount",
+    "targetAmount": "Target",
+    "monthlyPace": "Monthly pace",
+    "noMonthlyPace": "No monthly pace",
+    "statusCompleted": "Recorded savings meet this target.",
+    "statusOverdue": "The deadline has passed and the target is still unmet.",
+    "statusDueToday": "The deadline is today and the target is still unmet.",
+    "statusNoDeadline": "No deadline is recorded for this goal."
   },
   "active": {
     "title": "Active goals"

@@ -157,6 +157,49 @@ describe('Forecast native view', () => {
     expect(amountCell.className).toMatch(/whitespace-nowrap/)
   })
 
+  it('stacks the account scope above the range actions so the select cannot collapse', async () => {
+    render(<Forecast />)
+    await screen.findByRole('option', { name: 'scope.allAccounts' })
+    await waitFor(() => expect(query).toHaveBeenCalled())
+    const toolbar = document.querySelector('.page-toolbar')
+    expect(toolbar).not.toBeNull()
+    expect(toolbar?.className).toMatch(/(?:^|\s)flex-col(?:\s|$)/)
+    expect(toolbar?.className).toMatch(/(?:^|\s)items-stretch(?:\s|$)/)
+    expect(toolbar?.className).toMatch(/(?:^|\s)sm:flex-row(?:\s|$)/)
+    expect(toolbar?.className).toMatch(/(?:^|\s)sm:items-center(?:\s|$)/)
+    expect(toolbar?.className).not.toMatch(/(?:^|\s)items-center(?:\s|$)/)
+    expect(toolbar?.className).toContain('max-sm:[&>div]:w-full')
+    expect(toolbar?.className).toContain('max-sm:[&>div]:min-w-0')
+
+    const slots = toolbar ? [...toolbar.children] : []
+    expect(slots).toHaveLength(2)
+    expect(slots.every((slot) => slot.tagName === 'DIV')).toBe(true)
+
+    const select = screen.getByRole('combobox')
+    expect(slots[0]).toContainElement(select)
+    expect(select.className).toMatch(/(?:^|\s)w-full(?:\s|$)/)
+    expect(select.className).toMatch(/(?:^|\s)min-w-0(?:\s|$)/)
+    expect(select.className).toMatch(/(?:^|\s)max-w-full(?:\s|$)/)
+    expect(select.className).toMatch(/min-h-11/)
+    expect(select.className).toMatch(/sm:w-auto/)
+    expect(select.parentElement?.className).toMatch(/(?:^|\s)w-full(?:\s|$)/)
+    expect(select.parentElement?.className).toMatch(/sm:w-auto/)
+    expect(screen.getByRole('option', { name: 'scope.allAccounts' })).toBeInTheDocument()
+    expect((select as HTMLSelectElement).value).toBe('')
+
+    const rangeGroup = screen.getByRole('group', { name: 'range.label' })
+    expect(slots[1]).toContainElement(rangeGroup)
+    expect(rangeGroup.className).toMatch(/flex-wrap/)
+    expect(rangeGroup.className).toMatch(/max-w-full/)
+    for (const name of ['range.30', 'range.60', 'range.90']) {
+      const button = screen.getByRole('button', { name })
+      expect(rangeGroup).toContainElement(button)
+      expect(button.className).toMatch(/min-h-11/)
+      expect(button.className).toMatch(/min-w-11/)
+      expect(button.className).toMatch(/shrink-0/)
+    }
+  })
+
   it('surfaces forecast and subscriptions read errors', async () => {
     vi.mocked(generateCashFlowForecast).mockRejectedValue(new Error('Forecast read failed'))
     vi.mocked(query).mockRejectedValue(new Error('Subscription read failed'))

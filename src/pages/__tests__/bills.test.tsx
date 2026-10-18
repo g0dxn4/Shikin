@@ -94,6 +94,54 @@ describe('BillsPage', () => {
     ]
   })
 
+  it('stacks the status filter above calendar and add actions at narrow widths', () => {
+    render(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
+
+    const toolbar = document.querySelector('.page-toolbar')
+    expect(toolbar).not.toBeNull()
+    expect(toolbar?.className).toMatch(/(?:^|\s)flex-col(?:\s|$)/)
+    expect(toolbar?.className).toMatch(/(?:^|\s)items-stretch(?:\s|$)/)
+    expect(toolbar?.className).toMatch(/(?:^|\s)sm:flex-row(?:\s|$)/)
+    expect(toolbar?.className).toMatch(/(?:^|\s)sm:items-center(?:\s|$)/)
+    expect(toolbar?.className).not.toMatch(/(?:^|\s)items-center(?:\s|$)/)
+    expect(toolbar?.className).toContain('max-sm:[&>div]:w-full')
+    expect(toolbar?.className).toContain('max-sm:[&>div]:min-w-0')
+
+    const slots = toolbar ? [...toolbar.children] : []
+    expect(slots).toHaveLength(2)
+    expect(slots.every((slot) => slot.tagName === 'DIV')).toBe(true)
+
+    const select = screen.getByRole('combobox')
+    expect(slots[0]).toContainElement(select)
+    expect(select.className).toMatch(/(?:^|\s)w-full(?:\s|$)/)
+    expect(select.className).toMatch(/(?:^|\s)min-w-0(?:\s|$)/)
+    expect(select.className).toMatch(/(?:^|\s)flex-1(?:\s|$)/)
+    expect(select.className).toMatch(/min-h-11/)
+    expect(select.className).toMatch(/sm:w-auto/)
+    expect(select.className).toMatch(/sm:flex-none/)
+    expect(select.parentElement?.className).toMatch(/(?:^|\s)w-full(?:\s|$)/)
+    expect(select.parentElement?.className).toMatch(/sm:w-auto/)
+    expect(screen.getByRole('option', { name: 'filter.all' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'filter.soon' })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'filter.overdue' })).toBeInTheDocument()
+    expect((select as HTMLSelectElement).value).toBe('all')
+
+    const calendar = screen.getByRole('link', { name: /bills\.calendarView/i })
+    const add = screen.getByRole('button', { name: 'bills.addRecurring' })
+    expect(slots[1]).toContainElement(calendar)
+    expect(slots[1]).toContainElement(add)
+    for (const control of [calendar, add]) {
+      expect(control.className).toMatch(/min-h-11/)
+      expect(control.className).toMatch(/(?:^|\s)w-full(?:\s|$)/)
+      expect(control.className).toMatch(/shrink-0/)
+      expect(control.className).toMatch(/sm:w-auto/)
+    }
+  })
+
   it('renders recurring bills from local rules', () => {
     render(
       <MemoryRouter>

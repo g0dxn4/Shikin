@@ -59,11 +59,12 @@ export function Forecast() {
   return (
     <div className="page-content min-w-0">
       <PageToolbar
+        className="flex-col items-stretch sm:flex-row sm:items-center max-sm:[&>div]:w-full max-sm:[&>div]:min-w-0"
         leading={
           <label className="text-muted-foreground flex w-full min-w-0 flex-col gap-1 text-xs sm:w-auto sm:flex-row sm:items-center sm:gap-2">
             <span>{t('scope.account')}</span>
             <select
-              className="border-input bg-surface text-foreground focus-visible:ring-ring min-h-11 w-full min-w-0 rounded-lg border px-3 focus-visible:ring-2 focus-visible:outline-none sm:w-auto sm:max-w-xs"
+              className="border-input bg-surface text-foreground focus-visible:ring-ring min-h-11 w-full max-w-full min-w-0 rounded-lg border px-3 focus-visible:ring-2 focus-visible:outline-none sm:w-auto sm:max-w-xs"
               value={accountId ?? ''}
               onChange={(event) => setAccount(event.target.value || undefined)}
             >
@@ -79,7 +80,11 @@ export function Forecast() {
           </label>
         }
         actions={
-          <div className="flex flex-wrap gap-1" role="group" aria-label={t('range.label')}>
+          <div
+            className="flex max-w-full flex-wrap gap-1"
+            role="group"
+            aria-label={t('range.label')}
+          >
             {ranges.map((range) => (
               <Button
                 key={range}
@@ -87,7 +92,7 @@ export function Forecast() {
                 size="sm"
                 onClick={() => setRange(range)}
                 aria-pressed={selectedRange === range}
-                className="min-h-11 min-w-11"
+                className="min-h-11 min-w-11 shrink-0"
               >
                 {t(`range.${range}`)}
               </Button>

@@ -204,11 +204,12 @@ export function BillsPage() {
   return (
     <div className="page-content max-w-full min-w-0">
       <PageToolbar
+        className="flex-col items-stretch sm:flex-row sm:items-center max-sm:[&>div]:w-full max-sm:[&>div]:min-w-0"
         leading={
-          <label className="text-muted-foreground flex min-w-0 items-center gap-2 text-xs">
-            {t('filter.label')}
+          <label className="text-muted-foreground flex w-full min-w-0 items-center gap-2 text-xs sm:w-auto">
+            <span className="shrink-0">{t('filter.label')}</span>
             <select
-              className="bg-background text-foreground border-border min-h-11 min-w-0 rounded-lg border px-3"
+              className="bg-background text-foreground border-border min-h-11 w-full min-w-0 flex-1 rounded-lg border px-3 sm:w-auto sm:max-w-xs sm:flex-none"
               value={status}
               onChange={(event) => {
                 setStatus(event.target.value)
@@ -224,14 +225,17 @@ export function BillsPage() {
           </label>
         }
         actions={
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            <Button variant="ghost" asChild className="min-h-11 w-full sm:w-auto">
+          <div className="flex w-full max-w-full flex-col gap-2 sm:w-auto sm:flex-row">
+            <Button variant="ghost" asChild className="min-h-11 w-full shrink-0 sm:w-auto">
               <Link to="/bill-calendar">
                 <CalendarClock size={16} aria-hidden="true" />
                 {t('bills.calendarView')}
               </Link>
             </Button>
-            <Button className="min-h-11 w-full sm:w-auto" onClick={() => openRecurringDialog()}>
+            <Button
+              className="min-h-11 w-full shrink-0 sm:w-auto"
+              onClick={() => openRecurringDialog()}
+            >
               <Plus size={16} aria-hidden="true" />
               {t('bills.addRecurring')}
             </Button>

@@ -10,6 +10,8 @@ body,
   overflow: hidden;
 }
 
+/* Native ink violet. primary is the filled action only; accent is text, links, icons, and focus.
+   Keep those tokens distinct so the dark fill is never used as small text. */
 @theme {
   --color-background: #f5f5f2;
   --color-foreground: #202124;
@@ -19,11 +21,11 @@ body,
   --color-card-foreground: #202124;
   --color-popover: #ffffff;
   --color-popover-foreground: #202124;
-  --color-primary: #276fd6;
+  --color-primary: #6f29ae;
   --color-primary-foreground: #ffffff;
-  --color-accent: #276fd6;
-  --color-accent-hover: #1f62c2;
-  --color-accent-muted: #e9f1fc;
+  --color-accent: #6f29ae;
+  --color-accent-hover: #591f8a;
+  --color-accent-muted: #deded8;
   --color-accent-foreground: #ffffff;
   --color-secondary: #f0f0ed;
   --color-secondary-foreground: #202124;
@@ -34,9 +36,9 @@ body,
   --color-glass: #ffffff;
   --color-border: #deded8;
   --color-border-hover: #c9c9c2;
-  --color-border-accent: #8eb7ed;
+  --color-border-accent: #6f29ae;
   --color-input: #deded8;
-  --color-ring: #276fd6;
+  --color-ring: #6f29ae;
   --color-destructive: #c43b3b;
   --color-destructive-foreground: #ffffff;
   --color-success: #18783c;
@@ -45,22 +47,22 @@ body,
   --color-warning-foreground: #ffffff;
   --color-income: #18783c;
   --color-expense: #c43b3b;
-  --color-extension: #276fd6;
-  --color-chart-1: #276fd6;
+  --color-extension: #6f29ae;
+  --color-chart-1: #3b362b;
   --color-chart-2: #18783c;
-  --color-chart-3: #8eb7ed;
+  --color-chart-3: #44525f;
   --color-chart-4: #a96108;
   --color-chart-5: #c43b3b;
   --color-chart-grid: #eaeae5;
   --color-chart-axis: #73777e;
   --color-sidebar: #eeeeea;
   --color-sidebar-foreground: #202124;
-  --color-sidebar-primary: #276fd6;
+  --color-sidebar-primary: #6f29ae;
   --color-sidebar-primary-foreground: #ffffff;
-  --color-sidebar-accent: #e9f1fc;
-  --color-sidebar-accent-foreground: #276fd6;
+  --color-sidebar-accent: #ffffff;
+  --color-sidebar-accent-foreground: #6f29ae;
   --color-sidebar-border: #deded8;
-  --color-sidebar-ring: #276fd6;
+  --color-sidebar-ring: #6f29ae;
   --color-cat-food: #f97316;
   --color-cat-transport: #3b82f6;
   --color-cat-housing: #8b5cf6;
@@ -84,38 +86,38 @@ body,
 
 :root {
   color-scheme: light;
-  --shadow-panel: 0 1px 2px rgb(20 22 25 / 4%), 0 8px 24px rgb(20 22 25 / 3.5%);
-  --shadow-dialog: 0 20px 60px rgb(20 22 25 / 18%);
+  --shadow-panel: 0 1px 2px rgb(24 24 24 / 4%), 0 8px 24px rgb(24 24 24 / 3.5%);
+  --shadow-dialog: 0 20px 60px rgb(24 24 24 / 18%);
 }
 
 html[data-appearance='native-dark'] {
   color-scheme: dark;
-  --color-background: #18191b;
-  --color-foreground: #f3f3f1;
-  --color-surface: #222326;
-  --color-surface-elevated: #28292d;
-  --color-card: #222326;
-  --color-card-foreground: #f3f3f1;
-  --color-popover: #28292d;
-  --color-popover-foreground: #f3f3f1;
-  --color-primary: #66a4f4;
-  --color-primary-foreground: #101113;
-  --color-accent: #66a4f4;
-  --color-accent-hover: #82b6f6;
-  --color-accent-muted: #243752;
-  --color-accent-foreground: #f7f9fc;
-  --color-secondary: #303136;
-  --color-secondary-foreground: #f3f3f1;
-  --color-muted: #303136;
-  --color-muted-foreground: #a3a5aa;
-  --color-text-muted: #a3a5aa;
-  --color-subtle: #7f8288;
-  --color-glass: #222326;
-  --color-border: #3b3c40;
-  --color-border-hover: #4a4c51;
-  --color-border-accent: #3f6fa8;
-  --color-input: #3b3c40;
-  --color-ring: #66a4f4;
+  --color-background: #101010;
+  --color-foreground: #f4f2ec;
+  --color-surface: #181818;
+  --color-surface-elevated: #1e1e1e;
+  --color-card: #181818;
+  --color-card-foreground: #f4f2ec;
+  --color-popover: #1e1e1e;
+  --color-popover-foreground: #f4f2ec;
+  --color-primary: #9448d8;
+  --color-primary-foreground: #ffffff;
+  --color-accent: #c4a0e3;
+  --color-accent-hover: #d4b8ec;
+  --color-accent-muted: #262626;
+  --color-accent-foreground: #101010;
+  --color-secondary: #262626;
+  --color-secondary-foreground: #f4f2ec;
+  --color-muted: #262626;
+  --color-muted-foreground: #a7a8ad;
+  --color-text-muted: #a7a8ad;
+  --color-subtle: #8a8a8a;
+  --color-glass: #181818;
+  --color-border: #3a3a3a;
+  --color-border-hover: #6e6e6e;
+  --color-border-accent: #c4a0e3;
+  --color-input: #6e6e6e;
+  --color-ring: #c4a0e3;
   --color-destructive: #f07474;
   --color-destructive-foreground: #18191b;
   --color-success: #4dcc78;
@@ -124,22 +126,22 @@ html[data-appearance='native-dark'] {
   --color-warning-foreground: #101113;
   --color-income: #4dcc78;
   --color-expense: #f07474;
-  --color-extension: #66a4f4;
-  --color-chart-1: #66a4f4;
+  --color-extension: #c4a0e3;
+  --color-chart-1: #e6e1d6;
   --color-chart-2: #4dcc78;
-  --color-chart-3: #477bb7;
+  --color-chart-3: #a9b7c4;
   --color-chart-4: #e9a84d;
   --color-chart-5: #f07474;
-  --color-chart-grid: #303136;
-  --color-chart-axis: #a3a5aa;
-  --color-sidebar: #121315;
-  --color-sidebar-foreground: #f3f3f1;
-  --color-sidebar-primary: #66a4f4;
-  --color-sidebar-primary-foreground: #101113;
-  --color-sidebar-accent: #243752;
-  --color-sidebar-accent-foreground: #66a4f4;
-  --color-sidebar-border: #303136;
-  --color-sidebar-ring: #66a4f4;
+  --color-chart-grid: #3a3a3a;
+  --color-chart-axis: #a7a8ad;
+  --color-sidebar: #0c0c0c;
+  --color-sidebar-foreground: #f4f2ec;
+  --color-sidebar-primary: #9448d8;
+  --color-sidebar-primary-foreground: #ffffff;
+  --color-sidebar-accent: #262626;
+  --color-sidebar-accent-foreground: #c4a0e3;
+  --color-sidebar-border: #3a3a3a;
+  --color-sidebar-ring: #c4a0e3;
   --shadow-panel: 0 1px 2px rgb(0 0 0 / 20%), 0 8px 28px rgb(0 0 0 / 14%);
   --shadow-dialog: 0 24px 70px rgb(0 0 0 / 42%);
 }

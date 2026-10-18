@@ -78,6 +78,18 @@ slate corresponding to the dark cool-gray series. Neither is violet. Grid and ax
 neutral. Chart grids, axes, legends, and tooltips use the shared CSS-variable contracts in
 `src/lib/constants.ts`.
 
+## Visual-first hierarchy
+
+- Lead financial views with one useful chart, ring, calendar, or track, not a wall of explanations or
+  duplicate metric strips. Secondary numbers support the graphic.
+- Use compact legends and date, currency, scope, and status chips. Keep incomplete, overdue, and
+  unsafe states obvious. Method prose, detailed filters, evidence, and full tables belong on demand,
+  with keyboard and screen-reader access preserved.
+- A line needs real dated points; a share needs a valid denominator. Empty or incomplete data never
+  gets a decorative financial graph. Quantitative widths are not inflated for decoration.
+- Utility screens lead with appearance previews, category icons, and capability tiles, not fake
+  financial charts. Prefer fewer default words and clearer visual groups.
+
 ## Production layout
 
 - Desktop uses a full-height 216px sidebar, collapsing persistently to 72px.

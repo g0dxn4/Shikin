@@ -15,14 +15,12 @@ export function BudgetVisualCollection({
   references,
   onEdit,
   onDelete,
-  onAdd,
 }: {
   plans: readonly DisplayBudget[]
   visiblePlans: readonly DisplayBudget[]
   references: ScopedReferences
   onEdit: (id: string) => void
   onDelete: (id: string) => void
-  onAdd: () => void
 }) {
   const { t } = useTranslation('budgets')
   const titleId = useId()
@@ -52,47 +50,41 @@ export function BudgetVisualCollection({
     .join(' · ')
 
   return (
-    <NativePanel aria-labelledby={titleId} className="min-w-0 p-4 sm:p-6">
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 id={titleId} className="text-base font-semibold">
-            {t('visual.title')}
-          </h2>
-          <p className="text-muted-foreground mt-1 text-xs">{summary}</p>
-        </div>
-        <Button type="button" variant="outline" className="min-h-11" onClick={onAdd}>
-          <Plus size={16} />
-          {t('addBudget')}
-        </Button>
+    <NativePanel aria-labelledby={titleId} className="min-w-0 px-3 py-2.5 sm:px-4">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <h2 id={titleId} className="text-sm font-semibold">
+          {t('visual.title')}
+        </h2>
+        <p className="text-muted-foreground text-xs">{summary}</p>
+        <ul
+          className="text-muted-foreground flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs"
+          aria-label={t('visual.legend')}
+        >
+          <li className="text-success flex items-center gap-1.5">
+            <span className="bg-success size-1.5 rounded-full" aria-hidden="true" />
+            {t('status.safe')}
+          </li>
+          <li className="text-warning flex items-center gap-1.5">
+            <span className="bg-warning size-1.5 rounded-full" aria-hidden="true" />
+            {t('status.warning')}
+          </li>
+          <li className="text-destructive flex items-center gap-1.5">
+            <span className="bg-destructive size-1.5 rounded-full" aria-hidden="true" />
+            {t('status.critical')}
+          </li>
+          <li className="text-destructive flex items-center gap-1.5">
+            <span className="bg-destructive size-1.5 rounded-full" aria-hidden="true" />
+            {t('status.overBudget')}
+          </li>
+        </ul>
       </div>
-      <ul
-        className="text-muted-foreground mt-3 flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs"
-        aria-label={t('visual.legend')}
-      >
-        <li className="text-success flex items-center gap-1.5">
-          <span className="bg-success size-1.5 rounded-full" aria-hidden="true" />
-          {t('status.safe')}
-        </li>
-        <li className="text-warning flex items-center gap-1.5">
-          <span className="bg-warning size-1.5 rounded-full" aria-hidden="true" />
-          {t('status.warning')}
-        </li>
-        <li className="text-destructive flex items-center gap-1.5">
-          <span className="bg-destructive size-1.5 rounded-full" aria-hidden="true" />
-          {t('status.critical')}
-        </li>
-        <li className="text-destructive flex items-center gap-1.5">
-          <span className="bg-destructive size-1.5 rounded-full" aria-hidden="true" />
-          {t('status.overBudget')}
-        </li>
-      </ul>
-      <p className="text-muted-foreground mt-3 text-xs leading-relaxed text-pretty">
+      <p className="text-muted-foreground mt-1 text-xs leading-snug text-pretty">
         {t('scoped.currentDefinition')} {t('scoped.nonAdditive')}
       </p>
       {plans.length === 0 ? (
-        <p className="text-muted-foreground py-8 text-sm">{t('visual.noPeriodMatch')}</p>
+        <p className="text-muted-foreground py-6 text-sm">{t('visual.noPeriodMatch')}</p>
       ) : (
-        <ul className="mt-4 min-w-0">
+        <ul className="mt-2 min-w-0">
           {visiblePlans.map((budget) => (
             <BudgetVisualPlan
               key={budget.id}
@@ -111,15 +103,20 @@ export function BudgetVisualCollection({
 export function BudgetVisualSkeleton() {
   const { t } = useTranslation('common')
   return (
-    <NativePanel as="div" role="status" aria-busy="true" className="min-w-0 space-y-6 p-4 sm:p-6">
+    <NativePanel
+      as="div"
+      role="status"
+      aria-busy="true"
+      className="min-w-0 space-y-3 px-3 py-3 sm:px-4"
+    >
       <span className="sr-only">{t('status.loading')}</span>
       {Array.from({ length: 3 }).map((_, index) => (
-        <div key={index} className="flex min-w-0 items-center gap-4">
-          <Skeleton className="size-[5.5rem] shrink-0 rounded-full sm:size-24" />
-          <div className="min-w-0 flex-1 space-y-2">
-            <Skeleton className="h-4 w-32" />
-            <Skeleton className="h-3 w-44 max-w-full" />
-            <Skeleton className="h-7 w-full max-w-sm" />
+        <div key={index} className="flex min-w-0 items-center gap-3">
+          <Skeleton className="size-14 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Skeleton className="h-4 w-40 max-w-full" />
+            <Skeleton className="h-3 w-56 max-w-full" />
+            <Skeleton className="h-4 w-full max-w-md" />
           </div>
         </div>
       ))}

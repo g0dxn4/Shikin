@@ -72,6 +72,7 @@
     "unavailable": "Usage unavailable",
     "limit": "Limit",
     "remaining": "Remaining",
+    "details": "Details & evidence",
     "capped": "The ring stops at 100%. The percent and the remaining amount stay exact.",
     "statusLine": "{{status}} · {{percent}}%",
     "overLine": "{{status}} · {{amount}} · {{percent}}%",

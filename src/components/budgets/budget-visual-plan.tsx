@@ -1,8 +1,8 @@
-import { Pencil, Tag, Trash2 } from 'lucide-react'
+import { ChevronRight, Pencil, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { ScopedReferences } from '@/lib/scoped-report-read'
 import type { DisplayBudget } from '@/components/budgets/use-budget-display'
-import { ScopedActualResult } from '@/components/budgets/scoped-result'
+import { ScopeSummary, ScopedActualResult } from '@/components/budgets/scoped-result'
 import { budgetUsageVisual } from '@/components/budgets/budget-visual-model'
 import { BudgetUsageRing } from '@/components/budgets/budget-usage-ring'
 import { Button } from '@/components/ui/button'
@@ -29,18 +29,6 @@ function nativeMoney(value: number | null | undefined, currency: string): string
     : '—'
 }
 
-function CategoryMark({ color }: { color: string }) {
-  return (
-    <span
-      className="bg-muted text-foreground grid size-10 shrink-0 place-items-center rounded-lg"
-      style={{ boxShadow: `inset 0 0 0 2px ${color}` }}
-      aria-hidden="true"
-    >
-      <Tag size={16} />
-    </span>
-  )
-}
-
 function Amount({
   label,
   value,
@@ -51,12 +39,12 @@ function Amount({
   emphasis?: boolean
 }) {
   return (
-    <div className="min-w-0">
-      <dt className="text-muted-foreground text-xs">{label}</dt>
+    <div className="flex max-w-full min-w-0 items-baseline gap-1.5">
+      <dt className="text-muted-foreground shrink-0 text-xs">{label}</dt>
       <dd
         className={cn(
-          'mt-1 max-w-full overflow-x-auto font-medium whitespace-nowrap tabular-nums',
-          emphasis ? 'text-destructive text-xl sm:text-2xl' : 'text-foreground text-xl sm:text-2xl'
+          'max-w-full min-w-0 overflow-x-auto text-sm font-medium whitespace-nowrap tabular-nums',
+          emphasis ? 'text-destructive' : 'text-foreground'
         )}
       >
         {value}
@@ -118,26 +106,45 @@ export function BudgetVisualPlan({
           remaining,
           status,
         })
+  const metadata = [
+    t(`periods.${budget.period}`),
+    basis,
+    currency,
+    reportWindow?.start && reportWindow.end ? `${reportWindow.start} – ${reportWindow.end}` : null,
+    reportWindow?.start && reportWindow.end ? reportWindow.timeZone : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  const overCap = visual.filled && visual.percent !== null && visual.percent > 100
 
   return (
     <li
-      className="border-border min-w-0 border-t py-6 first:border-t-0 first:pt-5"
+      className="border-border min-w-0 border-t py-2 first:border-t-0 first:pt-1.5"
       data-budget-plan={budget.id}
     >
-      <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">
+      <div className="flex min-w-0 items-start gap-3">
         <BudgetUsageRing
           visual={visual}
           label={label}
           percentText={visual.filled && visual.percent !== null ? `${visual.percent}%` : '—'}
         />
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-start justify-between gap-2">
-            <div className="flex min-w-0 items-start gap-2.5">
-              <CategoryMark color={mark} />
-              <div className="min-w-0">
-                <p className="text-base font-semibold [overflow-wrap:anywhere]">{category}</p>
-                <p className="mt-0.5 text-sm [overflow-wrap:anywhere]">{budget.name}</p>
-              </div>
+          <div className="flex min-w-0 items-start justify-between gap-1">
+            <div className="min-w-0">
+              <p className="flex min-w-0 items-center gap-1.5 text-sm leading-5 font-semibold">
+                <span
+                  className="border-border size-2.5 shrink-0 rounded-full border"
+                  style={{ backgroundColor: mark }}
+                  aria-hidden="true"
+                />
+                <span className="min-w-0 [overflow-wrap:anywhere]">
+                  {category}
+                  <span className="text-muted-foreground font-normal"> · {budget.name}</span>
+                </span>
+              </p>
+              <p className="text-muted-foreground mt-0.5 max-w-full text-xs leading-4 [overflow-wrap:anywhere]">
+                {metadata}
+              </p>
             </div>
             <div className="flex shrink-0 items-center">
               <Button
@@ -162,24 +169,7 @@ export function BudgetVisualPlan({
               </Button>
             </div>
           </div>
-          <p className="text-muted-foreground mt-2 text-xs [overflow-wrap:anywhere]">
-            <span>{t(`periods.${budget.period}`)}</span>
-            <span aria-hidden="true"> · </span>
-            <span>{currency}</span>
-            {basis ? (
-              <>
-                <span aria-hidden="true"> · </span>
-                <span>{basis}</span>
-              </>
-            ) : null}
-          </p>
-          {reportWindow?.start && reportWindow.end ? (
-            <p className="text-muted-foreground mt-1 max-w-full overflow-x-auto text-xs whitespace-nowrap tabular-nums">
-              {reportWindow.start} – {reportWindow.end}
-              {reportWindow.timeZone ? ` · ${reportWindow.timeZone}` : ''}
-            </p>
-          ) : null}
-          <dl className="mt-4 grid min-w-0 grid-cols-1 gap-3 min-[420px]:grid-cols-3">
+          <dl className="mt-1 flex min-w-0 flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-baseline sm:gap-x-5">
             <Amount label={t('card.spent')} value={spent} />
             <Amount label={t('visual.limit')} value={limit} />
             <Amount
@@ -187,29 +177,54 @@ export function BudgetVisualPlan({
               value={remaining}
               emphasis={typeof budget.remaining === 'number' && budget.remaining < 0}
             />
+            <div className="flex max-w-full min-w-0 items-baseline">
+              <dt className="sr-only">{t('card.progressLabel')}</dt>
+              <dd className={cn('text-xs leading-4 font-medium', TONE_CLASS[visual.tone])}>
+                {statusText}
+              </dd>
+            </div>
           </dl>
-          <p className={cn('mt-3 text-sm font-medium', TONE_CLASS[visual.tone])}>{statusText}</p>
-          {visual.filled && visual.percent !== null && visual.percent > 100 ? (
-            <p className="text-muted-foreground mt-1 max-w-prose text-xs leading-relaxed">
-              {t('visual.capped')}
-            </p>
+          {budget.result ? (
+            <div className="mt-1 min-w-0">
+              <ScopeSummary
+                result={budget.result}
+                accounts={references.accounts}
+                categories={references.categories}
+              />
+            </div>
           ) : null}
           {!budget.is_active ? (
-            <p className="text-muted-foreground mt-2 text-xs">{t('scoped.inactive')}</p>
+            <p className="text-muted-foreground mt-1 text-xs leading-4">{t('scoped.inactive')}</p>
           ) : null}
           {budget.comparison?.limitComparable === false ? (
-            <p className="text-warning mt-2 text-xs leading-relaxed">{t('scoped.notComparable')}</p>
+            <p className="text-warning mt-1 text-xs leading-4">{t('scoped.notComparable')}</p>
           ) : null}
+          <details className="group mt-1 min-w-0">
+            <summary className="text-muted-foreground hover:text-foreground focus-visible:ring-ring flex min-h-11 w-full cursor-pointer list-none items-center gap-1.5 rounded-md text-xs font-medium focus-visible:ring-2 focus-visible:outline-none sm:min-h-7 sm:w-auto [&::-webkit-details-marker]:hidden">
+              <ChevronRight
+                size={14}
+                className="shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none"
+                aria-hidden="true"
+              />
+              <span>{t('visual.details')}</span>
+              <span className="sr-only">{budget.name}</span>
+            </summary>
+            <div className="mt-2 min-w-0 space-y-3">
+              {overCap ? (
+                <p className="text-muted-foreground text-xs leading-relaxed">
+                  {t('visual.capped')}
+                </p>
+              ) : null}
+              <ScopedActualResult
+                key={JSON.stringify(budget.result?.window ?? null)}
+                compact
+                result={budget.result}
+                accounts={references.accounts}
+                categories={references.categories}
+              />
+            </div>
+          </details>
         </div>
-      </div>
-      <div className="mt-4 min-w-0">
-        <ScopedActualResult
-          key={JSON.stringify(budget.result?.window ?? null)}
-          compact
-          result={budget.result}
-          accounts={references.accounts}
-          categories={references.categories}
-        />
       </div>
     </li>
   )

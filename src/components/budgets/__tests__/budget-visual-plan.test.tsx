@@ -1,3 +1,4 @@
+import type * as ScopedResultModule from '@/components/budgets/scoped-result'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -8,22 +9,26 @@ import { formatMoney } from '@/lib/money'
 import { BudgetVisualPlan } from '@/components/budgets/budget-visual-plan'
 import { BudgetVisualCollection } from '@/components/budgets/budget-visual-collection'
 
-vi.mock('@/components/budgets/scoped-result', () => ({
-  ScopedActualResult: ({
-    result,
-    compact,
-  }: {
-    result: { basis?: string; transactionIds?: string[] }
-    compact?: boolean
-  }) => (
-    <div data-evidence-compact={String(!!compact)} data-evidence-basis={result.basis ?? ''}>
-      <p>Inspect scope, coverage & money evidence</p>
-      <button type="button">
-        Inspect contributing transactions · {result.transactionIds?.length ?? 0}
-      </button>
-    </div>
-  ),
-}))
+vi.mock('@/components/budgets/scoped-result', async (importOriginal) => {
+  const actual = await importOriginal<typeof ScopedResultModule>()
+  return {
+    ...actual,
+    ScopedActualResult: ({
+      result,
+      compact,
+    }: {
+      result: { basis?: string; transactionIds?: string[] }
+      compact?: boolean
+    }) => (
+      <div data-evidence-compact={String(!!compact)} data-evidence-basis={result.basis ?? ''}>
+        <p>Inspect scope, coverage & money evidence</p>
+        <button type="button">
+          Inspect contributing transactions · {result.transactionIds?.length ?? 0}
+        </button>
+      </div>
+    ),
+  }
+})
 
 const references = {
   accounts: [
@@ -96,16 +101,25 @@ describe('budget visual plan', () => {
     expect(screen.getByText('$1,000.00')).toBeInTheDocument()
     expect(screen.getByText('$750.00')).toBeInTheDocument()
     expect(screen.getByText('On track · 25%')).toHaveClass('text-success')
-    expect(screen.getByText('Actual gross')).toBeInTheDocument()
-    expect(screen.getByText(/2026-01-01 .+ 2026-01-31 · UTC/)).toBeInTheDocument()
-    expect(screen.getByText('Inspect scope, coverage & money evidence')).toBeInTheDocument()
+    expect(
+      screen.getByText('Monthly · Actual gross · USD · 2026-01-01 – 2026-01-31 · UTC')
+    ).toBeInTheDocument()
+    expect(screen.getByText('All source accounts, categories and tags')).toBeInTheDocument()
+    const metadata = screen.getByText(
+      'Monthly · Actual gross · USD · 2026-01-01 – 2026-01-31 · UTC'
+    )
+    expect(metadata.closest('details')).toBeNull()
+    const details = screen.getByText('Details & evidence').closest('details')
+    expect(details).toHaveTextContent('Inspect scope, coverage & money evidence')
+    expect(details).not.toHaveAttribute('open')
     expect(document.querySelector('[data-evidence-compact="true"]')).toHaveAttribute(
       'data-evidence-basis',
       'gross_cashflow'
     )
   })
 
-  it('caps the ring above 100 and keeps the exact percent and over amount', () => {
+  it('caps the ring above 100 and keeps the exact percent and over amount', async () => {
+    const user = userEvent.setup()
     render(
       <BudgetVisualPlan
         budget={plan({
@@ -136,7 +150,12 @@ describe('budget visual plan', () => {
     expect(screen.getByText(formatMoney(10000, 'EUR'))).toBeInTheDocument()
     expect(screen.getByText(formatMoney(-4000, 'EUR'))).toHaveClass('text-destructive')
     expect(screen.getByText(/Over budget · €40\.00 · 140%/)).toBeInTheDocument()
-    expect(screen.getByText(/ring stops at 100%/)).toBeInTheDocument()
+    const details = screen.getByText('Details & evidence').closest('details')
+    expect(details).toHaveTextContent(/ring stops at 100%/)
+    expect(screen.getByText(/ring stops at 100%/).closest('details')).toBe(details)
+    await user.click(screen.getByText('Details & evidence'))
+    expect(details).toHaveAttribute('open')
+    expect(screen.getByText('Inspect scope, coverage & money evidence')).toBeInTheDocument()
   })
 
   it('shows an em dash and no arc when the limit is not comparable', () => {
@@ -191,6 +210,9 @@ describe('budget visual plan', () => {
     expect(document.querySelector('[data-budget-usage-arc]')).toBeNull()
     expect(screen.getByText('Usage unavailable')).toBeInTheDocument()
     expect(screen.queryByText(/40%/)).not.toBeInTheDocument()
+    expect(screen.getByText('Details & evidence').closest('details')).toHaveTextContent(
+      'Inspect scope, coverage & money evidence'
+    )
     expect(document.querySelector('[data-evidence-basis="net_consumption"]')).toBeInTheDocument()
   })
 
@@ -207,8 +229,12 @@ describe('budget visual plan', () => {
       />
     )
     expect(screen.getByText('Inactive budget · editable for reactivation')).toBeInTheDocument()
+    const details = screen.getByText('Details & evidence').closest('details')
+    expect(details).not.toHaveAttribute('open')
     await user.click(screen.getByRole('button', { name: 'Edit Food plan' }))
     await user.click(screen.getByRole('button', { name: 'Delete Food plan' }))
+    await user.click(screen.getByText('Details & evidence'))
+    expect(details).toHaveAttribute('open')
     expect(onEdit).toHaveBeenCalledOnce()
     expect(onDelete).toHaveBeenCalledOnce()
     expect(
@@ -253,6 +279,7 @@ describe('budget visual collection', () => {
         currency: 'EUR',
         window: { start: '2026-01-01', end: '2026-12-31', timeZone: 'UTC' },
         transactionIds: [],
+        scope: {},
       },
     })
     render(
@@ -262,9 +289,10 @@ describe('budget visual collection', () => {
         references={references}
         onEdit={vi.fn()}
         onDelete={vi.fn()}
-        onAdd={vi.fn()}
       />
     )
+    expect(screen.queryByRole('button', { name: 'Add Budget' })).not.toBeInTheDocument()
+    expect(screen.getAllByText('Details & evidence')).toHaveLength(3)
     expect(screen.getAllByRole('progressbar')).toHaveLength(3)
     expect(screen.getByRole('heading', { name: 'Plan usage' })).toBeInTheDocument()
     expect(screen.getByText(/Budgets may overlap/)).toBeInTheDocument()

@@ -213,7 +213,6 @@ export function Budgets() {
             references={references}
             onEdit={(id) => openBudgetDialog(id)}
             onDelete={setDeleteId}
-            onAdd={() => openBudgetDialog()}
           />
           <ShowMorePagination
             shown={visibleProgressBudgets.length}

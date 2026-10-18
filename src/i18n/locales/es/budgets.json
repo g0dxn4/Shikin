@@ -72,6 +72,7 @@
     "unavailable": "Uso no disponible",
     "limit": "Límite",
     "remaining": "Restante",
+    "details": "Detalles y evidencia",
     "capped": "El anillo se detiene en 100 %. El porcentaje y el importe restante siguen siendo exactos.",
     "statusLine": "{{status}} · {{percent}}%",
     "overLine": "{{status}} · {{amount}} · {{percent}}%",

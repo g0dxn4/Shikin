@@ -107,5 +107,7 @@ describe('budget usage visual', () => {
     expect(es.visual.title).toBe('Uso de los planes')
     expect(es.visual.unfilledLabel).toContain('uso no disponible')
     expect(en.visual.capped).toContain('100%')
+    expect(en.visual.details).toBe('Details & evidence')
+    expect(es.visual.details).toBe('Detalles y evidencia')
   })
 })

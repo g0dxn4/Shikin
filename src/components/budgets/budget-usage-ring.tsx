@@ -33,7 +33,7 @@ export function BudgetUsageRing({
 
   return (
     <div
-      className={cn('relative size-[5.5rem] shrink-0 sm:size-24', tone)}
+      className={cn('relative size-14 shrink-0 overflow-hidden', tone)}
       role={visual.filled ? 'progressbar' : 'img'}
       aria-label={label}
       aria-valuemin={visual.filled ? 0 : undefined}
@@ -73,8 +73,8 @@ export function BudgetUsageRing({
       <span
         aria-hidden="true"
         className={cn(
-          'pointer-events-none absolute inset-0 grid place-items-center px-2 text-center font-medium tabular-nums',
-          percentText.length > 5 ? 'text-xs' : 'text-sm'
+          'pointer-events-none absolute inset-0 grid place-items-center px-1 text-center leading-none font-medium tabular-nums',
+          percentText.length > 4 ? 'text-[10px]' : 'text-xs'
         )}
       >
         {percentText}

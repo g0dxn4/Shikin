@@ -1,8 +1,12 @@
+import type * as ScopedResultModule from '@/components/budgets/scoped-result'
 import { describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router'
 import { render, screen } from '@testing-library/react'
 
-vi.mock('@/components/budgets/scoped-result', () => ({ ScopedActualResult: () => null }))
+vi.mock('@/components/budgets/scoped-result', async (importOriginal) => {
+  const actual = await importOriginal<typeof ScopedResultModule>()
+  return { ...actual, ScopedActualResult: () => null }
+})
 vi.mock('@/components/budgets/use-budget-display', () => ({
   useBudgetDisplay: (budgets: Array<Record<string, unknown>>) => ({
     budgets: budgets.map((budget) => ({ ...budget, complete: true, currency: 'USD' })),

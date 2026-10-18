@@ -42,6 +42,10 @@ describe('Budgets scoped page', () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('Food plan')
+    // Request the fixture window explicitly rather than depending on today's date.
+    await user.click(screen.getByText('Dates & window'))
+    fireEvent.change(screen.getByLabelText('As of'), { target: { value: '2026-10-17' } })
+    await waitFor(() => expect(useBudgetStore.getState().options.asOf).toBe('2026-10-17'))
     expect(screen.getByText('Independent plans')).toBeInTheDocument()
     const independence = document.querySelector('[data-budget-independence]')
     expect(independence).not.toHaveAttribute('open')

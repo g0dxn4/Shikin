@@ -15,14 +15,17 @@ Quality gates are local commands plus GitHub Actions. Git hooks are not used.
 
 - Run `pnpm check` (lint, typecheck, and format check)
 - Run `pnpm test:run`
+- Run `pnpm inventory:generate` after tool contract changes, then `pnpm inventory:check`
 - Run `pnpm build` if your change affects app behavior or packaging
+- Run `pnpm build:cli` for CLI/MCP or packaging changes and the relevant browser tests for frontend changes
+- Use only isolated synthetic databases for migrations, financial integration tests and `pnpm benchmark:mcp`
 - Run `pnpm release:preflight` when your change touches release versions, updater config, or the GitHub release flow
 
 Do not attach databases, `.env` files, or real financial exports to issues or pull requests.
 
 ## CI and releases
 
-- CI on `main` and pull requests runs release preflight, `pnpm check`, unit tests, app/CLI builds, and e2e.
+- CI on `main` and pull requests runs release preflight, `pnpm check`, unit tests, generated inventory validation, app/CLI builds, and e2e.
 - Create release tags only from `main` after `pnpm release:preflight` passes locally. Maintainers own tagging and GitHub Releases.
 - The GitHub release workflow creates a draft release first and publishes it only after signed artifacts and `latest.json` finish uploading.
 

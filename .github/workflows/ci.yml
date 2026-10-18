@@ -41,6 +41,9 @@ jobs:
       - name: Unit tests
         run: pnpm test:run
 
+      - name: Generated MCP inventory
+        run: pnpm inventory:check
+
       - name: Build
         run: pnpm build
 

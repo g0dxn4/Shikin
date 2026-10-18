@@ -247,6 +247,7 @@ const EXPORT_TABLES: ExportTableSpec[] = [
       'payer',
       'amount',
       'received_amount',
+      'unattributed_received_amount',
       'currency',
       'due_date',
       'project_reference',
@@ -304,6 +305,43 @@ const EXPORT_TABLES: ExportTableSpec[] = [
     name: 'budget_periods',
     columns: ['id', 'budget_id', 'start_date', 'end_date', 'spent', 'created_at'],
     orderBy: 'start_date ASC, budget_id ASC, id ASC',
+  },
+  {
+    name: 'budget_history_revisions',
+    columns: [
+      'id',
+      'budget_id',
+      'month',
+      'revision',
+      'supersedes_id',
+      'kind',
+      'snapshot_json',
+      'reason',
+      'source',
+      'idempotency_key',
+      'request_json',
+      'created_at',
+    ],
+    orderBy: 'month ASC, budget_id ASC, revision ASC',
+  },
+  {
+    name: 'receivable_payment_links',
+    columns: [
+      'id',
+      'receivable_id',
+      'transaction_id',
+      'amount',
+      'currency',
+      'transaction_date',
+      'transaction_snapshot_json',
+      'source',
+      'note',
+      'created_at',
+      'reversed_at',
+      'reversal_source',
+      'reversal_note',
+    ],
+    orderBy: 'receivable_id ASC, created_at ASC, id ASC',
   },
   {
     name: 'investments',
@@ -703,6 +741,8 @@ const OPTIONAL_EXPORT_TABLES = new Set([
   'subscriptions',
   'budgets',
   'budget_periods',
+  'budget_history_revisions',
+  'receivable_payment_links',
   'investments',
   'stock_prices',
   'exchange_rates',
@@ -732,7 +772,7 @@ const OPTIONAL_EXPORT_TABLES = new Set([
 ])
 
 const REDACTED_FIELD_PATTERN =
-  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|payer|project[_-]?reference|invoice[_-]?reference|notes?|description|url|value|summary|tags|source|reason|import[_-]?external[_-]?id|import[_-]?fingerprint|before_json|after_json|scope_json|pattern|highlights_json|breakdown_json|document_ref|replacement_transaction_ids_json|source_before_json|mirror_before_json)/i
+  /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|payer|project[_-]?reference|invoice[_-]?reference|notes?|description|url|value|summary|tags|source|reason|import[_-]?external[_-]?id|import[_-]?fingerprint|before_json|after_json|scope_json|snapshot_json|request_json|idempotency_key|pattern|highlights_json|breakdown_json|document_ref|replacement_transaction_ids_json|source_before_json|mirror_before_json)/i
 const REDACTED_SETTINGS_VALUE_KEYS = new Set([FINANCE_PROFILE_SETTING_KEY, 'account_aliases'])
 
 function stableJsonValue(value: unknown): unknown {

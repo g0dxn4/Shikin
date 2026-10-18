@@ -1,0 +1,65 @@
+{
+  "schemaVersion": "shikin.mcp-schema-tokens.v1",
+  "tokenizer": {
+    "package": "tiktoken",
+    "version": "0.12.0"
+  },
+  "methodology": "Exact compact JSON.stringify(tools/list) token counts, encoded locally. No provider model calls, host formatting, inference, caching or billing measured.",
+  "reports": [
+    {
+      "report": "baseline-880a70c.json",
+      "profiles": [
+        {
+          "profile": "full",
+          "schemaBytes": 132658,
+          "schemaSha256": "d8b4eff94b1c0532654cbc1618ad50db43129e40a9c036ee7fb2726bfbbd87cb",
+          "tokens": {
+            "o200k_base": 31106,
+            "cl100k_base": 29887
+          }
+        }
+      ]
+    },
+    {
+      "report": "candidate-agent-workflows.json",
+      "profiles": [
+        {
+          "profile": "full",
+          "schemaBytes": 162122,
+          "schemaSha256": "6dc26f73d59ec3c2aa826f5ec09ff71daede952739f2ab9930cefd71387114f1",
+          "tokens": {
+            "o200k_base": 37964,
+            "cl100k_base": 36439
+          }
+        },
+        {
+          "profile": "core",
+          "schemaBytes": 42668,
+          "schemaSha256": "6250c5c713993188698d5ee838fa1c38524748f6593e604b681ecf410dc72ad9",
+          "tokens": {
+            "o200k_base": 10156,
+            "cl100k_base": 9778
+          }
+        },
+        {
+          "profile": "full-read-only",
+          "schemaBytes": 25228,
+          "schemaSha256": "9a086385e87b1297b8177604d924ee80f5ec3775b7f1ad792561e55ba3616574",
+          "tokens": {
+            "o200k_base": 6129,
+            "cl100k_base": 5920
+          }
+        },
+        {
+          "profile": "core-read-only",
+          "schemaBytes": 16957,
+          "schemaSha256": "5ec4350d5d14b88846f129f0030c964dc70ce077034f906f99cb77ab21d60326",
+          "tokens": {
+            "o200k_base": 4169,
+            "cl100k_base": 4031
+          }
+        }
+      ]
+    }
+  ]
+}

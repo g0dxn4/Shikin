@@ -505,7 +505,7 @@ const deleteBudget: ToolDefinition = {
   name: 'delete-budget',
   effects: { writesTo: ['budgets', 'audit_log', 'budget_periods', 'app_data_state'] },
   description:
-    'Delete a budget. Use this when the user wants to remove a budget they no longer need.',
+    'Delete a current budget definition and legacy period rows. Saved monthly history revisions and transactions are preserved.',
   schema: z.object({
     budgetId: z.string().describe('The ID of the budget to delete'),
     dryRun: z
@@ -540,6 +540,7 @@ const deleteBudget: ToolDefinition = {
         message: `Deleted budget "${existing.name}".`,
         undoSupport: 'unsupported_budget_undo',
         budgetPeriods: 'deleted_by_foreign_key_cascade_not_restorable_by_generic_undo',
+        savedHistory: 'budget_history_revisions_preserved',
       }
     }),
 }

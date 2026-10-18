@@ -136,6 +136,23 @@ describe('notebook writes across approved custom-root migration', () => {
     chmodSync(legacyFile, 0o400)
     stubApprovedCustomRoot(roots)
 
+    // Inject the OS denial at the real append boundary: privileged test runners
+    // can bypass POSIX mode bits, but must still preserve bytes after EACCES.
+    const migratedFile = join(targetNotebookDir(roots.data), 'readonly.md')
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof NodeFs>()
+      return {
+        ...actual,
+        writeFileSync: ((path, data, options) => {
+          const flag = typeof options === 'object' && options !== null ? options.flag : undefined
+          if (path === migratedFile && flag === 'a') {
+            throw Object.assign(new Error('Permission denied'), { code: 'EACCES' })
+          }
+          return actual.writeFileSync(path, data, options)
+        }) as typeof actual.writeFileSync,
+      }
+    })
+
     try {
       const { appendNote } = await loadNotebook()
       await expect(appendNote('readonly.md', 'appended')).rejects.toMatchObject({ code: 'EACCES' })

@@ -3,6 +3,18 @@ import {
   scopedBudgetsStatements,
   assertScopedBudgetsReady,
 } from '@shikin/finance-core/scoped-budgets-migration'
+import {
+  BUDGET_HISTORY_MIGRATION,
+  BUDGET_HISTORY_SCHEMA,
+  budgetHistoryStatements,
+  assertBudgetHistoryReady,
+} from '@shikin/finance-core/budget-history-migration'
+import {
+  RECEIVABLE_PAYMENTS_MIGRATION,
+  RECEIVABLE_PAYMENTS_SCHEMA,
+  receivablePaymentsStatements,
+  assertReceivablePaymentsReady,
+} from '@shikin/finance-core/receivable-payments-migration'
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import dayjs from 'dayjs'
@@ -422,6 +434,8 @@ const CURRENT_SHIKIN_MIGRATIONS = [
   DATED_FX_MIGRATION,
   CLASSIFICATION_TYPES_MIGRATION,
   SCOPED_BUDGETS_MIGRATION,
+  BUDGET_HISTORY_MIGRATION,
+  RECEIVABLE_PAYMENTS_MIGRATION,
 ]
 
 const CURRENT_SHIKIN_SCHEMA = {
@@ -790,6 +804,28 @@ function validateCurrentDatabase() {
 
   const migrationRows = db.prepare('SELECT id, name FROM _migrations').all()
   assertSupportedSchemaVersion(migrationRows)
+  assertBudgetHistoryReady(
+    Object.fromEntries(
+      Object.keys(BUDGET_HISTORY_SCHEMA).map((table) => [
+        table,
+        db.pragma(`table_info(${table})`).map((column) => column.name),
+      ])
+    ),
+    db
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type IN ('table', 'index', 'trigger')")
+      .all()
+  )
+  assertReceivablePaymentsReady(
+    Object.fromEntries(
+      Object.keys(RECEIVABLE_PAYMENTS_SCHEMA).map((table) => [
+        table,
+        db.pragma(`table_info(${table})`).map((column) => column.name),
+      ])
+    ),
+    db
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type IN ('table', 'index', 'trigger')")
+      .all()
+  )
   assertScopedBudgetsReady(
     { budgets: db.pragma('table_info(budgets)').map((column) => column.name) },
     db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger'").all()
@@ -875,7 +911,7 @@ function runMigrationsOnConnection() {
   )
 
   assertSupportedSchemaVersion(db.prepare('SELECT id, name FROM _migrations').all())
-  if (applied.has(SCOPED_BUDGETS_MIGRATION)) {
+  if (applied.has(RECEIVABLE_PAYMENTS_MIGRATION)) {
     validateCurrentDatabase()
     return
   }
@@ -1758,6 +1794,18 @@ function runBackendFoundationUpgrade(applied) {
         budgets: db.pragma('table_info(budgets)').map((column) => column.name),
       }))
         db.exec(statement)
+    }
+    if (!migrations.some((row) => row.name === BUDGET_HISTORY_MIGRATION)) {
+      for (const statement of budgetHistoryStatements()) db.exec(statement)
+    }
+    if (!migrations.some((row) => row.name === RECEIVABLE_PAYMENTS_MIGRATION)) {
+      const columns = Object.fromEntries(
+        Object.keys(RECEIVABLE_PAYMENTS_SCHEMA).map((table) => [
+          table,
+          db.pragma(`table_info(${table})`).map((column) => column.name),
+        ])
+      )
+      for (const statement of receivablePaymentsStatements(columns)) db.exec(statement)
     }
     validateCurrentDatabase()
   }).immediate()

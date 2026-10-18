@@ -2,7 +2,11 @@
 
 This document defines the planned public API contract for Shikin. Current runtime local bridge traffic in browser mode uses separate internal endpoints on `127.0.0.1:1480` (not this spec).
 
-**Status:** Planned for a future release. Not yet implemented.
+**Status:** The REST contract below is planned. The internal local bridge and
+stdio MCP server are implemented through separate adapters; see
+[Backend map](BACKEND-MAP.md), [MCP design](../research/MCP-DESIGN.md), and
+[generated tool inventory](MCP-TOOL-INVENTORY.md). Their actual envelopes,
+permissions, ports, and schemas are not specified by this proposed REST API.
 
 ---
 
@@ -29,7 +33,7 @@ Active bridge base URL in-browser (implemented):
 http://127.0.0.1:1480/api/
 ```
 
-The port `7878` is configurable in Shikin settings.
+The proposed port `7878` would need a future configuration surface; it is not an implemented Shikin setting.
 
 ---
 
@@ -652,7 +656,7 @@ PUT /api/v1/settings/:key
 
 ## Pagination
 
-List endpoints support cursor-based pagination:
+The proposed list endpoints use page/offset pagination:
 
 | Param      | Type    | Default | Description              |
 | ---------- | ------- | ------- | ------------------------ |
@@ -689,6 +693,11 @@ Events:
 { "type": "budget.threshold_reached", "data": { "id": "01HBUD...", "percent": 90 } }
 ```
 
-### MCP Server (v2)
+### Implemented MCP server
 
-The local API can be wrapped as an MCP (Model Context Protocol) server, allowing MCP-compatible clients to interact with Shikin's financial data.
+Shikin already exposes stdio MCP directly from the shared CLI/domain tool
+registry; it does not depend on implementing this proposed REST API. Full is the
+compatibility default, core is opt-in, and read-only is an enforced restriction.
+Inputs, structured results, resources, and permissions are documented in the
+[CLI/MCP guide](../../cli/README.md) and
+[generated inventory](MCP-TOOL-INVENTORY.md).

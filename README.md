@@ -28,21 +28,24 @@ _Screenshots show synthetic demo data._
 
 ### Planning and insights
 
-- Category budgets, savings goals, bills, bill calendar, debt payoff estimates, and receivables
+- Scoped budgets by account, category, and tag, with explicit exclusions and gross or net spending
+- Monthly budget-history captures with preserved original limits and auditable correction revisions
+- Virtual reserves, savings goals, bills, bill calendar, debt payoff estimates, and receivables with linked installment payments
 - Overview, reports with PDF export, spending heatmap, net worth, and habit streaks
 - Native light and dark appearance; English and Spanish
 
 ### Investments and currency
 
 - Holdings with optional quotes from Alpha Vantage, CoinGecko, or Finnhub, plus manual prices
-- Exchange rates via frankfurter.app from cached rates, with an online refresh (including automatic network refresh when rates are stale)
+- Explicit main currency and effective-dated manual FX rates, with incomplete results when required conversion evidence is missing
 - Legacy holdings stay stored; they may need a verified price or valuation identity before converted totals appear
 
 ### Automation (optional)
 
-- 112 shared CLI/MCP tools and 117 CLI commands on the same local database
+- A shared CLI/MCP catalog on the same local database, with a compact opt-in MCP profile and enforced read-only mode
+- Atomic transaction categorization and split corrections with previews and safe retry receipts
 - Imports, reconciliation, payments, buckets, backup, audit, and diagnostics
-- `shikin tools --json` is the catalog (missing `effects` means unaudited, not read-only)
+- `shikin tools --json` and the [generated inventory](docs/reference/MCP-TOOL-INVENTORY.md) provide current tools, schemas, and effects
 - Connect Claude Desktop, Cursor, or any MCP client — Shikin does not ship a chat UI
 
 ### Current limits
@@ -50,6 +53,8 @@ _Screenshots show synthetic demo data._
 - Recurring transfer rules are not supported yet (one-off transfers work)
 - Debt payoff infers card APR as 0% because accounts do not store APR
 - Installment plans such as meses sin intereses are not first-class; record each installment as a recurring or monthly card transaction
+- Budget history is captured explicitly; past months first recorded today are labeled retrospective reconstructions
+- Automatic budget rollover and explicit transaction-to-budget assignment rules remain planned; existing scopes and virtual reserves are available
 
 ## Install
 
@@ -87,12 +92,13 @@ Desktop builds check GitHub Releases and can install **signed updates** from Set
 - Hosted web cannot restore the database — stop hosted access and restore from the desktop app.
 - Legacy holdings stay in the database; they may need a verified price or valuation identity before converted totals appear. Records are not discarded.
 - Import statements from **Transactions → Import Statement**. Maintain coverage and history from **Accounts → Maintain history**. Automation details: [Automation Workflows](docs/reference/AUTOMATION-WORKFLOWS.md).
+- The agent-workflow changes introduce schema 25 (budget history) and 26 (receivable payment evidence). Upgrade app, CLI, and MCP together after a backup; see [migration notes](docs/guides/AGENT-WORKFLOWS-UPGRADE.md). Read-only MCP requires an already upgraded database.
 
 ## Privacy and network
 
 Finance records are stored locally (SQLite under the platform app-data directory). There is no mandatory cloud account.
 
-Shikin is not an offline-only app. Exchange rates use a local cache and can refresh over the network from frankfurter.app — including an automatic refresh on startup when cached rates are stale. Optional market quotes contact Alpha Vantage, CoinGecko, or Finnhub. Optional CLI/MCP clients and external AI tools follow their own privacy practices. Do not assume requests or data never leave the device.
+Current currency loading reads local dated manual rates without a startup network refresh. Optional market quotes and news can contact configured providers such as Alpha Vantage, CoinGecko, or Finnhub. Optional CLI/MCP clients and external AI tools follow their own privacy practices. Review those integrations when deciding which financial data to share.
 
 `shikin web` serves the production app on **127.0.0.1** only. For private access from another machine on your tailnet:
 
@@ -112,6 +118,10 @@ shikin add-transaction --amount 12.50 --type expense --description "Lunch"
 shikin finance-sanity-check --days-ahead 14 --redacted
 shikin web --port 8480
 shikin mcp
+# Smaller everyday catalog; the complete catalog remains the default
+shikin mcp --profile core
+# Enforced audited reads on an existing database
+shikin mcp --profile core --read-only
 ```
 
 ```json
@@ -125,7 +135,9 @@ shikin mcp
 }
 ```
 
-`shikin tools --json` is the catalog. Missing `effects` means unaudited, not read-only. More: [cli/README.md](cli/README.md) and [Automation Workflows](docs/reference/AUTOMATION-WORKFLOWS.md).
+Use `"args": ["mcp", "--profile", "core"]` to opt into the everyday catalog, or append `"--read-only"` to restrict it to audited reads. Profiles stay fixed for the server process. `shikin://capabilities` reports the active profile and permissions. Missing `effects` means unaudited; read-only mode excludes those tools.
+
+See [CLI configuration](cli/README.md), [safe workflows](docs/reference/AUTOMATION-WORKFLOWS.md), and the [measured MCP comparison](docs/benchmarks/MCP-BENCHMARKS.md). Schema size and scripted task results are measured separately from live-model selection accuracy.
 
 ## Development
 
@@ -142,15 +154,19 @@ Current development, CI, and releases use `main`. Create a feature branch from `
 
 ## Docs
 
-| Document                                                                    | Description                                |
-| --------------------------------------------------------------------------- | ------------------------------------------ |
-| [CLI and MCP](cli/README.md)                                                | Install, commands, hosted web, environment |
-| [Backend map](docs/reference/BACKEND-MAP.md)                                | CLI, MCP, bridge, and local backend        |
-| [Automation workflows](docs/reference/AUTOMATION-WORKFLOWS.md)              | Dry-run writes, provenance, smoke notes    |
-| [Frontend map](docs/reference/FRONTEND-MAP.md)                              | Routes, stores, dialogs                    |
-| [Database](docs/reference/DATABASE.md)                                      | SQLite schema and migrations               |
-| [Contributing](docs/guides/CONTRIBUTING.md)                                 | Setup and conventions                      |
-| [Support](SUPPORT.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) | Help, private reports, release notes       |
+| Document                                                                    | Description                                   |
+| --------------------------------------------------------------------------- | --------------------------------------------- |
+| [CLI and MCP](cli/README.md)                                                | Install, commands, hosted web, environment    |
+| [Backend map](docs/reference/BACKEND-MAP.md)                                | CLI, MCP, bridge, and local backend           |
+| [Automation workflows](docs/reference/AUTOMATION-WORKFLOWS.md)              | Dry-run writes, provenance, smoke notes       |
+| [Frontend map](docs/reference/FRONTEND-MAP.md)                              | Routes, stores, dialogs                       |
+| [Database](docs/reference/DATABASE.md)                                      | SQLite schema and migrations                  |
+| [Budget history](docs/BUDGET_HISTORY.md)                                    | Frozen monthly evidence and revisions         |
+| [Receivable payments](docs/RECEIVABLE_PAYMENTS.md)                          | Expected income and received installments     |
+| [MCP design and research](docs/research/MCP-DESIGN.md)                      | Profiles, safety, and architectural tradeoffs |
+| [Financial comparison](docs/research/FINANCIAL-CAPABILITIES.md)             | Competitor findings and remaining priorities  |
+| [Contributing](docs/guides/CONTRIBUTING.md)                                 | Setup and conventions                         |
+| [Support](SUPPORT.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md) | Help, private reports, release notes          |
 
 ## License
 

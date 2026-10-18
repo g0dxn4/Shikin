@@ -84,7 +84,9 @@ function statementFile(name = 'statement.ofx', content = 'parsed by test mock'):
 }
 
 function tableRows(table: string): Record<string, unknown>[] {
-  return db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Record<string, unknown>[]
+  const order =
+    table === 'budget_history_revisions' || table === 'receivable_payment_links' ? 'id' : 'rowid'
+  return db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all() as Record<string, unknown>[]
 }
 
 function databaseSnapshot(): Record<string, Record<string, unknown>[]> {

@@ -1,5 +1,7 @@
 # Native frontend integration
 
+> Historical native-frontend integration plan and validation ledger. Preserve its dated evidence; the [frontend map](../reference/FRONTEND-MAP.md), [architecture](../guides/ARCHITECTURE.md) and [current benchmark/validation report](../benchmarks/MCP-BENCHMARKS.md) describe the latest branch.
+
 Status: complete — all 19 screens integrated, review findings resolved, and final validation passed. Local commits only; nothing installed, released, or pushed.
 
 This records the earlier native-design milestone. Subsequent financial/storage changes and their separate validation/review gates are tracked in [Backend remediation](./BACKEND_REMEDIATION.md).

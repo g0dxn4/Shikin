@@ -16,6 +16,13 @@ import {
   writeAuditLog,
   type ToolDefinition,
 } from './shared.js'
+import {
+  planReceivablePayment,
+  planReceivablePaymentReversal,
+  ReceivablePaymentError,
+  type ReceivablePaymentLink,
+} from '@shikin/finance-core/receivable-payments'
+import { importPlanToken } from '@shikin/finance-core/imports'
 
 type ReceivableStatus = 'open' | 'partial' | 'received' | 'cancelled'
 
@@ -24,6 +31,7 @@ type ReceivableRow = {
   payer: string
   amount: number
   received_amount: number
+  unattributed_received_amount: number
   currency: string
   due_date: string
   project_reference: string | null
@@ -38,7 +46,10 @@ type ReceivableRow = {
   updated_at: string
 }
 
-type ReceivableWithAccountRow = ReceivableRow & { account_name: string | null }
+type ReceivableWithAccountRow = ReceivableRow & {
+  account_name: string | null
+  payments?: ReceivablePaymentLink[]
+}
 
 type IncomeTransactionRow = {
   id: string
@@ -48,11 +59,16 @@ type IncomeTransactionRow = {
   type: 'expense' | 'income' | 'transfer'
   status: 'pending' | 'posted' | 'cleared' | null
   ledger_treatment: string | null
+  reporting_treatment: string | null
   transaction_kind: string | null
   matched_transaction_id: string | null
   is_archived: number | null
   description: string
   date: string
+  account_mode: string | null
+  account_is_archived: number | null
+  is_card_payment: number
+  is_non_income_classification: number
 }
 
 function optionalText(value: string | null | undefined): string | null {
@@ -75,7 +91,7 @@ function isOverdue(receivable: ReceivableRow, asOf: string): boolean {
 
 function receivableSnapshot(
   receivable: ReceivableWithAccountRow,
-  options: { redacted?: boolean; asOf?: string } = {}
+  options: { redacted?: boolean; asOf?: string; includePayments?: boolean } = {}
 ) {
   const redacted = options.redacted ?? false
   const remainingAmountCentavos = Math.max(0, receivable.amount - receivable.received_amount)
@@ -88,6 +104,12 @@ function receivableSnapshot(
     amountCentavos: receivable.amount,
     receivedAmount: fromCentavos(receivable.received_amount),
     receivedAmountCentavos: receivable.received_amount,
+    unattributedReceivedAmount: fromCentavos(receivable.unattributed_received_amount),
+    unattributedReceivedAmountCentavos: receivable.unattributed_received_amount,
+    linkedReceivedAmountCentavos:
+      receivable.received_amount - receivable.unattributed_received_amount,
+    activePaymentCount: (receivable.payments ?? []).filter((payment) => !payment.reversed_at)
+      .length,
     remainingAmount: fromCentavos(remainingAmountCentavos),
     remainingAmountCentavos,
     currency: receivable.currency,
@@ -104,20 +126,69 @@ function receivableSnapshot(
     note: redactText(receivable.note, redacted),
     createdAt: receivable.created_at,
     updatedAt: receivable.updated_at,
+    ...(options.includePayments
+      ? {
+          payments: (receivable.payments ?? []).map((payment) =>
+            paymentSnapshot(payment, redacted)
+          ),
+        }
+      : {}),
   }
 }
 
 function getReceivable(receivableId: string): ReceivableWithAccountRow | null {
-  return (
-    query<ReceivableWithAccountRow>(
-      `SELECT r.*, a.name AS account_name
+  const row = query<ReceivableWithAccountRow>(
+    `SELECT r.*, a.name AS account_name
        FROM receivables r
        LEFT JOIN accounts a ON a.id = r.account_id
        WHERE r.id = $1
        LIMIT 1`,
-      [receivableId]
-    )[0] ?? null
+    [receivableId]
+  )[0]
+  return row ? { ...row, payments: paymentLinks(receivableId) } : null
+}
+
+function paymentLinks(receivableId: string, transactionId?: string): ReceivablePaymentLink[] {
+  return query<ReceivablePaymentLink>(
+    `SELECT * FROM receivable_payment_links WHERE receivable_id = $1${transactionId ? ' OR transaction_id = $2' : ''} ORDER BY created_at, id`,
+    transactionId ? [receivableId, transactionId] : [receivableId]
   )
+}
+
+function paymentSnapshot(payment: ReceivablePaymentLink, redacted = false) {
+  return {
+    id: payment.id,
+    transactionId: payment.transaction_id,
+    amount: fromCentavos(payment.amount),
+    amountCentavos: payment.amount,
+    currency: payment.currency,
+    date: payment.transaction_date,
+    source: redactText(payment.source, redacted),
+    note: redactText(payment.note, redacted),
+    createdAt: payment.created_at,
+    reversedAt: payment.reversed_at,
+    reversalSource: redactText(payment.reversal_source, redacted),
+    reversalNote: redactText(payment.reversal_note, redacted),
+    transactionSnapshot: redacted ? '[REDACTED]' : JSON.parse(payment.transaction_snapshot_json),
+  }
+}
+
+function paymentFailure(error: unknown) {
+  return {
+    success: false,
+    reason: error instanceof ReceivablePaymentError ? error.reason : 'receivable_payment_conflict',
+    message: error instanceof Error ? error.message : 'The receipt could not be applied safely.',
+  }
+}
+
+function incomeEvidence(id: string): IncomeTransactionRow | undefined {
+  return query<IncomeTransactionRow>(
+    `SELECT t.*, a.account_mode, a.is_archived AS account_is_archived,
+      EXISTS (SELECT 1 FROM card_statement_payment_links p WHERE p.transaction_id = t.id AND p.voided_at IS NULL) AS is_card_payment,
+      EXISTS (SELECT 1 FROM transaction_consumption_classifications c WHERE c.transaction_id = t.id AND c.role NOT IN ('earned_income', 'other_income')) AS is_non_income_classification
+      FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE t.id = $1`,
+    [id]
+  )[0]
 }
 
 function resolveOptionalAccount(accountId?: string, account?: string) {
@@ -278,6 +349,7 @@ const manageReceivable: ToolDefinition = {
         payer,
         amount: toCentavos(amount),
         received_amount: 0,
+        unattributed_received_amount: 0,
         currency: resolvedCurrency,
         due_date: dueDate,
         project_reference: optionalText(projectReference),
@@ -592,12 +664,16 @@ const manageReceivable: ToolDefinition = {
       }
     }
 
-    if (existing.matched_transaction_id || existing.received_amount > 0) {
+    if (
+      existing.matched_transaction_id ||
+      existing.received_amount > 0 ||
+      existing.payments?.length
+    ) {
       return {
         success: false,
         reason: 'receivable_has_receipts',
         message:
-          'Receivables with recorded receipts cannot be deleted. Cancel them to preserve the audit trail.',
+          'Receivables with payment history cannot be deleted. Cancel them to preserve the audit trail.',
       }
     }
     if (!apply) {
@@ -643,6 +719,7 @@ const manageReceivable: ToolDefinition = {
 
 const listReceivables: ToolDefinition = {
   name: 'list-receivables',
+  effects: { readOnly: true, writesTo: [] },
   description:
     'List receivables with lifecycle, due-date, payer, account, overdue, and text filters. Returns stable centavo and display fields.',
   schema: z.object({
@@ -666,6 +743,11 @@ const listReceivables: ToolDefinition = {
       .optional()
       .default(false)
       .describe('Redact payer, references, account names, and notes'),
+    includePayments: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Include preserved active and reversed receipt evidence'),
     limit: z.number().int().min(1).max(500).optional().default(100),
   }),
   execute: async ({
@@ -678,6 +760,7 @@ const listReceivables: ToolDefinition = {
     account,
     overdue,
     redacted,
+    includePayments,
     limit,
   }) => {
     if (dueStart && dueEnd && dueStart > dueEnd) {
@@ -743,8 +826,20 @@ const listReceivables: ToolDefinition = {
        LIMIT $${parameter}`,
       params
     )
+    const receiptRows = receivables.length
+      ? query<ReceivablePaymentLink>(
+          `SELECT * FROM receivable_payment_links WHERE receivable_id IN (${receivables.map((_, index) => `$${index + 1}`).join(',')}) ORDER BY created_at, id`,
+          receivables.map((receivable) => receivable.id)
+        )
+      : []
     const snapshots = receivables.map((receivable) =>
-      receivableSnapshot(receivable, { redacted, asOf })
+      receivableSnapshot(
+        {
+          ...receivable,
+          payments: receiptRows.filter((payment) => payment.receivable_id === receivable.id),
+        },
+        { redacted, asOf, includePayments }
+      )
     )
 
     return {
@@ -772,373 +867,300 @@ const listReceivables: ToolDefinition = {
 const matchReceivable: ToolDefinition = {
   name: 'match-receivable',
   description:
-    'Preview or apply a posted/cleared income transaction against an open receivable. Matching defaults to dry-run; set apply to true to write.',
+    'Preview or link a posted income transaction as a partial or final receivable payment. Existing bank income is preserved; active match retries are no-ops.',
   schema: z.object({
-    receivableId: boundedText('Receivable ID', 'The receivable to receive payment for', 128),
+    receivableId: boundedText('Receivable ID', 'The expected income to settle', 128),
     transactionId: boundedText('Transaction ID', 'A posted or cleared income transaction ID', 128),
-    apply: z
-      .boolean()
-      .optional()
-      .default(false)
-      .describe('Set true to apply the match; defaults to dry-run'),
+    apply: z.boolean().optional().default(false).describe('Apply the receipt; defaults to preview'),
+    expectedToken: boundedText(
+      'Expected token',
+      'Token from the reviewed receipt preview; rejects changed evidence',
+      128
+    ).optional(),
     source: boundedText('Source', 'Automation source or origin label', 120).optional(),
     note: boundedText('Note', 'Workflow changelog note', 500).optional(),
     redacted: z.boolean().optional().default(false).describe('Redact payer and reference fields'),
   }),
-  execute: async ({ receivableId, transactionId, apply, source, note, redacted }) => {
-    return transaction(() => {
-      const receivable = getReceivable(receivableId)
-      if (!receivable) {
-        return {
-          success: false,
-          reason: 'receivable_not_found',
-          message: `Receivable ${receivableId} not found.`,
+  execute: async ({
+    receivableId,
+    transactionId,
+    apply,
+    expectedToken,
+    source,
+    note,
+    redacted,
+  }) => {
+    try {
+      return transaction(() => {
+        const receivable = getReceivable(receivableId)
+        if (!receivable)
+          return {
+            success: false,
+            reason: 'receivable_not_found',
+            message: `Receivable ${receivableId} not found.`,
+          }
+        const income = incomeEvidence(transactionId)
+        if (!income)
+          return {
+            success: false,
+            reason: 'transaction_not_found',
+            message: `Transaction ${transactionId} not found.`,
+          }
+        const payments = paymentLinks(receivableId, transactionId)
+        const plan = planReceivablePayment({ receivable, payments, income })
+        const token = importPlanToken({ action: 'match', receivable, payments, income })
+        if (apply && !plan.replayed && expectedToken && token !== expectedToken)
+          throw new ReceivablePaymentError(
+            'stale_preview',
+            'Payment evidence changed. Preview again and pass its current token before applying.'
+          )
+        const transactionSnapshot = {
+          id: income.id,
+          accountId: redactText(income.account_id, redacted),
+          amount: fromCentavos(income.amount),
+          amountCentavos: income.amount,
+          currency: income.currency,
+          type: income.type,
+          status: income.status,
+          ledgerTreatment: income.ledger_treatment,
+          description: redacted ? '[REDACTED]' : income.description,
+          date: income.date,
         }
-      }
-      if (receivable.status !== 'open' && receivable.status !== 'partial') {
-        return {
-          success: false,
-          reason: 'receivable_not_open',
-          message: `Receivable ${receivableId} is ${receivable.status} and cannot receive a new match.`,
+        if (plan.replayed) {
+          return {
+            success: true,
+            action: 'matched',
+            dryRun: !apply,
+            changed: false,
+            replayed: true,
+            token,
+            receivable: receivableSnapshot(receivable, { redacted }),
+            payment: paymentSnapshot(plan.payment, redacted),
+            transaction: transactionSnapshot,
+            message: 'This bank transaction is already linked to this receivable. Nothing changed.',
+          }
         }
-      }
-      if (receivable.matched_transaction_id) {
-        return {
-          success: false,
-          reason: 'receivable_already_matched',
-          message:
-            'This receivable already has a matched transaction; its single transaction link cannot be overwritten.',
+        const now = dayjs().toISOString()
+        const link: ReceivablePaymentLink = {
+          id: generateId(),
+          receivable_id: receivableId,
+          transaction_id: transactionId,
+          amount: income.amount,
+          currency: normalizeCurrencyCode(income.currency!),
+          transaction_date: income.date,
+          transaction_snapshot_json: JSON.stringify(income),
+          source: source ?? receivable.source,
+          note: note ?? receivable.note,
+          created_at: now,
+          reversed_at: null,
+          reversal_source: null,
+          reversal_note: null,
         }
-      }
-
-      const incomeTransaction = query<IncomeTransactionRow>(
-        `SELECT id, account_id, amount, currency, type, status, ledger_treatment,
-                transaction_kind, matched_transaction_id, is_archived, description, date
-         FROM transactions
-         WHERE id = $1
-         LIMIT 1`,
-        [transactionId]
-      )[0]
-      if (!incomeTransaction) {
-        return {
-          success: false,
-          reason: 'transaction_not_found',
-          message: `Transaction ${transactionId} not found.`,
+        const projected: ReceivableWithAccountRow = {
+          ...receivable,
+          received_amount: plan.after.receivedAmount,
+          status: plan.after.status,
+          matched_transaction_id: plan.after.matchedTransactionId,
+          updated_at: now,
+          payments: [...(receivable.payments ?? []), link],
         }
-      }
-      const transactionAccount = resolveAccountId(incomeTransaction.account_id)
-      if (!transactionAccount.success) {
-        return {
-          success: false,
-          reason: 'account_unavailable',
-          message: transactionAccount.message,
+        if (!apply) {
+          return {
+            success: true,
+            action: 'matched',
+            dryRun: true,
+            changed: true,
+            token,
+            wouldMatch: {
+              receivable: receivableSnapshot(projected, { redacted }),
+              transaction: transactionSnapshot,
+            },
+            payment: paymentSnapshot(link, redacted),
+            message:
+              'Preview: link this existing bank payment without creating another income transaction.',
+          }
         }
-      }
-      if (transactionAccount.accountMode === 'snapshot_only') {
-        return {
-          success: false,
-          reason: 'snapshot_only_account',
-          message: `Account ${incomeTransaction.account_id} is snapshot-only and cannot be used for transaction ledger writes.`,
-        }
-      }
-      if (incomeTransaction.type !== 'income') {
-        return {
-          success: false,
-          reason: 'transaction_not_income',
-          message: 'Only income transactions can match receivables.',
-        }
-      }
-      if (incomeTransaction.status !== 'posted' && incomeTransaction.status !== 'cleared') {
-        return {
-          success: false,
-          reason: 'transaction_not_posted',
-          message: 'The income transaction must be posted or cleared before matching.',
-        }
-      }
-      if (incomeTransaction.is_archived === 1) {
-        return {
-          success: false,
-          reason: 'transaction_archived',
-          message: 'Archived transactions cannot match receivables.',
-        }
-      }
-      if (incomeTransaction.ledger_treatment !== 'normal') {
-        return {
-          success: false,
-          reason: 'transaction_non_normal_ledger_treatment',
-          message: 'Only transactions with normal ledger treatment can match receivables.',
-        }
-      }
-      if (
-        (incomeTransaction.transaction_kind ?? 'standard') !== 'standard' ||
-        incomeTransaction.matched_transaction_id
-      ) {
-        return {
-          success: false,
-          reason: 'protected_transaction',
-          message: 'The income transaction is already linked or is reserved financial provenance.',
-        }
-      }
-      if (
-        !incomeTransaction.currency ||
-        normalizeCurrencyCode(incomeTransaction.currency) !==
-          normalizeCurrencyCode(receivable.currency)
-      ) {
-        return {
-          success: false,
-          reason: 'currency_mismatch',
-          message: 'The income transaction currency must match the receivable currency.',
-        }
-      }
-      if (receivable.account_id && incomeTransaction.account_id !== receivable.account_id) {
-        return {
-          success: false,
-          reason: 'account_mismatch',
-          message: 'The income transaction account must match the receivable linked account.',
-        }
-      }
-      if (incomeTransaction.amount <= 0) {
-        return {
-          success: false,
-          reason: 'invalid_income_amount',
-          message: 'The income transaction amount must be positive.',
-        }
-      }
-
-      const remainingAmountCentavos = receivable.amount - receivable.received_amount
-      if (incomeTransaction.amount !== remainingAmountCentavos) {
-        return {
-          success: false,
-          reason: 'payment_amount_mismatch',
-          message: `Transaction amount must exactly match the receivable remaining amount of ${receivable.currency} ${fromCentavos(remainingAmountCentavos).toFixed(2)}.`,
-        }
-      }
-      const matchedElsewhere = query<{ id: string }>(
-        'SELECT id FROM receivables WHERE matched_transaction_id = $1 AND id <> $2 LIMIT 1',
-        [transactionId, receivableId]
-      )[0]
-      if (matchedElsewhere) {
-        return {
-          success: false,
-          reason: 'transaction_already_matched',
-          message: `Transaction ${transactionId} is already matched to receivable ${matchedElsewhere.id}.`,
-        }
-      }
-
-      const receivedAmount = receivable.received_amount + incomeTransaction.amount
-      const matched: ReceivableWithAccountRow = {
-        ...receivable,
-        received_amount: receivedAmount,
-        matched_transaction_id: transactionId,
-        status: 'received',
-        updated_at: dayjs().toISOString(),
-      }
-      const beforeSnapshot = receivableSnapshot(receivable)
-      const afterSnapshot = receivableSnapshot(matched)
-      const transactionSnapshot = {
-        id: incomeTransaction.id,
-        accountId: incomeTransaction.account_id,
-        amount: fromCentavos(incomeTransaction.amount),
-        amountCentavos: incomeTransaction.amount,
-        currency: incomeTransaction.currency,
-        type: incomeTransaction.type,
-        status: incomeTransaction.status,
-        ledgerTreatment: incomeTransaction.ledger_treatment,
-        description: incomeTransaction.description,
-        date: incomeTransaction.date,
-      }
-      const outputReceivable = receivableSnapshot(matched, { redacted })
-      const outputTransaction = redacted
-        ? { ...transactionSnapshot, accountId: '[REDACTED]', description: '[REDACTED]' }
-        : transactionSnapshot
-
-      if (!apply) {
+        execute(
+          `INSERT INTO receivable_payment_links
+            (id, receivable_id, transaction_id, amount, currency, transaction_date,
+             transaction_snapshot_json, source, note, created_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [
+            link.id,
+            link.receivable_id,
+            link.transaction_id,
+            link.amount,
+            link.currency,
+            link.transaction_date,
+            link.transaction_snapshot_json,
+            link.source,
+            link.note,
+            link.created_at,
+          ]
+        )
+        const saved = getReceivable(receivableId)!
+        writeAuditLog({
+          entity: 'receivable',
+          entityId: receivableId,
+          action: 'match',
+          before: { receivable: receivableSnapshot(receivable), transaction: income },
+          after: { receivable: receivableSnapshot(saved), payment: link },
+          source: link.source,
+          note: link.note,
+        })
         return {
           success: true,
-          action: 'matched' as const,
-          dryRun: true,
-          wouldMatch: { receivable: outputReceivable, transaction: outputTransaction },
-          message: `Dry run: transaction ${transactionId} would be matched to receivable ${receivableId}.`,
+          action: 'matched',
+          dryRun: false,
+          changed: true,
+          token,
+          receivable: receivableSnapshot(saved, { redacted }),
+          payment: paymentSnapshot(link, redacted),
+          transaction: transactionSnapshot,
+          message:
+            saved.status === 'received'
+              ? 'The receivable is fully received.'
+              : 'Partial payment linked; the remaining amount is still expected.',
         }
-      }
-
-      const result = execute(
-        `UPDATE receivables
-         SET matched_transaction_id = $1, received_amount = $2, status = $3, updated_at = $4
-         WHERE id = $5
-           AND matched_transaction_id IS NULL
-           AND status IN ('open', 'partial')
-           AND amount = $6
-           AND received_amount = $7
-           AND currency = $8
-            AND account_id IS $9
-            AND NOT EXISTS (
-              SELECT 1 FROM receivables WHERE matched_transaction_id = $10 AND id <> $11
-            )
-            AND EXISTS (
-              SELECT 1
-              FROM transactions t
-              WHERE t.id = $12
-                AND t.type = 'income'
-                AND t.status IN ('posted', 'cleared')
-                AND COALESCE(t.is_archived, 0) = 0
-                AND t.ledger_treatment = 'normal'
-                AND COALESCE(t.transaction_kind, 'standard') = 'standard'
-                AND t.matched_transaction_id IS NULL
-                AND UPPER(TRIM(t.currency)) = UPPER(TRIM($13))
-                AND t.amount = $14
-                AND ($15 IS NULL OR t.account_id = $16)
-            )`,
-        [
-          transactionId,
-          matched.received_amount,
-          matched.status,
-          matched.updated_at,
-          receivableId,
-          receivable.amount,
-          receivable.received_amount,
-          receivable.currency,
-          receivable.account_id,
-          transactionId,
-          receivableId,
-          transactionId,
-          receivable.currency,
-          incomeTransaction.amount,
-          receivable.account_id,
-          receivable.account_id,
-        ]
-      )
-      assertSingleRowUpdated(
-        result,
-        `Receivable ${receivableId} could not be matched safely; it may have changed or the transaction may now be matched elsewhere.`
-      )
-      writeAuditLog({
-        entity: 'receivable',
-        entityId: receivableId,
-        action: 'match',
-        before: { receivable: beforeSnapshot, transaction: transactionSnapshot },
-        after: { receivable: afterSnapshot, transaction: transactionSnapshot },
-        source: source ?? receivable.source,
-        note: note ?? receivable.note,
       })
-
-      return {
-        success: true,
-        action: 'matched' as const,
-        dryRun: false,
-        receivable: outputReceivable,
-        transaction: outputTransaction,
-        message: `Matched transaction ${transactionId} to receivable ${receivableId}.`,
-      }
-    })
+    } catch (error) {
+      return paymentFailure(error)
+    }
   },
 }
 
 const unmatchReceivable: ToolDefinition = {
   name: 'unmatch-receivable',
   description:
-    'Preview or atomically detach a matched income transaction from a receivable while preserving both records.',
+    'Preview or reverse a receivable payment link, preserving bank transactions and receipt history. Select paymentId or all=true when several payments exist.',
   schema: z.object({
-    receivableId: boundedText('Receivable ID', 'Matched receivable ID', 128),
-    apply: z.boolean().optional().default(false).describe('Apply the unmatch; defaults to preview'),
+    receivableId: boundedText('Receivable ID', 'Expected income with receipt history', 128),
+    paymentId: boundedText(
+      'Payment ID',
+      'One receipt link to reverse; omit for a sole active payment',
+      200
+    ).optional(),
+    all: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Explicitly reverse all active payment links'),
+    apply: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe('Apply the reversal; defaults to preview'),
+    expectedToken: boundedText(
+      'Expected token',
+      'Token from the reviewed reversal preview; rejects changed receipts',
+      128
+    ).optional(),
     source: boundedText('Source', 'Automation source or origin label', 120).optional(),
     note: boundedText('Note', 'Workflow changelog note', 500).optional(),
     redacted: z.boolean().optional().default(false).describe('Redact payer and reference fields'),
   }),
-  execute: async ({ receivableId, apply, source, note, redacted }) => {
-    return transaction(() => {
-      const receivable = getReceivable(receivableId)
-      if (!receivable) {
-        return {
-          success: false,
-          reason: 'receivable_not_found',
-          message: `Receivable ${receivableId} not found.`,
+  execute: async ({
+    receivableId,
+    paymentId,
+    all,
+    apply,
+    expectedToken,
+    source,
+    note,
+    redacted,
+  }) => {
+    try {
+      return transaction(() => {
+        const receivable = getReceivable(receivableId)
+        if (!receivable)
+          return {
+            success: false,
+            reason: 'receivable_not_found',
+            message: `Receivable ${receivableId} not found.`,
+          }
+        const plan = planReceivablePaymentReversal({
+          receivable,
+          payments: receivable.payments ?? [],
+          paymentId,
+          all,
+        })
+        const token = importPlanToken({
+          action: 'reverse',
+          receivable,
+          paymentId: paymentId ?? null,
+          all,
+        })
+        if (apply && !plan.replayed && expectedToken && token !== expectedToken)
+          throw new ReceivablePaymentError(
+            'stale_preview',
+            'Payment evidence changed. Preview again and pass its current token before applying.'
+          )
+        const now = dayjs().toISOString()
+        const projected: ReceivableWithAccountRow = {
+          ...receivable,
+          received_amount: plan.after.receivedAmount,
+          status: plan.after.status,
+          matched_transaction_id: plan.after.matchedTransactionId,
+          updated_at: plan.replayed ? receivable.updated_at : now,
+          payments: (receivable.payments ?? []).map((payment) =>
+            plan.paymentIds.includes(payment.id) ? { ...payment, reversed_at: now } : payment
+          ),
         }
-      }
-      if (!receivable.matched_transaction_id || receivable.status !== 'received') {
-        return {
-          success: false,
-          reason: 'receivable_not_matched',
-          message: `Receivable ${receivableId} does not have an applied payment match.`,
+        if (!apply || plan.replayed) {
+          return {
+            success: true,
+            dryRun: !apply,
+            changed: !plan.replayed,
+            replayed: plan.replayed,
+            token,
+            paymentIds: plan.paymentIds,
+            ...(!apply
+              ? { wouldUnmatch: receivableSnapshot(projected, { redacted }) }
+              : { receivable: receivableSnapshot(projected, { redacted }) }),
+            message: plan.replayed
+              ? 'The selected payment links are already reversed.'
+              : 'Preview: reverse the selected receipts while preserving the original bank income.',
+          }
         }
-      }
-      const incomeTransaction = query<IncomeTransactionRow>(
-        `SELECT id, account_id, amount, currency, type, status, ledger_treatment,
-                transaction_kind, matched_transaction_id, is_archived, description, date
-         FROM transactions WHERE id = $1 LIMIT 1`,
-        [receivable.matched_transaction_id]
-      )[0]
-      if (
-        !incomeTransaction ||
-        incomeTransaction.type !== 'income' ||
-        incomeTransaction.is_archived === 1 ||
-        (incomeTransaction.transaction_kind ?? 'standard') !== 'standard' ||
-        incomeTransaction.amount > receivable.received_amount
-      ) {
-        return {
-          success: false,
-          reason: 'invalid_payment_provenance',
-          message:
-            'The matched income transaction is missing or no longer valid payment provenance.',
+        for (const id of plan.paymentIds) {
+          assertSingleRowUpdated(
+            execute(
+              `UPDATE receivable_payment_links SET reversed_at = $1, reversal_source = $2, reversal_note = $3
+              WHERE id = $4 AND receivable_id = $5 AND reversed_at IS NULL`,
+              [now, source ?? null, note ?? null, id, receivableId]
+            ),
+            'The selected receipt changed. Refresh its payment history before retrying.'
+          )
         }
-      }
-
-      const restoredReceivedAmount = receivable.received_amount - incomeTransaction.amount
-      const restored: ReceivableWithAccountRow = {
-        ...receivable,
-        received_amount: restoredReceivedAmount,
-        matched_transaction_id: null,
-        status: restoredReceivedAmount > 0 ? 'partial' : 'open',
-        updated_at: dayjs().toISOString(),
-      }
-      const beforeSnapshot = receivableSnapshot(receivable)
-      const afterSnapshot = receivableSnapshot(restored)
-      const outputSnapshot = receivableSnapshot(restored, { redacted })
-      if (!apply) {
+        const saved = getReceivable(receivableId)!
+        writeAuditLog({
+          entity: 'receivable',
+          entityId: receivableId,
+          action: 'unmatch',
+          before: { receivable: receivableSnapshot(receivable), payments: receivable.payments },
+          after: { receivable: receivableSnapshot(saved), paymentIds: plan.paymentIds },
+          source: source ?? receivable.source,
+          note: note ?? receivable.note,
+        })
+        const transactionIds = (receivable.payments ?? [])
+          .filter((payment) => plan.paymentIds.includes(payment.id))
+          .map((payment) => payment.transaction_id)
         return {
           success: true,
-          dryRun: true,
-          applyRequired: true,
-          wouldUnmatch: outputSnapshot,
-          message: `Dry run: transaction ${incomeTransaction.id} would be detached from receivable ${receivableId}.`,
+          dryRun: false,
+          changed: true,
+          token,
+          receivable: receivableSnapshot(saved, { redacted }),
+          paymentIds: plan.paymentIds,
+          transactionIds,
+          transactionId: transactionIds.length === 1 ? transactionIds[0] : null,
+          message:
+            'Receipt links reversed. The bank transactions and original receipt evidence remain preserved.',
         }
-      }
-
-      assertSingleRowUpdated(
-        execute(
-          `UPDATE receivables
-           SET matched_transaction_id = NULL, received_amount = $1, status = $2, updated_at = $3
-           WHERE id = $4 AND matched_transaction_id = $5 AND received_amount = $6
-             AND status = 'received' AND updated_at = $7`,
-          [
-            restored.received_amount,
-            restored.status,
-            restored.updated_at,
-            receivableId,
-            incomeTransaction.id,
-            receivable.received_amount,
-            receivable.updated_at,
-          ]
-        ),
-        `Receivable ${receivableId} could not be unmatched safely.`
-      )
-      writeAuditLog({
-        entity: 'receivable',
-        entityId: receivableId,
-        action: 'unmatch',
-        before: { receivable: beforeSnapshot },
-        after: { receivable: afterSnapshot },
-        source: source ?? receivable.source,
-        note: note ?? receivable.note,
       })
-      return {
-        success: true,
-        dryRun: false,
-        receivable: outputSnapshot,
-        transactionId: incomeTransaction.id,
-        message: `Unmatched transaction ${incomeTransaction.id} from receivable ${receivableId}.`,
-      }
-    })
+    } catch (error) {
+      return paymentFailure(error)
+    }
   },
 }
 

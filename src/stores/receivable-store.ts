@@ -14,6 +14,8 @@ export interface ReceivableWithDetails extends Receivable {
   accountCurrency: CurrencyCode | null
   isOverdue: boolean
   remainingAmount: number
+  activePaymentCount?: number
+  paymentHistoryCount?: number
 }
 
 interface ReceivableFormData {
@@ -65,9 +67,16 @@ export const useReceivableStore = create<ReceivableState>((set, get) => ({
     set({ isLoading: true, fetchError: null })
     try {
       const raw = await query<
-        Receivable & { account_name: string | null; account_currency: CurrencyCode | null }
+        Receivable & {
+          account_name: string | null
+          account_currency: CurrencyCode | null
+          active_payment_count?: number
+          payment_history_count?: number
+        }
       >(
-        `SELECT r.*, a.name as account_name, a.currency as account_currency
+        `SELECT r.*, a.name as account_name, a.currency as account_currency,
+           (SELECT COUNT(*) FROM receivable_payment_links p WHERE p.receivable_id = r.id AND p.reversed_at IS NULL) AS active_payment_count,
+           (SELECT COUNT(*) FROM receivable_payment_links p WHERE p.receivable_id = r.id) AS payment_history_count
          FROM receivables r
          LEFT JOIN accounts a ON r.account_id = a.id
          ORDER BY r.due_date ASC, r.created_at DESC`
@@ -79,6 +88,8 @@ export const useReceivableStore = create<ReceivableState>((set, get) => ({
         accountCurrency: r.account_currency,
         isOverdue: computeIsOverdue(r.due_date, r.status),
         remainingAmount: computeRemaining(r.amount, r.received_amount),
+        activePaymentCount: r.active_payment_count ?? (r.matched_transaction_id ? 1 : 0),
+        paymentHistoryCount: r.payment_history_count ?? (r.matched_transaction_id ? 1 : 0),
       }))
 
       set({ receivables, fetchError: null })
@@ -268,6 +279,14 @@ export const useReceivableStore = create<ReceivableState>((set, get) => ({
         if (existing.matched_transaction_id || existing.received_amount > 0) {
           throw new Error('Receivables with recorded receipts cannot be deleted.')
         }
+        const paymentHistory = await tx.query<{ id: string }>(
+          'SELECT id FROM receivable_payment_links WHERE receivable_id = ? LIMIT 1',
+          [id]
+        )
+        if (paymentHistory.length)
+          throw new Error(
+            'Receivables with payment history cannot be deleted. Cancel the receivable instead.'
+          )
         const result = await tx.execute(
           `DELETE FROM receivables
            WHERE id = ? AND received_amount = 0 AND matched_transaction_id IS NULL

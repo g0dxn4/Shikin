@@ -93,6 +93,7 @@ export interface Receivable {
   payer: string
   amount: Money
   received_amount: Money
+  unattributed_received_amount?: Money
   currency: CurrencyCode
   due_date: DateStr
   project_reference: string | null

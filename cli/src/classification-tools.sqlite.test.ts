@@ -19,6 +19,7 @@ vi.mock('./notebook.js', () => ({
   listNotes: vi.fn(),
 }))
 import { classificationTools } from './classification-tools.js'
+import { receivablesTools } from './tools/receivables.js'
 const run = async (name: string, input: Record<string, unknown>) => {
   const tool = classificationTools.find((entry) => entry.name === name)!
   return tool.execute(tool.schema.parse(input))
@@ -47,6 +48,41 @@ beforeEach(() => {
 afterEach(() => state.db?.close())
 
 describe('CLI classification catalog and batch services', () => {
+  it('rejects both installment sources when the legacy single-payment mirror is null', async () => {
+    state.db!.exec(`
+      INSERT INTO receivables (id,payer,amount,currency,due_date,status,account_id)
+        VALUES ('invoice','Synthetic client',200,'USD','2026-01-10','open','a');
+      INSERT INTO transactions (id,account_id,category_id,type,amount,currency,description,date,status)
+        VALUES ('installment','a','income','income',100,'USD','Second installment','2026-01-03','posted');
+    `)
+    const match = receivablesTools.find((tool) => tool.name === 'match-receivable')!
+    for (const transactionId of ['refund', 'installment'])
+      expect(
+        await match.execute(
+          match.schema.parse({ receivableId: 'invoice', transactionId, apply: true })
+        )
+      ).toMatchObject({ success: true })
+    expect(
+      state.db!.prepare("SELECT matched_transaction_id FROM receivables WHERE id='invoice'").get()
+    ).toEqual({ matched_transaction_id: null })
+    const allocations = ['refund', 'installment'].map((transactionId) => ({
+      transactionId,
+      builtinRole: 'earned_income',
+    }))
+    const before = snapshot()
+    const preview = await run('preview-consumption-classifications', { allocations })
+    expect(preview.applicable).toBe(false)
+    expect(preview.items).toHaveLength(2)
+    for (const item of preview.items)
+      expect(item.errors).toEqual(
+        expect.arrayContaining([expect.stringMatching(/Protected receivable/)])
+      )
+    await expect(
+      run('apply-consumption-classifications', { allocations, previewToken: preview.previewToken })
+    ).rejects.toThrow(/invalid/)
+    expect(snapshot()).toEqual(before)
+  })
+
   it('creates/revises/archives append-only types while preserving pinned history', async () => {
     const created = await run('create-classification-type', {
       name: ' Gift ',

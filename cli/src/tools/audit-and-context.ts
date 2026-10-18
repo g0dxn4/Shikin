@@ -1970,7 +1970,7 @@ function assertCurrentTransactionUndoState(entry: AuditLogRow, plan: UndoPlan) {
   }>(
     `SELECT
          (SELECT COUNT(*) FROM account_reconciliations WHERE adjustment_transaction_id = $1) AS reconciliation_count,
-         (SELECT COUNT(*) FROM receivables WHERE matched_transaction_id = $2) AS receivable_count,
+         (SELECT COUNT(*) FROM (SELECT matched_transaction_id AS transaction_id FROM receivables UNION SELECT transaction_id FROM receivable_payment_links WHERE reversed_at IS NULL) receipt_evidence WHERE transaction_id = $2) AS receivable_count,
          (SELECT COUNT(*) FROM account_reconciliations
           WHERE account_id = $3 AND staging_batch_id = $4 AND selection_mode = 'legacy_batch') AS finalized_statement_count`,
     [plan.entityId, plan.entityId, current.account_id, current.staging_batch_id ?? null]
@@ -2631,7 +2631,7 @@ function getRecentAuditSanityFindings(input: { asOf: string; redacted: boolean; 
 const undo: ToolDefinition = {
   name: 'undo',
   description:
-    'Preview or apply a safe rollback for the latest matching transaction or credit-card-statement audit entry. Dry-run is the default; pass apply=true to write.',
+    'Preview or apply rollback for supported transaction or credit-card-statement create/update/delete audit entries. Metadata corrections and batch receipts require a new reviewed correction. Preview is the default; pass apply=true to write.',
   schema: z.object({
     last: z
       .boolean()
@@ -2771,6 +2771,7 @@ const financeSanityCheck: ToolDefinition = {
   name: 'finance-sanity-check',
   description:
     'Run generic automation-safe finance checks for card statements, placeholders, duplicate-looking transactions, subscriptions, recurring rules, balances, uncategorized spending, and recent provenance writes.',
+  effects: { readOnly: true, writesTo: [] },
   schema: z.object({
     asOf: isoDate('Date used for due/overdue checks').optional(),
     daysAhead: z
@@ -2872,6 +2873,7 @@ const auditList: ToolDefinition = {
   name: 'audit-list',
   description:
     'List audit history entries with filters for automation-safe triage. Supports redaction of free-text before/after/source/note details.',
+  effects: { readOnly: true, writesTo: [] },
   schema: z.object({
     since: z
       .string()
@@ -2929,6 +2931,7 @@ const auditList: ToolDefinition = {
 const auditShow: ToolDefinition = {
   name: 'audit-show',
   description: 'Show one audit history entry by ID with optional free-text redaction.',
+  effects: { readOnly: true, writesTo: [] },
   schema: z.object({
     id: boundedText('Audit ID', 'Audit log entry ID to fetch', 160),
     redacted: z
@@ -2968,6 +2971,7 @@ const automationContext: ToolDefinition = {
   name: 'automation-context',
   description:
     'Return one consolidated automation context payload for setup readiness, accounts, aliases, budgets, subscriptions, cards, recurring bills, support surfaces, and recent audits.',
+  effects: { readOnly: true, writesTo: [] },
   schema: z.object({
     redacted: z
       .boolean()

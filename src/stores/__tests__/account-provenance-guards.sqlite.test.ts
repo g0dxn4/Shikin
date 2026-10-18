@@ -81,7 +81,11 @@ function allTables() {
   return Object.fromEntries(
     tables.map(({ name }) => [
       name,
-      holder.db.prepare(`SELECT * FROM ${name} ORDER BY rowid`).all(),
+      holder.db
+        .prepare(
+          `SELECT * FROM ${name} ORDER BY ${name === 'budget_history_revisions' || name === 'receivable_payment_links' ? 'id' : 'rowid'}`
+        )
+        .all(),
     ])
   )
 }

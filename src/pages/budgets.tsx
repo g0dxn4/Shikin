@@ -31,6 +31,11 @@ const ConfirmDialog = lazy(() =>
     default: m.ConfirmDialog,
   }))
 )
+const BudgetHistoryPanel = lazy(() =>
+  import('@/components/budgets/budget-history-panel').then((m) => ({
+    default: m.BudgetHistoryPanel,
+  }))
+)
 
 const BUDGETS_PAGE_SIZE = 20
 
@@ -159,6 +164,7 @@ export function Budgets() {
   const [searchParams] = useSearchParams()
   const budgetId = searchParams.get('budget') ?? undefined
   const [includeInactive, setIncludeInactive] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [windowOptions, setWindowOptions] = useState<ReportWindowInput>({})
   const authority = useCurrencyStore(currencyAuthorityKey)
   const options = useMemo(
@@ -256,6 +262,13 @@ export function Budgets() {
         }
         actions={
           <>
+            <Button
+              variant="outline"
+              onClick={() => setHistoryOpen((open) => !open)}
+              aria-expanded={historyOpen}
+            >
+              {t('history.title')}
+            </Button>
             <Button variant="outline" onClick={() => invalidateTransactionPage('store-refresh')}>
               {t('scoped.refresh')}
             </Button>
@@ -279,6 +292,11 @@ export function Budgets() {
         {t('scoped.includeInactive')}
       </label>
       <WindowControls budget value={windowOptions} onChange={setWindowOptions} />
+      {historyOpen && (
+        <Suspense>
+          <BudgetHistoryPanel initialBudgetId={budgetId} />
+        </Suspense>
+      )}
       <ErrorBanner
         title={t('error.load')}
         message={displayError || (!hasInitialLoadError ? fetchError : null)}

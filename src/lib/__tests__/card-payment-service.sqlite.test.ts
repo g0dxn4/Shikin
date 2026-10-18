@@ -59,7 +59,14 @@ function allTableSnapshot(): Record<string, unknown[]> {
     )
     .all() as Array<{ name: string }>
   return Object.fromEntries(
-    tables.map(({ name }) => [name, db.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all()])
+    tables.map(({ name }) => [
+      name,
+      db
+        .prepare(
+          `SELECT * FROM "${name}" ORDER BY ${name === 'budget_history_revisions' || name === 'receivable_payment_links' ? 'id' : 'rowid'}`
+        )
+        .all(),
+    ])
   )
 }
 

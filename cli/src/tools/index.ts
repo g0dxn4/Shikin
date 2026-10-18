@@ -1,7 +1,9 @@
 import type { ToolDefinition } from './shared.js'
 import { transactionsTools } from './transactions.js'
+import { transactionBatchTools } from './transaction-batch.js'
 import { accountsandanalyticsTools } from './accounts-and-analytics.js'
 import { budgetsandnetworthTools } from './budgets-and-net-worth.js'
+import { budgetHistoryTools } from './budget-history.js'
 import { creditCardsTools } from './credit-cards.js'
 import { investmentsandsubscriptionsTools } from './investments-and-subscriptions.js'
 import { notebookandmarketTools } from './notebook-and-market.js'
@@ -19,9 +21,11 @@ import { loadEnabledPluginToolDefinitions } from '../plugins.js'
 
 export const builtInTools: ToolDefinition[] = [
   ...transactionsTools,
+  ...transactionBatchTools,
   ...accountsandanalyticsTools,
   ...creditCardsTools,
   ...budgetsandnetworthTools,
+  ...budgetHistoryTools,
   ...investmentsandsubscriptionsTools,
   ...notebookandmarketTools,
   ...automationTools,

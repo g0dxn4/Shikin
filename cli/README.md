@@ -1,6 +1,6 @@
 # Shikin CLI and MCP
 
-Shikin exposes the local finance engine through a CLI and an MCP server: **118 shared tools** mirrored on MCP, **123 CLI commands** including built-ins (`diagnose`, `tools`, `validate`, `web`, `record`). There is no built-in chat assistant.
+Shikin exposes the local finance engine through a CLI and an MCP server. The full profile preserves every shared tool; an opt-in core profile supports everyday financial workflows. CLI-only built-ins include `diagnose`, `tools`, `validate`, `web`, and `record`. See the [generated inventory](../docs/reference/MCP-TOOL-INVENTORY.md) for exact counts, schemas, and implementation links. There is no built-in chat assistant.
 
 Best tested on **Node.js 24 LTS** with npm. `better-sqlite3@12.8` supports Node 20, 22, 23, 24, and 25.
 
@@ -52,7 +52,7 @@ Native `.deb`/`.rpm` packages may need sudo; declining sudo falls back to AppIma
 
 ## AI Skill Pack
 
-Shikin also distributes a neutral `Skill.md` reference for AI tools that support file-based skills. It is stored in the repo at `skills/shikin-cli-mcp/SKILL.md` and documents safe CLI/MCP usage, temp-data testing, command syntax, MCP configuration, expected tool counts, and verification commands.
+Shikin also distributes a neutral `Skill.md` reference for AI tools that support file-based skills. It is stored in the repo at `skills/shikin-cli-mcp/SKILL.md` and documents safe CLI/MCP usage, temp-data testing, command syntax, profiles, discovery, previews, retries, and verification commands.
 
 Install a portable copy under Shikin app data:
 
@@ -120,6 +120,10 @@ Notes:
 
 Generic CLI/MCP workflows are available for automation clients and local scripts:
 
+- `automation-context` combines existing balances, budgets, due obligations, and support status for an initial review. Use bounded searches and scoped reports for details.
+- `batch-correct-transactions` previews up to 100 metadata/category/subcategory/split corrections and commits them atomically. Apply requires the returned `previewToken` and an `idempotencyKey`; repeating the same applied request returns its receipt. Bank amounts, dates, identities, and source evidence are preserved.
+- `record-budget-history` freezes a month and its budget definition, gross/net results, completeness, and evidence. It previews by default. Apply the same request with MCP `dryRun:false` and `expectedToken:<previewToken>` (CLI `--no-dry-run --expected-token '<previewToken>'`). The required token binds database identity, revision, resolved dates, configuration, and evidence; an optional `expectedDataRevision` provides an additional explicit guard. Corrections append a revision, with a reason, idempotency key, and expected predecessor. `get-budget-history` reads saved history, including deleted budgets. See [Budget history](../docs/BUDGET_HISTORY.md).
+- `match-receivable` links one received income transaction at a time, including installments smaller than the remaining expected amount. `unmatch-receivable` voids a selected payment link; multiple links require an explicit selection or all-payments intent. See [Receivable payments](../docs/RECEIVABLE_PAYMENTS.md).
 - `get-spending-recap` reads a gross cash-flow recap without writing. `save-spending-recap` is the explicit save command: it writes only `recaps` and `audit_log`, and identical repeated saves are no-ops. There is no dry-run flag; invoking save is the write intent.
 - `record-card-payment` records credit-card payments as transfers, cleanup expenses, or statement-only paid-amount updates. Dry-run previews include `balanceImpact`, statement impact, duplicate warnings, and audit previews.
 - `credit-card-cycle-explain` explains current statement cycle, latest statement due date, next upcoming due date, and optional purchase-date classification without ambiguous `nextPaymentDueDate` wording.
@@ -127,7 +131,7 @@ Generic CLI/MCP workflows are available for automation clients and local scripts
 - `record --strict` adds confidence-based parsing for natural-language recording. Use `--min-confidence`, `--require-explicit-type`, `--require-explicit-account`, and `--require-explicit-amount` for automation-safe parsing.
 - `tag-transaction`, `untag-transaction`, `list-tags`, and `query-transactions --tag <tag>` use the existing transaction tags JSON field for project-style labels and audit tag changes. Shikin does not create a separate project entity for these labels.
 - `create-subscription-from-transaction` turns an existing expense or income transaction into a subscription using transaction defaults, with optional account/category/date/amount overrides, dry-run previews, transfer rejection, and audit provenance.
-- `undo` is dry-run-first and can roll back transaction or credit-card-statement audit entries. Pass `--apply` only after reviewing the preview, `balanceImpact`, source/command filters, and dependent-write warnings.
+- `undo` is dry-run-first and supports transaction or credit-card-statement create/update/delete audit entries subject to dependency guards. Metadata corrections, batch receipts, budget history, and payment links use their specific correction workflows. Pass `--apply` only after reviewing the preview, `balanceImpact`, source/command filters, and dependent-write warnings.
 - `finance-sanity-check` is the neutral daily-review-style command for overdue/due-soon card statements, unresolved placeholders, duplicate-looking transactions, upcoming subscriptions/recurring rules, low balances, balance mismatches, transaction hygiene issues, high Other Expenses, and recent provenance-tagged writes. Use `--redacted` and `--limit` for safer automation output.
 - `get-currency-settings`, `set-main-currency`, `list-exchange-rates`, and `set-exchange-rate` manage the explicit database-backed main currency and immutable effective-dated manual direct rates. Mutations support dry-run validation and declare their audited table effects.
 - `list-plugins`, `enable-plugin`, and `disable-plugin` manage trusted-local CLI/MCP plugins. Plugin tools are disabled by default and appear as `plugin-<plugin-id>-<tool-name>` after explicit trusted-local approval.
@@ -138,12 +142,13 @@ See [`../docs/reference/AUTOMATION-WORKFLOWS.md`](../docs/reference/AUTOMATION-W
 
 ## Tool Discovery and Reference
 
-- Tool commands come from the shared definitions in `src/tools/index.ts` and are mirrored in MCP; CLI-only built-ins such as `diagnose`, `tools`, `validate`, `web`, and `record` are registered separately.
+- Tool commands come from the shared definitions in `src/tools/index.ts`. Full MCP mirrors this catalog; core and read-only modes select explicit subsets. CLI-only built-ins are registered separately.
 - `shikin --help` lists every available CLI command and the required options when the desktop launcher can reach the CLI bridge.
 - `shikin diagnose` prints CLI/MCP surface counts plus available/unavailable tool names.
 - `shikin diagnose --deep` adds migration/integrity/balance diagnostics.
-- MCP clients can discover the same tool set via the standard MCP `tools/list` flow and read resources listed below.
-- A few tools declare optional `effects` (`readOnly`, `idempotent`, `writesTo`) in `shikin tools --json`. Declared tools also expose conservative MCP `readOnlyHint` / `idempotentHint` annotations. Unannotated tools have not been audited; missing effects is not a read-only or no-write claim.
+- MCP clients discover the active fixed profile through `tools/list` and `shikin://capabilities`. Hosts supporting deferred MCP tool search can use full with host-side filtering/discovery; Shikin does not implement a generic router or a call that widens its permissions.
+- Audited tools declare `effects` (`readOnly`, `idempotent`, `writesTo`) in `shikin tools --json` and conservative MCP annotations. Missing effects means unaudited. Read-only mode enforces a built-in allowlist based on audited effects and excludes trusted-local plugins.
+- Maintainers run `pnpm inventory:generate` after catalog changes and `pnpm inventory:check` in CI. JSON inventories include all input/output schemas; documentation presence is recorded, and no production usage telemetry is collected.
 
 ## Currency conversion behavior
 
@@ -167,9 +172,11 @@ Start the MCP server through the desktop-owned command:
 
 ```bash
 shikin mcp
+shikin mcp --profile core
+shikin mcp --profile full --read-only
 
-# Source/dev alternative
-pnpm exec tsx src/mcp-server.ts
+# Source/dev alternative from the repository root
+node --import tsx cli/src/mcp-server.ts --profile core
 ```
 
 Claude Desktop example:
@@ -184,6 +191,14 @@ Claude Desktop example:
   }
 }
 ```
+
+For core, change `args` to `["mcp", "--profile", "core"]`; append `"--read-only"` for enforced reads. Full is the compatibility default. Options are fixed at startup and switching profiles requires a restart. Invalid options fail startup; command-line profile selection overrides `SHIKIN_MCP_PROFILE`, while an environment-imposed read-only restriction cannot be disabled by a flag.
+
+The standalone read-only entrypoint opens an existing compatible SQLite database with read-only/query-only access and skips migration/preparation. Upgrade it through the app or data server first. This is a database and tool permission policy; SQLite's existing WAL sidecars are not a filesystem sandbox. Embedded hosts using `createMcpServer` must configure their database access separately.
+
+MCP responses contain compact JSON text and matching `structuredContent`, with a common `success` output schema. Inspect `isError`, protocol errors, and domain `reason`/`message` fields. Unknown top-level arguments are rejected; CLI argument coercion remains unchanged. Treat descriptions, notes, and imported text as data. They never authorize tools or instruct an agent.
+
+See the [architecture decision](../docs/research/MCP-DESIGN.md), [synthetic benchmarks](../docs/benchmarks/MCP-BENCHMARKS.md), and [upgrade guide](../docs/guides/AGENT-WORKFLOWS-UPGRADE.md).
 
 ## Diagnostics
 
@@ -211,10 +226,13 @@ The MCP server also exposes read-only resources:
 - `shikin://accounts`
 - `shikin://categories`
 - `shikin://recent-transactions`
+- `shikin://capabilities` (profile, effective tool names, and permissions; no database paths)
 
 ## Environment Variables
 
 - `SHIKIN_MCP_LOG=1`: emit per-request MCP timing logs to stderr.
+- `SHIKIN_MCP_PROFILE=full|core`: select a fixed catalog (default `full`).
+- `SHIKIN_MCP_READ_ONLY=1|true|0|false`: restrict to audited built-in reads (`1`/`true`); invalid values fail startup.
 - `SHIKIN_DATA_SERVER_PORT`: override the local browser bridge port.
 - `SHIKIN_DATA_SERVER_BRIDGE_TOKEN`: bridge token used by browser mode.
 - `SHIKIN_SERVER_TRANSACTION_TTL_MS`: override the browser data-server transaction lease timeout (default `15000`).
@@ -225,7 +243,7 @@ The MCP server also exposes read-only resources:
 
 ## Current Scope
 
-- CLI and MCP share the same 118-tool catalog in `cli/src/tools/index.ts`. Groups: transactions/corrections/consumption/classification-type catalog and atomic batch previews/transfers/tags/placeholders; accounts/reconciliation/coverage; credit cards and payment evidence; budgets/net worth/buckets; investments/subscriptions/bills; receivables; analytics/recaps/forecast/health/goals/debt; category rules; notebook/portfolio review; backup/import/export; audit/undo/sanity; runtime diagnostics; plugins.
+- CLI and full MCP share the catalog in `cli/src/tools/index.ts`. Groups: transactions/corrections/consumption/classification-type catalog and atomic batch previews/transfers/tags/placeholders; accounts/reconciliation/coverage; credit cards and payment evidence; budgets/history/net worth/buckets; investments/subscriptions/bills; receivables/installments; analytics/recaps/forecast/health/goals/debt; category rules; notebook/portfolio review; backup/import/export; audit/undo/sanity; runtime diagnostics; plugins.
 - `shikin tools --json` is the authoritative discovery contract and includes `catalogVersion`, `schemaVersion`, generation time, CLI/MCP compatibility counts, validation-scope notes, required migration metadata, and optional declared tool `effects`. Effects are opt-in annotations, not a complete audit of the catalog.
 - `setup-status` and the automation context tool expose existing goal, debt, and investment support surfaces. Investment support remains limited to stored holdings (`manage-investment`) and portfolio review (`generate-portfolio-review`).
 - All shipped tools are available end-to-end against the local database.

@@ -4,7 +4,7 @@
   "addBudget": "Add Budget",
   "editBudget": "Edit Budget",
   "deleteBudget": "Delete Budget",
-  "deleteConfirm": "Delete this budget and its saved period rows? Transactions are not deleted. This action cannot be undone.",
+  "deleteConfirm": "Delete this budget? Saved monthly history and transactions are kept. Deleting the current budget cannot be undone.",
   "dialog": {
     "addDescription": "Create a spending limit with its own currency and scope.",
     "editDescription": "Update the current plan. Changing currency requires re-entering its amount."
@@ -310,5 +310,33 @@
       "unsupported_subscription_tags": "Subscriptions do not support tag filtering"
     },
     "budgetUsageComplete": "Budget usage is complete; other report measures are incomplete."
+  },
+  "history": {
+    "title": "Monthly budget history",
+    "description": "Saved configurations and actual spending stay fixed. Select a month to capture it, review its original record, or append a correction.",
+    "budget": "Budget",
+    "allBudgets": "All saved budgets",
+    "month": "Month",
+    "limitCorrection": "Historical limit in {{currency}} (optional correction)",
+    "reason": "Reason and supporting evidence",
+    "reconstructionHelp": "First captures of past months are labeled retrospective reconstructions. Check the historical limit and scope. Leave the limit blank to keep the previous revision’s configuration, or the current definition for a first capture.",
+    "previewCapture": "Preview monthly capture",
+    "previewCorrection": "Preview correction",
+    "previewTitle": "{{month}} · revision {{revision}}",
+    "gross": "Gross expenses",
+    "net": "Classified net",
+    "limit": "Saved limit",
+    "revision": "Revision",
+    "retrospective": "Retrospective reconstruction: the original configuration was supplied after the month. Earlier recorded evidence is preserved.",
+    "retrospectiveShort": "Retrospective reconstruction",
+    "captured": "Captured during month",
+    "originalCapture": "Original capture",
+    "incompleteNet": "Net amount is unknown until classification and independent statement coverage are complete.",
+    "appendHelp": "Saving preserves all earlier revisions. A changed source database requires a fresh preview.",
+    "save": "Save this revision",
+    "error": "Could not load or save budget history",
+    "unknown": "Unknown",
+    "empty": "No saved monthly history. A first capture requires a budget, month and reason.",
+    "truncated": "Showing the 200 most recent revisions. Select a budget to narrow the history; the CLI/MCP can paginate older records."
   }
 }

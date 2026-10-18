@@ -233,6 +233,7 @@ async function state(tx: TransactionClient): Promise<State> {
 async function protectedIds(tx: TransactionClient): Promise<string[]> {
   const values = await tx.query<{ id: string }>(
     `SELECT matched_transaction_id AS id FROM receivables WHERE matched_transaction_id IS NOT NULL
+     UNION SELECT transaction_id AS id FROM receivable_payment_links WHERE reversed_at IS NULL
      UNION SELECT adjustment_transaction_id AS id FROM account_reconciliations WHERE adjustment_transaction_id IS NOT NULL`
   )
   return values.map((row) => row.id)

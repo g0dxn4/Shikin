@@ -4,6 +4,18 @@ import {
   assertScopedBudgetsReady,
 } from '@shikin/finance-core/scoped-budgets-migration'
 import {
+  BUDGET_HISTORY_MIGRATION,
+  BUDGET_HISTORY_SCHEMA,
+  budgetHistoryStatements,
+  assertBudgetHistoryReady,
+} from '@shikin/finance-core/budget-history-migration'
+import {
+  RECEIVABLE_PAYMENTS_MIGRATION,
+  RECEIVABLE_PAYMENTS_SCHEMA,
+  receivablePaymentsStatements,
+  assertReceivablePaymentsReady,
+} from '@shikin/finance-core/receivable-payments-migration'
+import {
   CLASSIFICATION_TYPES_MIGRATION,
   CLASSIFICATION_TYPES_SCHEMA,
   classificationTypesStatements,
@@ -36,7 +48,11 @@ import {
 import { join, resolve } from 'node:path'
 import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 import { PRIVATE_FILE_MODE, ensurePrivateDirectory, hardenPathMode } from './app-data-dir.js'
-import { prepareStorageForWrite, storageContext } from './storage-context.js'
+import {
+  prepareStorageForWrite,
+  storageContext,
+  validateNativeSqliteBinding,
+} from './storage-context.js'
 
 const DATA_DIR = storageContext.appDataDir
 const DB_PATH = storageContext.databasePath
@@ -300,6 +316,21 @@ function convertParams(sql: string): string {
 }
 
 let _db: Database.Database | null = null
+let databaseReadOnly = false
+
+/** Configure once at process startup, before a database handle is opened. */
+export function configureDatabaseReadOnly(readOnly: boolean): void {
+  if ((_db && readOnly !== databaseReadOnly) || (databaseReadOnly && !readOnly))
+    throw new Error(
+      'Database access cannot be widened or changed after initialization. Restart the process.'
+    )
+  databaseReadOnly = readOnly
+}
+
+function assertDatabaseWriteAllowed(): void {
+  if (databaseReadOnly)
+    throw new Error('Database is read-only. Restart with write permission to apply changes.')
+}
 
 function formatTimestampForFileName(date: Date): string {
   return date
@@ -646,6 +677,18 @@ function applyRestoreCompatibleMigrations(db: Database.Database): void {
         budgets: [...getColumnNames(db, 'budgets')],
       }))
         db.exec(statement)
+    }
+    if (!migrations.some((row) => row.name === BUDGET_HISTORY_MIGRATION)) {
+      for (const statement of budgetHistoryStatements()) db.exec(statement)
+    }
+    if (!migrations.some((row) => row.name === RECEIVABLE_PAYMENTS_MIGRATION)) {
+      const columns = Object.fromEntries(
+        Object.keys(RECEIVABLE_PAYMENTS_SCHEMA).map((table) => [
+          table,
+          [...getColumnNames(db, table)],
+        ])
+      )
+      for (const statement of receivablePaymentsStatements(columns)) db.exec(statement)
     }
     assertShikinSchemaReady(db)
   }).immediate()
@@ -1090,6 +1133,25 @@ export function assertShikinSchemaReady(db: Database.Database, dbPath = DB_PATH)
       throw new Error(`Database is not ready for CLI/MCP use. Missing 020 columns on ${table}.`)
     }
   }
+  assertBudgetHistoryReady(
+    Object.fromEntries(
+      Object.keys(BUDGET_HISTORY_SCHEMA).map((table) => [table, [...getColumnNames(db, table)]])
+    ),
+    db
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type IN ('table', 'index', 'trigger')")
+      .all() as Array<{ name: string; sql: string | null }>
+  )
+  assertReceivablePaymentsReady(
+    Object.fromEntries(
+      Object.keys(RECEIVABLE_PAYMENTS_SCHEMA).map((table) => [
+        table,
+        [...getColumnNames(db, table)],
+      ])
+    ),
+    db
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type IN ('table', 'index', 'trigger')")
+      .all() as Array<{ name: string; sql: string | null }>
+  )
   assertScopedBudgetsReady(
     { budgets: [...getColumnNames(db, 'budgets')] },
     db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger'").all() as Array<{
@@ -1209,7 +1271,7 @@ function databaseInitializationError(error: unknown): DatabaseInitializationErro
 
 function openDb(): Database.Database {
   try {
-    return new Database(DB_PATH, { fileMustExist: true })
+    return new Database(DB_PATH, { fileMustExist: true, readonly: databaseReadOnly })
   } catch (error) {
     throw databaseInitializationError(error)
   }
@@ -1219,17 +1281,21 @@ function getDb(): Database.Database {
   if (!_db) {
     // The in-memory constructor/close probe must happen before preparation can
     // inspect or migrate any existing user files.
-    prepareStorageForWrite()
+    if (databaseReadOnly) validateNativeSqliteBinding()
+    else prepareStorageForWrite()
 
     let db: Database.Database | null = null
     try {
       db = openDb()
-      db.pragma('journal_mode = WAL')
       db.pragma('foreign_keys = ON')
-      hardenPathMode(DB_PATH, PRIVATE_FILE_MODE)
-      hardenPathMode(`${DB_PATH}-wal`, PRIVATE_FILE_MODE)
-      hardenPathMode(`${DB_PATH}-shm`, PRIVATE_FILE_MODE)
-      hardenPathMode(`${DB_PATH}-journal`, PRIVATE_FILE_MODE)
+      if (databaseReadOnly) db.pragma('query_only = ON')
+      else {
+        db.pragma('journal_mode = WAL')
+        hardenPathMode(DB_PATH, PRIVATE_FILE_MODE)
+        hardenPathMode(`${DB_PATH}-wal`, PRIVATE_FILE_MODE)
+        hardenPathMode(`${DB_PATH}-shm`, PRIVATE_FILE_MODE)
+        hardenPathMode(`${DB_PATH}-journal`, PRIVATE_FILE_MODE)
+      }
       assertShikinSchemaReady(db)
       _db = db
     } catch (error) {
@@ -1257,6 +1323,7 @@ export function getDatabaseBackupDirectory(): string {
 }
 
 export async function backupDatabase(): Promise<DatabaseBackupMetadata> {
+  assertDatabaseWriteAllowed()
   const db = getDb()
   ensurePrivateDirectory(BACKUP_DIR)
 
@@ -1302,6 +1369,7 @@ export async function restoreDatabase({
   sourcePath: string
   dryRun?: boolean
 }): Promise<DatabaseRestoreResult> {
+  assertDatabaseWriteAllowed()
   prepareStorageForWrite()
   const candidate = stageRestoreCandidate(sourcePath)
   if (dryRun) {
@@ -1437,6 +1505,7 @@ export function execute(
   sql: string,
   params?: unknown[]
 ): { rowsAffected: number; lastInsertId: number } {
+  assertDatabaseWriteAllowed()
   const db = getDb()
   const converted = convertParams(sql)
   const stmt = db.prepare(converted)
@@ -1446,7 +1515,7 @@ export function execute(
 
 export function transaction<T>(fn: () => T): T {
   const db = getDb()
-  return db.transaction(fn).immediate()
+  return databaseReadOnly ? db.transaction(fn).deferred() : db.transaction(fn).immediate()
 }
 
 export function close(): void {

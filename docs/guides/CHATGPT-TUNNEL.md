@@ -155,10 +155,22 @@ authentication. The runtime API key belongs to the local tunnel client; do not
 paste it into the plugin authentication form. Then create/install the private
 plugin and verify its discovered tool list.
 
-This forwards the installed Shikin MCP catalog, **including write tools**; it is
-not a read-only filter. Apply the desired tool permissions and confirmation
-settings in ChatGPT. Missing Shikin `effects` annotations do not mean read-only.
-OpenAI treats a missing `readOnlyHint` as a write.
+By default this forwards the installed full Shikin MCP catalog, including write
+tools. The helper does not choose a financial profile or configure ChatGPT's
+permissions. Apply the desired tool permissions and confirmation settings in
+ChatGPT. Missing Shikin effects are unaudited; verify the annotations in the
+installed bundle.
+
+After upgrading the container's app/CLI/MCP together to the agent-workflow schema,
+its server also accepts `SHIKIN_MCP_PROFILE=core` and `SHIKIN_MCP_READ_ONLY=1` in
+its **container environment**. The helper's `docker exec` inherits those settings;
+setting them only on the Mac helper invocation does not forward them. Configure
+and restart the deployment through its normal process, then reconnect and inspect
+`shikin://capabilities` for the effective profile and permissions. Read-only mode
+requires an existing compatible database and does not migrate it. This helper
+still does not install, upgrade, or alter the container. See
+[CLI profiles](../../cli/README.md#mcp-server) and
+[upgrade notes](AGENT-WORKFLOWS-UPGRADE.md).
 
 `list-accounts` is annotated read-only in this checkout (`effects.readOnly` and
 MCP `readOnlyHint: true`). The helper uses the **installed container bundle**, so

@@ -4,7 +4,7 @@
   "addBudget": "Agregar Presupuesto",
   "editBudget": "Editar Presupuesto",
   "deleteBudget": "Eliminar Presupuesto",
-  "deleteConfirm": "¿Eliminar este presupuesto y sus registros de períodos guardados? Los movimientos no se eliminan. Esta acción no se puede deshacer.",
+  "deleteConfirm": "¿Eliminar este presupuesto? Se conservan el historial mensual guardado y las transacciones. No se puede deshacer la eliminación del presupuesto actual.",
   "dialog": {
     "addDescription": "Crea un límite de gasto con su propia moneda y alcance.",
     "editDescription": "Actualiza el plan actual. Cambiar la moneda requiere introducir el importe de nuevo."
@@ -310,5 +310,33 @@
       "unsupported_subscription_tags": "Las suscripciones no admiten filtros de etiquetas"
     },
     "budgetUsageComplete": "El consumo del presupuesto está completo; otras medidas del informe están incompletas."
+  },
+  "history": {
+    "title": "Historial mensual de presupuestos",
+    "description": "La configuración guardada y los gastos reales quedan fijos. Selecciona un mes para guardarlo, consultar el registro original o agregar una corrección.",
+    "budget": "Presupuesto",
+    "allBudgets": "Todos los presupuestos guardados",
+    "month": "Mes",
+    "limitCorrection": "Límite histórico en {{currency}} (corrección opcional)",
+    "reason": "Motivo y evidencia de respaldo",
+    "reconstructionHelp": "El primer registro de meses pasados se identifica como reconstrucción retrospectiva. Verifica el límite y alcance históricos. Deja el límite vacío para conservar la configuración de la revisión anterior, o la definición actual si es el primer registro.",
+    "previewCapture": "Revisar registro mensual",
+    "previewCorrection": "Revisar corrección",
+    "previewTitle": "{{month}} · revisión {{revision}}",
+    "gross": "Gastos brutos",
+    "net": "Neto clasificado",
+    "limit": "Límite guardado",
+    "revision": "Revisión",
+    "retrospective": "Reconstrucción retrospectiva: la configuración original se proporcionó después del mes. La evidencia registrada anteriormente se conserva.",
+    "retrospectiveShort": "Reconstrucción retrospectiva",
+    "captured": "Registrado durante el mes",
+    "originalCapture": "Registro original",
+    "incompleteNet": "El importe neto es desconocido hasta completar la clasificación y la cobertura independiente de estados de cuenta.",
+    "appendHelp": "Guardar conserva todas las revisiones anteriores. Si cambian los datos de origen, deberás revisar una vista previa nueva.",
+    "save": "Guardar esta revisión",
+    "error": "No se pudo cargar o guardar el historial",
+    "unknown": "Desconocido",
+    "empty": "No hay historial mensual guardado. El primer registro requiere presupuesto, mes y motivo.",
+    "truncated": "Se muestran las 200 revisiones más recientes. Selecciona un presupuesto para acotar el historial; CLI/MCP permite paginar registros anteriores."
   }
 }

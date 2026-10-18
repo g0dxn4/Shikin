@@ -86,7 +86,8 @@ function seedCoreShikinSchema(
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       balance INTEGER NOT NULL DEFAULT 0,
-      type TEXT NOT NULL DEFAULT 'checking'
+      type TEXT NOT NULL DEFAULT 'checking',
+      is_archived INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE categories (
       id TEXT PRIMARY KEY,
@@ -99,6 +100,8 @@ function seedCoreShikinSchema(
       transfer_to_account_id TEXT,
       type TEXT NOT NULL,
       amount INTEGER NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      description TEXT NOT NULL DEFAULT '',
       date TEXT NOT NULL
       ${
         includeCliQolTransactionColumns
@@ -245,7 +248,16 @@ function seedCoreShikinSchema(
       'CREATE TABLE IF NOT EXISTS recaps (id TEXT PRIMARY KEY); ALTER TABLE investments ADD COLUMN avg_cost_basis INTEGER NOT NULL DEFAULT 0'
     )
     if (migrations.includes(BACKEND_FOUNDATION_MIGRATION))
-      applyBackendFoundationTestSchema(db, migrations.includes('024_scoped_budgets'))
+      applyBackendFoundationTestSchema(
+        db,
+        migrations.includes('026_receivable_payments')
+          ? 26
+          : migrations.includes('025_budget_history')
+            ? 25
+            : migrations.includes('024_scoped_budgets')
+              ? 24
+              : 23
+      )
   }
 
   for (const migration of migrations) {
@@ -692,7 +704,8 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
     const dbPath = createCliDatabasePath(homeDir)
-    const candidatePath = join(homeDir, 'candidate-v019.db')
+    const candidatePath = join(homeDir, 'candidate-v025.db')
+    const latestMigration = CLI_DATABASE_MIGRATIONS.at(-1)!
     seedCoreShikinSchema(dbPath)
     seedCoreShikinSchema(candidatePath, CLI_DATABASE_MIGRATIONS.slice(0, -1))
     insertAccount(candidatePath, 'previous schema account')
@@ -700,6 +713,20 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     previousSchemaDb
       .prepare('INSERT INTO net_worth_snapshots (id, currency) VALUES (?, NULL)')
       .run('snapshot-1')
+    previousSchemaDb
+      .prepare(
+        `INSERT INTO receivables (id, payer, amount, received_amount, currency, due_date, status)
+         VALUES ('legacy-receivable', 'Synthetic client', 100, 40, 'USD', '2026-01-01', 'partial')`
+      )
+      .run()
+    expect(previousSchemaDb.prepare('SELECT MAX(id) AS version FROM _migrations').get()).toEqual({
+      version: 25,
+    })
+    expect(
+      previousSchemaDb
+        .prepare("SELECT name FROM sqlite_master WHERE name = 'receivable_payment_links'")
+        .all()
+    ).toEqual([])
     previousSchemaDb.close()
 
     const { restoreDatabase, close } = await importFreshDatabaseModule(homeDir)
@@ -711,10 +738,8 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
 
     const restoredDb = new Database(dbPath, { readonly: true, fileMustExist: true })
     expect(
-      restoredDb
-        .prepare("SELECT name FROM _migrations WHERE name = '020_quote_recurrence_import_identity'")
-        .get()
-    ).toEqual({ name: '020_quote_recurrence_import_identity' })
+      restoredDb.prepare('SELECT name FROM _migrations WHERE name = ?').get(latestMigration)
+    ).toEqual({ name: latestMigration })
     expect(restoredDb.prepare('SELECT name FROM accounts WHERE id = ?').get('acct-1')).toEqual({
       name: 'previous schema account',
     })
@@ -723,7 +748,24 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     ).toEqual({
       currency: null,
     })
+    expect(
+      restoredDb
+        .prepare(
+          'SELECT received_amount, unattributed_received_amount FROM receivables WHERE id = ?'
+        )
+        .get('legacy-receivable')
+    ).toEqual({ received_amount: 40, unattributed_received_amount: 40 })
     restoredDb.close()
+    const originalBackup = new Database(candidatePath, { readonly: true, fileMustExist: true })
+    expect(originalBackup.prepare('SELECT MAX(id) AS version FROM _migrations').get()).toEqual({
+      version: 25,
+    })
+    expect(
+      originalBackup
+        .prepare("SELECT name FROM sqlite_master WHERE name = 'receivable_payment_links'")
+        .all()
+    ).toEqual([])
+    originalBackup.close()
     close()
   })
 

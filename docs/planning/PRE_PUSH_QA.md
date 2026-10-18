@@ -1,5 +1,7 @@
 # Pre-push mock-data QA
 
+> Historical QA evidence for the commit named below. It does not certify later changes; see the [current benchmark and validation report](../benchmarks/MCP-BENCHMARKS.md) for this increment.
+
 ## Result
 
 **Passed at `56e6bf8`.** All 19 screens were exercised with isolated synthetic data at desktop and mobile widths. Five application findings and two stale browser-test expectations were fixed, verified and closed. Nothing was pushed or released.

@@ -1,6 +1,13 @@
 import { cn } from '@/lib/utils'
 import type { BudgetUsageVisual } from '@/components/budgets/budget-visual-model'
 
+const TRACK_TONE = {
+  success: 'bg-success',
+  warning: 'bg-warning',
+  destructive: 'bg-destructive',
+  unavailable: 'bg-transparent',
+} as const
+
 const SIZE = 96
 const STROKE = 8
 const CENTER = SIZE / 2
@@ -79,6 +86,39 @@ export function BudgetUsageRing({
       >
         {percentText}
       </span>
+    </div>
+  )
+}
+
+/** Slim scan track. Same capped visual percent and tone as the ring; no second percent. */
+export function BudgetUsageTrack({
+  visual,
+  className,
+}: {
+  visual: BudgetUsageVisual
+  className?: string
+}) {
+  const showFill = visual.filled && visual.visualPercent !== null && visual.visualPercent > 0
+
+  return (
+    <div
+      className={cn('bg-border h-2 w-full min-w-0 overflow-hidden rounded-full', className)}
+      data-budget-usage-track=""
+      data-budget-usage-track-filled={visual.filled ? 'true' : 'false'}
+      data-budget-usage-track-visual-percent={visual.visualPercent ?? ''}
+      data-budget-usage-track-tone={visual.tone}
+      aria-hidden="true"
+    >
+      {showFill && visual.visualPercent !== null ? (
+        <div
+          data-budget-usage-track-fill=""
+          className={cn(
+            'h-full rounded-full transition-[width] duration-300 motion-reduce:transition-none',
+            TRACK_TONE[visual.tone]
+          )}
+          style={{ width: `${visual.visualPercent}%` }}
+        />
+      ) : null}
     </div>
   )
 }

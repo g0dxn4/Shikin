@@ -76,7 +76,8 @@
     "statusCompleted": "El ahorro registrado alcanza este objetivo.",
     "statusOverdue": "La fecha límite ya pasó y el objetivo sigue sin cumplirse.",
     "statusDueToday": "La fecha límite es hoy y el objetivo sigue sin cumplirse.",
-    "statusNoDeadline": "Esta meta no tiene una fecha límite registrada."
+    "statusNoDeadline": "Esta meta no tiene una fecha límite registrada.",
+    "method": "Ritmo y método"
   },
   "active": {
     "title": "Metas activas"
@@ -110,6 +111,8 @@
     "viewAll": "Ver Todas"
   },
   "scope": "Metas y contribuciones registradas · mostrado en {{currency}} · no es dinero bancario",
+  "scopeChip": "no es dinero bancario",
+  "scopeInfo": "Cómo se muestran",
   "contributions": {
     "update": "Actualizar aporte",
     "note": "El ritmo mensual es una recomendación. Actualizar una meta no programa transferencias ni mueve dinero."

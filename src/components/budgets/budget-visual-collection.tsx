@@ -1,4 +1,4 @@
-import { PiggyBank, Plus } from 'lucide-react'
+import { Info, Layers, PiggyBank, Plus } from 'lucide-react'
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ScopedReferences } from '@/lib/scoped-report-read'
@@ -78,9 +78,19 @@ export function BudgetVisualCollection({
           </li>
         </ul>
       </div>
-      <p className="text-muted-foreground mt-1 text-xs leading-snug text-pretty">
-        {t('scoped.currentDefinition')} {t('scoped.nonAdditive')}
-      </p>
+      <details className="group mt-1 min-w-0" data-budget-independence>
+        <summary className="border-border text-foreground hover:bg-muted focus-visible:ring-ring inline-flex min-h-11 w-fit max-w-full cursor-pointer list-none items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium focus-visible:ring-2 focus-visible:outline-none sm:min-h-7 [&::-webkit-details-marker]:hidden">
+          <Layers size={12} className="text-accent shrink-0" aria-hidden="true" />
+          <span>{t('visual.independent')}</span>
+          <Info size={12} className="text-muted-foreground shrink-0" aria-hidden="true" />
+          <span className="sr-only">{t('visual.independenceInfo')}</span>
+        </summary>
+        <div className="text-muted-foreground mt-1 max-w-prose space-y-1 text-xs leading-snug">
+          <p>{t('scoped.budgetScope')}</p>
+          <p>{t('scoped.nonAdditive')}</p>
+          <p>{t('scoped.currentDefinition')}</p>
+        </div>
+      </details>
       {plans.length === 0 ? (
         <p className="text-muted-foreground py-6 text-sm">{t('visual.noPeriodMatch')}</p>
       ) : (
@@ -115,7 +125,7 @@ export function BudgetVisualSkeleton() {
           <Skeleton className="size-14 shrink-0 rounded-full" />
           <div className="min-w-0 flex-1 space-y-1.5">
             <Skeleton className="h-4 w-40 max-w-full" />
-            <Skeleton className="h-3 w-56 max-w-full" />
+            <Skeleton className="h-2 w-full max-w-md" />
             <Skeleton className="h-4 w-full max-w-md" />
           </div>
         </div>

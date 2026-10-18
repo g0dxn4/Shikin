@@ -169,9 +169,6 @@ export function Budgets() {
           </>
         }
       />
-      <p className="text-muted-foreground w-full min-w-0 text-xs leading-relaxed text-pretty">
-        {t('scoped.budgetScope')}
-      </p>
 
       <label className="flex min-h-11 items-center gap-2 text-sm">
         <input

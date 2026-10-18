@@ -284,6 +284,7 @@ describe('Goals', () => {
 
       expect(screen.getByText('currency.unavailable')).toBeInTheDocument()
       expect(screen.queryByTestId('goals-aggregate-summary')).not.toBeInTheDocument()
+      expect(document.querySelector('[data-goal-summary-track]')).not.toBeInTheDocument()
       expect(screen.queryByText('$50.00')).not.toBeInTheDocument()
       expect(screen.queryByText('$100.00')).not.toBeInTheDocument()
       expect(screen.getByRole('region', { name: /hero\.featuredGoal/ })).toHaveTextContent(
@@ -355,12 +356,15 @@ describe('Goals', () => {
       render(<Goals />)
 
       expect(screen.getAllByText('card.dueToday').length).toBeGreaterThan(0)
-      expect(screen.getByText('hero.statusDueToday')).toBeInTheDocument()
+      expect(document.querySelector('[data-goal-status="dueToday"]')).toHaveClass('bg-warning')
+      expect(document.querySelector('[data-goal-method]')).toHaveTextContent('hero.statusDueToday')
+      expect(document.querySelector('[data-goal-method]')).not.toHaveAttribute('open')
       expect(screen.queryByText('card.overdue')).not.toBeInTheDocument()
       expect(screen.queryByText('card.noDeadline')).not.toBeInTheDocument()
     })
 
-    it('shows overdue text for goals with negative days remaining', () => {
+    it('shows overdue text for goals with negative days remaining', async () => {
+      const user = userEvent.setup()
       mockGoals = [
         {
           id: 'goal-1',
@@ -380,7 +384,15 @@ describe('Goals', () => {
       render(<Goals />)
 
       expect(screen.getAllByText('card.overdue').length).toBeGreaterThan(0)
-      expect(screen.getByText('hero.statusOverdue')).toBeInTheDocument()
+      expect(document.querySelector('[data-goal-status="overdue"]')).toHaveClass(
+        'bg-destructive',
+        'text-destructive-foreground'
+      )
+      const method = document.querySelector('[data-goal-method]')
+      expect(method).toHaveTextContent('hero.statusOverdue')
+      expect(method).not.toHaveAttribute('open')
+      await user.click(screen.getByText('hero.method'))
+      expect(method).toHaveAttribute('open')
       expect(screen.queryByText('card.dueToday')).not.toBeInTheDocument()
     })
   })
@@ -628,6 +640,10 @@ describe('Goals', () => {
     expect(summary).toHaveTextContent('$60.00')
     expect(summary).toHaveTextContent('$120.00')
     expect(summary).toHaveTextContent('USD')
+    expect(summary.querySelector('[data-goal-summary-track]')).toHaveClass('h-2')
+    expect(
+      summary.querySelector('[data-goal-summary-track-fill]')?.getAttribute('style')
+    ).toContain('50%')
     expect(screen.queryByText('currency.unavailable')).not.toBeInTheDocument()
   })
 
@@ -671,6 +687,7 @@ describe('Goals', () => {
     render(<Goals />)
 
     expect(screen.queryByTestId('goals-aggregate-summary')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-goal-summary-track]')).not.toBeInTheDocument()
     expect(screen.getByText('currency.unavailable')).toBeInTheDocument()
     expect(screen.queryByText('$99.99')).not.toBeInTheDocument()
     expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
@@ -717,6 +734,7 @@ describe('Goals', () => {
     render(<Goals />)
 
     expect(screen.queryByTestId('goals-aggregate-summary')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-goal-summary-track]')).not.toBeInTheDocument()
     expect(screen.queryByText('$11.11')).not.toBeInTheDocument()
     expect(screen.queryByText('$22.22')).not.toBeInTheDocument()
     expect(screen.getByText('currency.unavailable')).toBeInTheDocument()
@@ -738,7 +756,9 @@ describe('Goals', () => {
     render(<Goals />)
 
     expect(screen.getAllByText('card.completed').length).toBeGreaterThan(0)
-    expect(screen.getByText('hero.statusCompleted')).toBeInTheDocument()
+    expect(document.querySelector('[data-goal-method]')).toHaveTextContent('hero.statusCompleted')
+    expect(document.querySelector('[data-goal-method]')).toHaveTextContent('automation.keepPace')
+    expect(document.querySelector('[data-goal-method]')).toHaveTextContent('contributions.note')
     expect(screen.queryByText('card.overdue')).not.toBeInTheDocument()
     expect(screen.getByText('hero.noMonthlyPace')).toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
@@ -766,6 +786,16 @@ describe('Goals', () => {
     expect(screen.getByRole('button', { name: /^Narrow/ })).toHaveClass('min-h-11')
     expect(screen.getByLabelText('actions.edit Narrow')).toHaveClass('h-11', 'w-11')
     expect(screen.getByLabelText('actions.delete Narrow')).toHaveClass('h-11', 'w-11')
+    const row = screen.getByRole('button', { name: /^Narrow/ }).closest('li')
+    const track = row?.querySelector('[data-goal-progress-track]')
+    const amount = row?.querySelector('[data-goal-amount]')
+    expect(track).toHaveClass('h-2')
+    expect(
+      track && amount && track.compareDocumentPosition(amount) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(document.querySelector('[data-goal-method]')).toHaveTextContent('contributions.note')
+    expect(document.querySelector('[data-goal-method]')).toHaveTextContent('automation.monthlyMove')
+    expect(document.querySelector('[data-goal-summary-track]')).not.toBeInTheDocument()
     const progress = screen.getByRole('progressbar')
     expect(progress).toHaveAttribute('aria-valuenow', '50')
     expect(progress).toHaveAttribute('aria-valuetext', expect.stringContaining('$50.00'))

@@ -1,5 +1,5 @@
 import dayjs from 'dayjs'
-import { Pencil } from 'lucide-react'
+import { AlertCircle, ChevronRight, Clock, Landmark, Pencil } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { NativePanel } from '@/components/ui/native-layout'
@@ -10,14 +10,15 @@ import {
   goalIdentityColor,
   goalStatus,
   goalStatusLabel,
+  type GoalStatus,
 } from './goal-presentation'
 import { GoalProgressRing } from './goal-progress-ring'
 
-const STATUS_TONE = {
-  success: 'text-success',
-  warning: 'text-warning',
-  destructive: 'text-destructive',
-  neutral: 'text-foreground',
+const STATUS_CHIP = {
+  success: 'border-success text-success',
+  warning: 'border-transparent bg-warning text-warning-foreground',
+  destructive: 'border-transparent bg-destructive text-destructive-foreground',
+  neutral: 'border-border text-foreground',
 } as const
 
 const STATUS_DETAIL = {
@@ -36,6 +37,23 @@ function formatGoalDeadline(deadline: string, language: string): string {
     year: 'numeric',
     timeZone: 'UTC',
   }).format(new Date(`${parsed.format('YYYY-MM-DD')}T00:00:00Z`))
+}
+
+function StatusChip({ status, label }: { status: GoalStatus; label: string }) {
+  return (
+    <span
+      data-goal-status={status.key}
+      className={cn(
+        'inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold',
+        STATUS_CHIP[status.tone],
+        (status.tone === 'destructive' || status.tone === 'warning') && 'text-sm'
+      )}
+    >
+      {status.tone === 'destructive' ? <AlertCircle size={14} aria-hidden="true" /> : null}
+      {status.tone === 'warning' ? <Clock size={14} aria-hidden="true" /> : null}
+      <span className="min-w-0 break-words">{label}</span>
+    </span>
+  )
 }
 
 interface GoalHeroProps {
@@ -71,19 +89,11 @@ export function GoalHero({ goal, onEdit }: GoalHeroProps) {
     <NativePanel
       aria-label={`${t('hero.featuredGoal')}: ${goal.name}`}
       data-goal-id={goal.id}
-      className="min-w-0 p-4 sm:p-6"
+      className="min-w-0 p-3 sm:p-4"
     >
-      <p className="text-muted-foreground flex items-center gap-2 text-xs font-medium tracking-wide uppercase">
-        <span
-          className="h-2 w-2 shrink-0 rounded-full"
-          style={{ backgroundColor: identity }}
-          aria-hidden="true"
-        />
-        {t('hero.featuredGoal')}
-      </p>
       <div
         data-goal-hero-layout
-        className="mt-4 flex min-w-0 flex-col items-start gap-5 sm:flex-row sm:items-center"
+        className="flex min-w-0 flex-col items-start gap-4 sm:flex-row sm:items-center"
       >
         <GoalProgressRing
           progress={goal.progress}
@@ -93,15 +103,16 @@ export function GoalHero({ goal, onEdit }: GoalHeroProps) {
           valueText={valueText}
         />
         <div className="min-w-0 flex-1">
-          <h2 className="text-foreground text-xl font-medium break-words sm:text-2xl">
-            {goal.name}
-          </h2>
-          <p className={cn('mt-1 text-sm font-medium', STATUS_TONE[status.tone])}>{statusLabel}</p>
-          {detailKey ? (
-            <p className="text-muted-foreground mt-1 text-sm leading-relaxed">{t(detailKey)}</p>
-          ) : null}
-          <p className="text-muted-foreground mt-4 text-xs">{t('hero.currentAmount')}</p>
-          <p className="text-foreground mt-1 text-2xl font-medium break-all tabular-nums sm:text-3xl">
+          <p className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: identity }}
+              aria-hidden="true"
+            />
+            {t('hero.featuredGoal')}
+          </p>
+          <p className="text-foreground mt-1 max-w-full overflow-x-auto text-2xl font-medium whitespace-nowrap tabular-nums sm:text-3xl">
+            <span className="sr-only">{t('hero.currentAmount')} </span>
             {currentText}
             {currency ? (
               <span className="text-muted-foreground ml-2 align-middle text-sm font-medium">
@@ -109,21 +120,28 @@ export function GoalHero({ goal, onEdit }: GoalHeroProps) {
               </span>
             ) : null}
           </p>
-          <p className="text-muted-foreground mt-1 text-sm break-all tabular-nums">
+          <p className="text-muted-foreground mt-0.5 max-w-full overflow-x-auto text-sm whitespace-nowrap tabular-nums">
+            <span className="sr-only">{t('hero.targetAmount')} </span>
             {t('card.of')} <span className="text-foreground font-medium">{targetText}</span>
             {currency ? <span className="ml-2">{currency}</span> : null}
           </p>
+          <h2 className="text-foreground mt-1 text-base font-medium break-words sm:text-lg">
+            {goal.name}
+          </h2>
+          <div className="mt-2">
+            <StatusChip status={status} label={statusLabel} />
+          </div>
           {accountName ? (
-            <p className="text-muted-foreground mt-3 text-sm break-words">
-              <span className="text-foreground">{t('form.account')}</span>
-              {': '}
-              {accountName}
+            <p className="text-muted-foreground mt-2 flex min-w-0 items-center gap-1.5 text-xs">
+              <Landmark size={12} className="shrink-0" aria-hidden="true" />
+              <span className="sr-only">{t('form.account')}: </span>
+              <span className="min-w-0 break-words">{accountName}</span>
             </p>
           ) : null}
           <Button
             type="button"
             variant="outline"
-            className="mt-4 min-h-11 w-full sm:w-auto"
+            className="mt-3 min-h-11 w-full sm:w-auto"
             onClick={onEdit}
           >
             <Pencil aria-hidden="true" />
@@ -134,36 +152,47 @@ export function GoalHero({ goal, onEdit }: GoalHeroProps) {
 
       <dl
         data-goal-pace
-        className="border-border mt-6 grid grid-cols-1 gap-4 border-t pt-4 min-[360px]:grid-cols-3"
+        className="border-border mt-4 grid grid-cols-1 gap-3 border-t pt-3 min-[360px]:grid-cols-3"
       >
         <div className="min-w-0">
           <dt className="text-muted-foreground text-xs">{t('hero.monthlyPace')}</dt>
-          <dd className="text-foreground mt-1 text-base font-medium break-all tabular-nums">
+          <dd className="text-foreground mt-0.5 max-w-full overflow-x-auto text-sm font-medium whitespace-nowrap tabular-nums">
             {monthlyText}
           </dd>
         </div>
         <div className="min-w-0">
           <dt className="text-muted-foreground text-xs">{t('automation.remaining')}</dt>
-          <dd className="text-foreground mt-1 text-base font-medium break-all tabular-nums">
+          <dd className="text-foreground mt-0.5 max-w-full overflow-x-auto text-sm font-medium whitespace-nowrap tabular-nums">
             {remainingText}
           </dd>
         </div>
         <div className="min-w-0">
           <dt className="text-muted-foreground text-xs">{t('automation.deadline')}</dt>
-          <dd className="text-foreground mt-1 text-base font-medium break-words">{deadlineText}</dd>
+          <dd className="text-foreground mt-0.5 text-sm font-medium break-words">{deadlineText}</dd>
         </div>
       </dl>
-      <p className="text-muted-foreground mt-4 text-sm leading-relaxed">
-        {goal.monthlyNeeded > 0
-          ? t('automation.monthlyMove', {
-              amount: displayGoalAmount(goal.monthlyNeeded, currency),
-              goal: goal.name,
-            })
-          : t('automation.keepPace', { goal: goal.name })}
-      </p>
-      <p className="text-muted-foreground mt-2 text-xs leading-relaxed">
-        {t('contributions.note')}
-      </p>
+      <details data-goal-method className="group mt-2 min-w-0">
+        <summary className="text-muted-foreground hover:text-foreground focus-visible:ring-ring flex min-h-11 w-fit cursor-pointer list-none items-center gap-1.5 rounded-md text-xs font-medium focus-visible:ring-2 focus-visible:outline-none sm:min-h-7 [&::-webkit-details-marker]:hidden">
+          <ChevronRight
+            size={14}
+            className="shrink-0 transition-transform group-open:rotate-90 motion-reduce:transition-none"
+            aria-hidden="true"
+          />
+          {t('hero.method')}
+        </summary>
+        <div className="text-muted-foreground mt-2 space-y-2 text-xs leading-relaxed">
+          {detailKey ? <p>{t(detailKey)}</p> : null}
+          <p>
+            {goal.monthlyNeeded > 0
+              ? t('automation.monthlyMove', {
+                  amount: displayGoalAmount(goal.monthlyNeeded, currency),
+                  goal: goal.name,
+                })
+              : t('automation.keepPace', { goal: goal.name })}
+          </p>
+          <p>{t('contributions.note')}</p>
+        </div>
+      </details>
     </NativePanel>
   )
 }

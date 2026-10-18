@@ -100,15 +100,27 @@ describe('budget visual plan', () => {
     expect(screen.getByText('$250.00')).toBeInTheDocument()
     expect(screen.getByText('$1,000.00')).toBeInTheDocument()
     expect(screen.getByText('$750.00')).toBeInTheDocument()
-    expect(screen.getByText('On track · 25%')).toHaveClass('text-success')
-    expect(
-      screen.getByText('Monthly · Actual gross · USD · 2026-01-01 – 2026-01-31 · UTC')
-    ).toBeInTheDocument()
-    expect(screen.getByText('All source accounts, categories and tags')).toBeInTheDocument()
-    const metadata = screen.getByText(
-      'Monthly · Actual gross · USD · 2026-01-01 – 2026-01-31 · UTC'
-    )
+    expect(screen.getByText('On track')).toHaveClass('text-success')
+    expect(screen.getByText('On track')).not.toHaveTextContent('%')
+    expect(screen.getByText('25%')).toBeInTheDocument()
+    const metadata = screen.getByText(/Monthly · Actual gross · USD · 2026-01-01 – 2026-01-31/)
+    expect(metadata).toHaveAttribute('data-budget-plan-meta')
     expect(metadata.closest('details')).toBeNull()
+    expect(metadata.textContent).not.toContain('UTC')
+    const track = document.querySelector('[data-budget-usage-track]')
+    expect(track).toHaveClass('h-2', 'w-full')
+    expect(track).toHaveAttribute('data-budget-usage-track-visual-percent', '25')
+    expect(track).toHaveAttribute('data-budget-usage-track-tone', 'success')
+    expect(track?.querySelector('[data-budget-usage-track-fill]')?.getAttribute('style')).toContain(
+      '25%'
+    )
+    expect(document.querySelector('[data-budget-plan-name]')?.className).toContain('break-words')
+    expect(document.querySelector('[data-budget-plan-name]')?.className).not.toContain('anywhere')
+    expect(
+      document
+        .querySelector('[data-budget-plan-actions]')
+        ?.contains(document.querySelector('[data-budget-plan-name]'))
+    ).toBe(false)
     const details = screen.getByText('Details & evidence').closest('details')
     expect(details).toHaveTextContent('Inspect scope, coverage & money evidence')
     expect(details).not.toHaveAttribute('open')
@@ -149,7 +161,14 @@ describe('budget visual plan', () => {
     expect(screen.getByText(formatMoney(14000, 'EUR'))).toBeInTheDocument()
     expect(screen.getByText(formatMoney(10000, 'EUR'))).toBeInTheDocument()
     expect(screen.getByText(formatMoney(-4000, 'EUR'))).toHaveClass('text-destructive')
-    expect(screen.getByText(/Over budget · €40\.00 · 140%/)).toBeInTheDocument()
+    expect(screen.getByText('Over €40.00')).toHaveClass('text-destructive')
+    expect(screen.getByText('Over €40.00')).not.toHaveTextContent('140%')
+    const track = document.querySelector('[data-budget-usage-track]')
+    expect(track).toHaveAttribute('data-budget-usage-track-visual-percent', '100')
+    expect(track).toHaveAttribute('data-budget-usage-track-tone', 'destructive')
+    expect(track?.querySelector('[data-budget-usage-track-fill]')?.getAttribute('style')).toContain(
+      '100%'
+    )
     const details = screen.getByText('Details & evidence').closest('details')
     expect(details).toHaveTextContent(/ring stops at 100%/)
     expect(screen.getByText(/ring stops at 100%/).closest('details')).toBe(details)
@@ -177,6 +196,7 @@ describe('budget visual plan', () => {
     expect(ring).toHaveAttribute('data-budget-usage-filled', 'false')
     expect(ring.querySelector('[data-budget-usage-arc]')).toBeNull()
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    expect(document.querySelector('[data-budget-usage-track-fill]')).toBeNull()
     expect(container.querySelector('[style*="width"]')).toBeNull()
     expect(screen.getByText('Usage unavailable')).toBeInTheDocument()
     expect(screen.getByText(/This range spans plan periods/)).toBeInTheDocument()
@@ -208,6 +228,7 @@ describe('budget visual plan', () => {
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
     expect(screen.getByRole('img')).toHaveAttribute('data-budget-usage-filled', 'false')
     expect(document.querySelector('[data-budget-usage-arc]')).toBeNull()
+    expect(document.querySelector('[data-budget-usage-track-fill]')).toBeNull()
     expect(screen.getByText('Usage unavailable')).toBeInTheDocument()
     expect(screen.queryByText(/40%/)).not.toBeInTheDocument()
     expect(screen.getByText('Details & evidence').closest('details')).toHaveTextContent(
@@ -295,8 +316,21 @@ describe('budget visual collection', () => {
     expect(screen.getAllByText('Details & evidence')).toHaveLength(3)
     expect(screen.getAllByRole('progressbar')).toHaveLength(3)
     expect(screen.getByRole('heading', { name: 'Plan usage' })).toBeInTheDocument()
-    expect(screen.getByText(/Budgets may overlap/)).toBeInTheDocument()
+    expect(screen.getByText('Independent plans')).toBeInTheDocument()
+    const independence = document.querySelector('[data-budget-independence]')
+    expect(independence).not.toHaveAttribute('open')
+    expect(independence).toHaveTextContent(/Budgets may overlap/)
+    expect(independence).toHaveTextContent(/does not sum limits/)
+    expect(independence).toHaveTextContent(/no historical plan versions/)
     expect(screen.getByText('3 plans · 1 over plan')).toBeInTheDocument()
+    const tracks = document.querySelectorAll('[data-budget-usage-track]')
+    expect(tracks).toHaveLength(3)
+    expect(tracks[0]).toHaveAttribute('data-budget-usage-track-visual-percent', '25')
+    expect(tracks[1]).toHaveAttribute('data-budget-usage-track-visual-percent', '80')
+    expect(tracks[2]).toHaveAttribute('data-budget-usage-track-visual-percent', '100')
+    expect(
+      tracks[2].querySelector('[data-budget-usage-track-fill]')?.getAttribute('style')
+    ).toContain('100%')
     for (const amount of [100000, 25000, 75000, 50000, 40000, 10000]) {
       expect(screen.getAllByText(formatMoney(amount, 'USD')).length).toBeGreaterThan(0)
     }

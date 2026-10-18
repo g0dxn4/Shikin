@@ -50,24 +50,36 @@ export function GoalCollection({
           </p>
         </div>
         {summary.complete ? (
-          <p
-            data-testid="goals-aggregate-summary"
-            className="text-muted-foreground px-4 pb-3 text-sm"
-          >
-            <span className="text-foreground font-medium">{t('hero.aggregateProgress')}</span>
-            {' · '}
-            <span className="text-foreground font-medium tabular-nums">
-              {displayGoalAmount(summary.current, summary.currency)}
-            </span>{' '}
-            {t('card.of')}{' '}
-            <span className="tabular-nums">
-              {displayGoalAmount(summary.target, summary.currency)}
-            </span>
-            {' · '}
-            <span className="tabular-nums">{summary.progress}%</span>
-            {' · '}
-            <span className="tabular-nums">{summary.currency}</span>
-          </p>
+          <div data-testid="goals-aggregate-summary" className="min-w-0 px-4 pb-3">
+            <div
+              className="bg-border h-2 overflow-hidden rounded-full"
+              data-goal-summary-track=""
+              aria-hidden="true"
+            >
+              {summary.progress > 0 ? (
+                <div
+                  className="bg-chart-1 h-full rounded-full"
+                  data-goal-summary-track-fill=""
+                  style={{ width: `${summary.progress}%` }}
+                />
+              ) : null}
+            </div>
+            <p className="text-muted-foreground mt-1.5 text-sm">
+              <span className="text-foreground font-medium">{t('hero.aggregateProgress')}</span>
+              {' · '}
+              <span className="text-foreground font-medium tabular-nums">
+                {displayGoalAmount(summary.current, summary.currency)}
+              </span>{' '}
+              {t('card.of')}{' '}
+              <span className="tabular-nums">
+                {displayGoalAmount(summary.target, summary.currency)}
+              </span>
+              {' · '}
+              <span className="tabular-nums">{summary.progress}%</span>
+              {' · '}
+              <span className="tabular-nums">{summary.currency}</span>
+            </p>
+          </div>
         ) : (
           <p role="status" className="text-warning px-4 pb-3 text-xs">
             {t('currency.unavailable')}
@@ -154,7 +166,22 @@ export function GoalCollection({
                   </Button>
                 </div>
                 <div className="col-span-2 min-w-0 px-1">
-                  <p className="text-sm break-all tabular-nums">
+                  <div
+                    className="bg-border h-2 overflow-hidden rounded-full"
+                    data-goal-progress-track=""
+                    aria-hidden="true"
+                  >
+                    {clamped > 0 ? (
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${clamped}%`, backgroundColor: identity }}
+                      />
+                    ) : null}
+                  </div>
+                  <p
+                    data-goal-amount=""
+                    className="mt-1 max-w-full overflow-x-auto text-sm whitespace-nowrap tabular-nums"
+                  >
                     <span className="text-foreground font-medium">
                       {displayGoalAmount(goal.current_amount, goal.currency)}
                     </span>{' '}
@@ -162,15 +189,6 @@ export function GoalCollection({
                       {t('card.of')} {displayGoalAmount(goal.target_amount, goal.currency)}
                     </span>
                   </p>
-                  <div
-                    className="bg-border mt-2 h-1 overflow-hidden rounded-full"
-                    aria-hidden="true"
-                  >
-                    <div
-                      className="h-full"
-                      style={{ width: `${clamped}%`, backgroundColor: identity }}
-                    />
-                  </div>
                 </div>
               </li>
             )

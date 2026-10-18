@@ -60,6 +60,10 @@
   "visual": {
     "title": "Uso de los planes",
     "legend": "Colores de uso",
+    "independent": "Planes independientes",
+    "independenceInfo": "Por qué no se suman",
+    "metadataLabel": "Período, medida, moneda y fechas",
+    "overAmount": "Sobre {{amount}}",
     "count_one": "{{count}} plan",
     "count_other": "{{count}} planes",
     "overCount_one": "{{count}} sobre el plan",

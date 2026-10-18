@@ -1,7 +1,7 @@
 import { PageToolbar } from '@/components/ui/native-layout'
 import { useEffect, useState, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Target, Plus } from 'lucide-react'
+import { Info, Target, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -66,9 +66,22 @@ export function Goals() {
     <div className="page-content min-w-0">
       <PageToolbar
         leading={
-          <p className="text-muted-foreground text-xs">
-            {t('scope', { currency: mainCurrency ?? t('currency.unconfigured') })}
-          </p>
+          <div className="flex min-w-0 items-center gap-1">
+            <p className="border-border text-foreground max-w-full overflow-x-auto rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap">
+              {mainCurrency ?? t('currency.unconfigured')} · {t('scopeChip')}
+            </p>
+            <details className="group shrink-0">
+              <summary
+                className="text-muted-foreground focus-visible:ring-ring flex size-11 cursor-pointer list-none items-center justify-center rounded-md focus-visible:ring-2 focus-visible:outline-none sm:size-7 [&::-webkit-details-marker]:hidden"
+                aria-label={t('scopeInfo')}
+              >
+                <Info size={14} aria-hidden="true" />
+              </summary>
+              <p className="text-muted-foreground mt-1 max-w-sm text-xs leading-snug">
+                {t('scope', { currency: mainCurrency ?? t('currency.unconfigured') })}
+              </p>
+            </details>
+          </div>
         }
         actions={
           <Button type="button" className="min-h-11" onClick={() => openGoalDialog()}>

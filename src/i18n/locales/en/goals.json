@@ -76,7 +76,8 @@
     "statusCompleted": "Recorded savings meet this target.",
     "statusOverdue": "The deadline has passed and the target is still unmet.",
     "statusDueToday": "The deadline is today and the target is still unmet.",
-    "statusNoDeadline": "No deadline is recorded for this goal."
+    "statusNoDeadline": "No deadline is recorded for this goal.",
+    "method": "Pace & method"
   },
   "active": {
     "title": "Active goals"
@@ -110,6 +111,8 @@
     "viewAll": "View All"
   },
   "scope": "Goals and recorded contributions · displayed in {{currency}} · not bank money",
+  "scopeChip": "not bank money",
+  "scopeInfo": "How goals are shown",
   "contributions": {
     "update": "Update contribution",
     "note": "The monthly pace is guidance. Updating a goal does not schedule transfers or move money."

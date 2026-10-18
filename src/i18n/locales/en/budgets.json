@@ -60,6 +60,10 @@
   "visual": {
     "title": "Plan usage",
     "legend": "Usage colors",
+    "independent": "Independent plans",
+    "independenceInfo": "Why plans stay separate",
+    "metadataLabel": "Period, measure, currency, and dates",
+    "overAmount": "Over {{amount}}",
     "count_one": "{{count}} plan",
     "count_other": "{{count}} plans",
     "overCount_one": "{{count}} over plan",

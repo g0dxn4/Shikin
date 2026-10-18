@@ -742,17 +742,7 @@ function SummaryVisualSlot({
               {visual.points.map((point, index) => (
                 <tr key={`${point.date}-${index}`}>
                   <th scope="row">
-                    <button
-                      type="button"
-                      aria-pressed={active?.index === index && active.date === point.date}
-                      data-index={index}
-                      onClick={() => {
-                        const valid = summaryPointSelection(visual.points, index, point.date)
-                        if (valid) setSelection({ period, point: valid })
-                      }}
-                    >
-                      <time dateTime={point.date}>{formatSnapshotDate(point.date)}</time>
-                    </button>
+                    <time dateTime={point.date}>{formatSnapshotDate(point.date)}</time>
                   </th>
                   <td>{formatMoney(point.netWorth, visual.currency)}</td>
                 </tr>

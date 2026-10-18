@@ -763,7 +763,7 @@ describe('Overview summary ranges and point inspection', () => {
     expect(figure).toHaveTextContent('$1,150.00')
   })
 
-  it('inspects an actual dated point by click, keyboard, and table without changing the current total', async () => {
+  it('inspects an actual dated point by pointer and visible previous/next without changing the current total', async () => {
     const user = userEvent.setup()
     render(
       <OverviewNetWorth
@@ -795,14 +795,22 @@ describe('Overview summary ranges and point inspection', () => {
     expect(figure).toHaveTextContent(formatMoney(999_999, 'USD'))
     expect(summary).toHaveTextContent('$9.99')
 
-    const rows = document
-      .getElementById('overview-summary-recorded-snapshots')!
-      .querySelectorAll('button')
-    expect(rows[1]).toHaveAttribute('aria-pressed', 'true')
-    fireEvent.click(rows[0]!)
+    const recorded = document.getElementById('overview-summary-recorded-snapshots')!
+    expect(recorded.parentElement).toHaveClass('sr-only')
+    expect(recorded).not.toHaveClass('sr-only')
+    expect(
+      recorded.querySelectorAll('button, a, input, select, textarea, [tabindex]')
+    ).toHaveLength(0)
+    expect(recorded.querySelectorAll('time')).toHaveLength(3)
+    expect(recorded).toHaveTextContent(formatMoney(100_000, 'MXN'))
+    expect(recorded).toHaveTextContent(formatMoney(250_050, 'MXN'))
+    expect(recorded).toHaveTextContent(formatMoney(300_000, 'MXN'))
+
+    const previous = screen.getByRole('button', { name: 'overview.summaryInspect.previous' })
+    previous.focus()
+    await user.keyboard('{Enter}')
     expect(inspection).toHaveTextContent(formatMoney(100_000, 'MXN'))
-    expect(rows[0]).toHaveAttribute('aria-pressed', 'true')
-    expect(rows[1]).toHaveAttribute('aria-pressed', 'false')
+    expect(inspection).not.toHaveTextContent(formatMoney(250_050, 'MXN'))
 
     const next = screen.getByRole('button', { name: 'overview.summaryInspect.next' })
     next.focus()

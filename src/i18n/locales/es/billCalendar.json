@@ -11,6 +11,40 @@
     "emptyTitle": "Aun no hay facturas recurrentes",
     "emptyDescription": "Agrega una factura recurrente para seguir los próximos vencimientos desde tu agenda local."
   },
+  "horizon": {
+    "title": "Horizonte de vencimiento",
+    "scope": "Vencidas, próximos 7 días y más adelante no se superponen e incluyen cada regla de gasto activa. El filtro de la lista no cambia estos conteos.",
+    "legend": "Horizonte de vencimiento por cantidad de reglas",
+    "loading": "Cargando el horizonte de vencimiento",
+    "overdue": "Vencidas",
+    "overdueWindow": "Antes de hoy",
+    "overdueCount": "{{count}} vencidas, antes de hoy",
+    "next7": "Próximos 7 días",
+    "next7Window": "Hoy y hasta 7 días después",
+    "next7Count": "{{count}} con vencimiento de hoy a 7 días después",
+    "later": "Más adelante",
+    "laterWindow": "Más de 7 días después",
+    "laterCount": "{{count}} con vencimiento a más de 7 días",
+    "activeCount": "{{count}} reglas activas"
+  },
+  "frequency": {
+    "daily": "Diaria",
+    "weekly": "Semanal",
+    "biweekly": "Quincenal",
+    "monthly": "Mensual",
+    "quarterly": "Trimestral",
+    "yearly": "Anual"
+  },
+  "status": {
+    "paid": "Pagada",
+    "unpaid": "Sin pagar"
+  },
+  "calendar": {
+    "scrollRegion": "Calendario del mes",
+    "markLegend": "Marcas del día",
+    "paidCount": "{{count}} pagadas",
+    "unpaidCount": "{{count}} sin pagar"
+  },
   "prevMonth": "Mes anterior",
   "nextMonth": "Mes siguiente",
   "upcomingBills": "Próximas Facturas",
@@ -55,6 +89,8 @@
   "schedule": {
     "allDays": "Todo el mes",
     "description": "Selecciona un día. Los pagos se basan en transacciones registradas, no en fechas vencidas.",
+    "list": "Facturas programadas",
+    "nativeAmounts": "Cada importe permanece en la moneda de esa factura.",
     "unresolved": "Algunas reglas antiguas tienen fechas ambiguas. Solo se muestra la próxima fecha conocida; revisa su anclaje en Facturas."
   }
 }

@@ -213,4 +213,119 @@ describe('BillCalendar', () => {
     expect(within(total).queryByText('$1,400.00')).not.toBeInTheDocument()
     expect(within(total).getByText('—')).toBeInTheDocument()
   })
+
+  it('keeps the month grid keyboard-accessible inside a local scroll region', async () => {
+    const user = userEvent.setup()
+    await renderBillCalendar()
+
+    const month = screen.getByRole('heading', { level: 2 }).textContent
+    const table = screen.getByRole('table', { name: month ?? '' })
+    const region = screen.getByRole('region', { name: 'calendar.scrollRegion' })
+    const page = document.querySelector('.page-content')
+    expect(region).toHaveClass('max-w-full', 'min-w-0', 'overflow-x-auto')
+    expect(region).toContainElement(table)
+    expect(table).toHaveClass('min-w-[22rem]')
+    expect(page).toHaveClass('min-w-0', 'max-w-full')
+    expect(page).not.toHaveClass('min-w-[22rem]')
+    expect(screen.getAllByRole('columnheader')).toHaveLength(7)
+
+    const today = screen.getByRole('button', { current: 'date' })
+    expect(today).toHaveAttribute('aria-pressed', 'false')
+    expect(today.className).toMatch(/min-h-11/)
+    expect(today.className).toMatch(/min-w-11/)
+    expect(screen.getByRole('button', { name: 'prevMonth' }).className).toMatch(/h-11/)
+    expect(screen.getByRole('button', { name: 'nextMonth' }).className).toMatch(/w-11/)
+
+    const days = screen
+      .getAllByRole('button')
+      .filter((button) => button.hasAttribute('aria-pressed'))
+    expect(days.every((button) => button.className.includes('min-h-11'))).toBe(true)
+    expect(days.every((button) => button.className.includes('min-w-11'))).toBe(true)
+    days[0].focus()
+    await user.keyboard('{ArrowRight}')
+    expect(days[1]).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(days[1]).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'schedule.allDays' })).toHaveClass('min-h-11')
+  })
+
+  it('shows counts and paid marks in cells, and native amounts only for the selected day', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.setSystemTime(new Date(2026, 5, 14, 12, 0, 0))
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const paidRule = {
+      ...originalRule,
+      id: 'paid-usd',
+      description: 'Paid rent',
+      amount: 120000,
+      currency: 'USD',
+      next_date: '2026-06-14',
+    }
+    const unpaidRule = {
+      ...originalRule,
+      id: 'unpaid-eur',
+      description: 'Unpaid euro',
+      amount: 10000,
+      currency: 'EUR',
+      next_date: '2026-06-14',
+    }
+    const laterRule = {
+      ...originalRule,
+      id: 'later-mxn',
+      description: 'Later peso',
+      amount: 5000,
+      currency: 'MXN',
+      next_date: '2026-06-16',
+    }
+    recurringStoreMock.rules = [paidRule, unpaidRule, laterRule]
+    vi.mocked(query).mockResolvedValue([
+      {
+        id: 'paid-usd-transaction',
+        recurring_rule_id: paidRule.id,
+        date: '2026-06-14',
+        type: 'expense',
+        status: 'posted',
+        amount: 120000,
+        currency: 'USD',
+        description: 'Paid rent',
+      },
+    ])
+
+    try {
+      await renderBillCalendar()
+      const table = screen.getByRole('table')
+      expect(within(table).queryByText('$1,200.00')).not.toBeInTheDocument()
+      expect(within(table).queryByText('€100.00')).not.toBeInTheDocument()
+      expect(within(table).queryByText('MX$50.00')).not.toBeInTheDocument()
+      expect(
+        screen.getByRole('button', {
+          name: /scheduledCount 2, calendar\.paidCount 1, calendar\.unpaidCount 1/,
+        })
+      ).toBeInTheDocument()
+      expect(
+        screen.getByRole('button', {
+          name: /scheduledCount 1, calendar\.paidCount 0, calendar\.unpaidCount 1/,
+        })
+      ).toBeInTheDocument()
+      expect(screen.getByRole('list', { name: 'calendar.markLegend' })).toBeInTheDocument()
+
+      const list = screen.getByRole('list', { name: 'schedule.list' })
+      expect(within(list).getByText('Paid rent')).toBeInTheDocument()
+      expect(within(list).queryByText('$1,200.00')).not.toBeInTheDocument()
+      expect(within(list).queryByText('€100.00')).not.toBeInTheDocument()
+
+      await user.click(
+        screen.getByRole('button', {
+          name: /scheduledCount 2, calendar\.paidCount 1, calendar\.unpaidCount 1/,
+        })
+      )
+      expect(within(list).getByText('$1,200.00')).toBeInTheDocument()
+      expect(within(list).getByText('€100.00')).toBeInTheDocument()
+      expect(within(list).queryByText('MX$50.00')).not.toBeInTheDocument()
+      expect(within(list).queryByText('$1,300.00')).not.toBeInTheDocument()
+      expect(screen.getByText('schedule.nativeAmounts')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

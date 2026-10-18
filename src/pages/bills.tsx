@@ -1,5 +1,6 @@
-import { PageToolbar, MetricStrip, MetricItem } from '@/components/ui/native-layout'
+import { PageToolbar } from '@/components/ui/native-layout'
 import { ErrorBanner } from '@/components/ui/error-banner'
+import { DueHorizon } from '@/components/bill-calendar/due-horizon'
 import { useCurrencyStore } from '@/stores/currency-store'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -12,6 +13,7 @@ import { ShowMorePagination } from '@/components/shared/show-more-pagination'
 import { formatMoney } from '@/lib/money'
 import { useRecurringStore, type RecurringRuleWithDetails } from '@/stores/recurring-store'
 import { useUIStore } from '@/stores/ui-store'
+import { cn } from '@/lib/utils'
 
 function monthlyEquivalent(rule: RecurringRuleWithDetails) {
   const amount = rule.amount
@@ -36,71 +38,69 @@ function daysUntil(date: string) {
   return dayjs(date).startOf('day').diff(dayjs().startOf('day'), 'day')
 }
 
+function formatRuleDate(isoDate: string, locale: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate)
+  if (!match) return isoDate
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])).toLocaleDateString(
+    locale,
+    { month: 'short', day: 'numeric', year: 'numeric' }
+  )
+}
+
 const BILLS_PAGE_SIZE = 20
 
 function BillRow({ rule, onEdit }: { rule: RecurringRuleWithDetails; onEdit: () => void }) {
-  const { t } = useTranslation('billCalendar')
+  const { t, i18n } = useTranslation('billCalendar')
   const { t: tCommon } = useTranslation('common')
   const dueIn = daysUntil(rule.next_date)
   const isOverdue = dueIn < 0
   const isSoon = dueIn >= 0 && dueIn <= 7
+  const statusClass = isOverdue ? 'text-destructive' : isSoon ? 'text-warning' : 'text-success'
 
   return (
-    <div className="soft-divider grid min-w-0 gap-3 border-b py-4 last:border-b-0 sm:grid-cols-[1fr_auto] sm:items-center">
-      <div className="flex min-w-0 items-start gap-3">
-        <div
-          className="border-border bg-muted/50 mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border"
-          style={{ color: rule.category_color ?? 'var(--accent)' }}
-        >
-          <Receipt size={18} aria-hidden="true" />
+    <li className="border-border flex min-w-0 flex-col gap-2 border-b py-3 last:border-b-0 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            aria-hidden="true"
+            className="size-2 shrink-0 rounded-full"
+            style={{ backgroundColor: rule.category_color || 'var(--color-muted-foreground)' }}
+          />
+          <h3 className="truncate text-sm font-medium">{rule.description}</h3>
         </div>
-        <div className="min-w-0">
-          <h3 className="truncate text-sm font-semibold">{rule.description}</h3>
-          <p className="text-muted-foreground mt-1 text-xs">
-            {rule.category_name ?? t('uncategorized')} · {rule.account_name ?? t('unknownAccount')}
-          </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <span className="text-muted-foreground border-border bg-muted/50 rounded-full border px-2 py-1 text-[10px] tracking-wider uppercase tabular-nums">
-              {rule.frequency}
-            </span>
-            <span
-              className={`rounded-full border px-2 py-1 text-[10px] tracking-wider uppercase tabular-nums ${
-                isOverdue
-                  ? 'text-destructive border-red-400/20 bg-red-400/[0.08]'
-                  : isSoon
-                    ? 'text-warning border-amber-400/20 bg-amber-400/[0.08]'
-                    : 'text-success border-emerald-400/20 bg-emerald-400/[0.08]'
-              }`}
-            >
-              {isOverdue
-                ? t('overdueBy', { count: Math.abs(dueIn) })
-                : dueIn === 0
-                  ? t('dueToday')
-                  : t('dueIn', { count: dueIn })}
-            </span>
-          </div>
-        </div>
+        <p className="text-muted-foreground mt-1 text-xs">
+          {rule.category_name ?? t('uncategorized')} · {rule.account_name ?? t('unknownAccount')}
+        </p>
+        <p className="mt-1 text-xs">
+          <time dateTime={rule.next_date} className="text-foreground tabular-nums">
+            {formatRuleDate(rule.next_date, i18n.language)}
+          </time>
+          <span className="text-muted-foreground"> · {t(`frequency.${rule.frequency}`)}</span>
+        </p>
+        <p className={cn('mt-1 text-xs font-medium', statusClass)}>
+          {isOverdue
+            ? t('overdueBy', { count: Math.abs(dueIn) })
+            : dueIn === 0
+              ? t('dueToday')
+              : t('dueIn', { count: dueIn })}
+        </p>
       </div>
-      <div className="flex min-w-0 items-center justify-between gap-3 sm:justify-end">
-        <div className="min-w-0 text-left sm:text-right">
-          <p className="text-lg font-bold tracking-tight">
-            {formatMoney(rule.amount, rule.currency ?? rule.account_currency ?? 'USD')}
-          </p>
-          <p className="text-muted-foreground mt-1 text-xs">
-            {dayjs(rule.next_date).format('MMM D, YYYY')}
-          </p>
-        </div>
+      <div className="flex min-w-0 items-center justify-between gap-2 sm:justify-end">
+        <p className="min-w-0 flex-1 text-sm font-medium break-all tabular-nums sm:flex-none sm:text-right">
+          {formatMoney(rule.amount, rule.currency ?? rule.account_currency ?? 'USD')}
+        </p>
         <Button
+          type="button"
           variant="ghost"
           size="icon"
-          className="h-11 w-11 shrink-0 sm:h-10 sm:w-10"
+          className="h-11 w-11 shrink-0"
           onClick={onEdit}
           aria-label={`${tCommon('actions.edit')} ${rule.description}`}
         >
-          <Pencil size={12} aria-hidden="true" />
+          <Pencil size={16} aria-hidden="true" />
         </Button>
       </div>
-    </div>
+    </li>
   )
 }
 
@@ -119,71 +119,96 @@ export function BillsPage() {
     void fetch().catch(() => {})
   }, [fetch])
 
-  const { bills, dueThisMonth, dueSoon, overdue, monthlyTotal, missingCurrencies, complete } =
-    useMemo(() => {
-      const today = dayjs()
-      const todayStart = today.startOf('day')
-      const activeBills: RecurringRuleWithDetails[] = []
-      const thisMonth: RecurringRuleWithDetails[] = []
-      const soon: RecurringRuleWithDetails[] = []
-      const pastDue: RecurringRuleWithDetails[] = []
-      let total = 0
-      let complete = true
-      const missing = new Set<string>()
+  const {
+    bills,
+    dueThisMonth,
+    dueSoon,
+    overdue,
+    next7,
+    later,
+    monthlyTotal,
+    missingCurrencies,
+    complete,
+  } = useMemo(() => {
+    const today = dayjs()
+    const todayStart = today.startOf('day')
+    const activeBills: RecurringRuleWithDetails[] = []
+    const thisMonth: RecurringRuleWithDetails[] = []
+    const soon: RecurringRuleWithDetails[] = []
+    const pastDue: RecurringRuleWithDetails[] = []
+    const within7: RecurringRuleWithDetails[] = []
+    const after7: RecurringRuleWithDetails[] = []
+    let total = 0
+    let conversionComplete = true
+    const missing = new Set<string>()
 
-      for (const rule of rules) {
-        if (
-          rule.active !== 1 ||
-          rule.type !== 'expense' ||
-          rule.account_is_archived === 1 ||
-          (rule.end_date && rule.next_date > rule.end_date)
-        )
-          continue
+    for (const rule of rules) {
+      if (
+        rule.active !== 1 ||
+        rule.type !== 'expense' ||
+        rule.account_is_archived === 1 ||
+        (rule.end_date && rule.next_date > rule.end_date)
+      )
+        continue
 
-        activeBills.push(rule)
-        const result = convertCurrentToPreferred(
-          monthlyEquivalent(rule),
-          rule.currency ?? rule.account_currency ?? 'USD'
-        )
-        if (result.complete) total += result.amountCentavos
-        else {
-          complete = false
-          result.missingCurrencies.forEach((currency) => missing.add(currency))
-        }
-
-        const dueDate = dayjs(rule.next_date)
-        const dueIn = dueDate.startOf('day').diff(todayStart, 'day')
-        if (dueDate.isSame(today, 'month')) thisMonth.push(rule)
-        if (dueIn >= 0 && dueIn <= 30) soon.push(rule)
-        if (dueIn < 0) pastDue.push(rule)
+      activeBills.push(rule)
+      const result = convertCurrentToPreferred(
+        monthlyEquivalent(rule),
+        rule.currency ?? rule.account_currency ?? 'USD'
+      )
+      if (result.complete) total += result.amountCentavos
+      else {
+        conversionComplete = false
+        result.missingCurrencies.forEach((currency) => missing.add(currency))
       }
 
-      activeBills.sort((a, b) => a.next_date.localeCompare(b.next_date))
+      const dueDate = dayjs(rule.next_date)
+      const dueIn = dueDate.startOf('day').diff(todayStart, 'day')
+      if (dueDate.isSame(today, 'month')) thisMonth.push(rule)
+      if (dueIn >= 0 && dueIn <= 30) soon.push(rule)
+      if (dueIn < 0) pastDue.push(rule)
+      else if (dueIn <= 7) within7.push(rule)
+      else after7.push(rule)
+    }
 
-      return {
-        bills: activeBills,
-        dueThisMonth: thisMonth,
-        dueSoon: soon,
-        overdue: pastDue,
-        monthlyTotal: total,
-        complete,
-        missingCurrencies: [...missing],
-      }
-      // Manual authority is read by the stable store converter.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [rules, convertCurrentToPreferred, manualRates, mainCurrency, preferredCurrency])
+    activeBills.sort((a, b) => a.next_date.localeCompare(b.next_date))
+
+    return {
+      bills: activeBills,
+      dueThisMonth: thisMonth,
+      dueSoon: soon,
+      overdue: pastDue,
+      next7: within7,
+      later: after7,
+      monthlyTotal: total,
+      complete: conversionComplete,
+      missingCurrencies: [...missing],
+    }
+    // Manual authority is read by the stable store converter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rules, convertCurrentToPreferred, manualRates, mainCurrency, preferredCurrency])
 
   const filteredBills = status === 'overdue' ? overdue : status === 'soon' ? dueSoon : bills
   const visibleBills = filteredBills.slice(0, visibleBillCount)
+  const runRateValue = isLoading
+    ? '—'
+    : complete
+      ? formatMoney(monthlyTotal, preferredCurrency)
+      : t('currency.unavailable')
+  const runRateDetail = isLoading
+    ? null
+    : !complete
+      ? t('currency.missing', { currencies: missingCurrencies.join(', ') })
+      : t('currency.estimateToday', { currency: preferredCurrency })
 
   return (
-    <div className="page-content">
+    <div className="page-content max-w-full min-w-0">
       <PageToolbar
         leading={
-          <label className="text-muted-foreground flex items-center gap-2 text-xs">
+          <label className="text-muted-foreground flex min-w-0 items-center gap-2 text-xs">
             {t('filter.label')}
             <select
-              className="bg-background text-foreground border-border min-h-10 rounded-lg border px-3"
+              className="bg-background text-foreground border-border min-h-11 min-w-0 rounded-lg border px-3"
               value={status}
               onChange={(event) => {
                 setStatus(event.target.value)
@@ -200,13 +225,13 @@ export function BillsPage() {
         }
         actions={
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            <Button variant="ghost" asChild className="w-full sm:w-auto">
+            <Button variant="ghost" asChild className="min-h-11 w-full sm:w-auto">
               <Link to="/bill-calendar">
                 <CalendarClock size={16} aria-hidden="true" />
                 {t('bills.calendarView')}
               </Link>
             </Button>
-            <Button className="w-full sm:w-auto" onClick={() => openRecurringDialog()}>
+            <Button className="min-h-11 w-full sm:w-auto" onClick={() => openRecurringDialog()}>
               <Plus size={16} aria-hidden="true" />
               {t('bills.addRecurring')}
             </Button>
@@ -220,38 +245,31 @@ export function BillsPage() {
           void fetch().catch(() => {})
         }}
       />
-      <MetricStrip>
-        <MetricItem
-          label={t('monthlyRunRate')}
-          value={
-            isLoading
-              ? '—'
-              : complete
-                ? formatMoney(monthlyTotal, preferredCurrency)
-                : t('currency.unavailable')
-          }
-          detail={
-            !complete
-              ? t('currency.missing', { currencies: missingCurrencies.join(', ') })
-              : t('currency.estimateToday', { currency: preferredCurrency })
-          }
-        />
-        <MetricItem label={t('thisMonth')} value={isLoading ? '—' : dueThisMonth.length} />
-        <MetricItem label={t('filter.soon')} value={isLoading ? '—' : dueSoon.length} />
-        <MetricItem label={t('filter.overdue')} value={isLoading ? '—' : overdue.length} />
-      </MetricStrip>
+      <DueHorizon
+        overdue={overdue.length}
+        next7={next7.length}
+        later={later.length}
+        isLoading={isLoading}
+        runRateValue={runRateValue}
+        runRateDetail={runRateDetail}
+        runRateUnavailable={!isLoading && !complete}
+        thisMonthCount={dueThisMonth.length}
+        soonCount={dueSoon.length}
+      />
 
-      <div className="native-panel p-5">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold">{t('upcomingBills')}</h2>
+      <section className="min-w-0" aria-labelledby="upcoming-bills-heading">
+        <div className="mb-2 flex min-w-0 flex-wrap items-end justify-between gap-3">
+          <div className="min-w-0">
+            <h2 id="upcoming-bills-heading" className="text-sm font-medium">
+              {t('upcomingBills')}
+            </h2>
             <p className="text-muted-foreground mt-1 text-xs">{t('bills.upcomingDescription')}</p>
           </div>
           {overdue.length === 0 && bills.length > 0 && (
-            <span className="text-success flex items-center gap-1 rounded-full border border-emerald-400/10 bg-emerald-400/[0.06] px-3 py-1 text-xs font-semibold">
+            <p className="text-success flex items-center gap-1 text-xs font-medium">
               <CheckCircle size={14} aria-hidden="true" />
               {t('bills.onTrack')}
-            </span>
+            </p>
           )}
         </div>
 
@@ -262,28 +280,30 @@ export function BillsPage() {
             ))}
           </div>
         ) : filteredBills.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-14 text-center">
-            <div className="bg-accent-muted mb-4 flex h-14 w-14 items-center justify-center rounded-xl">
-              <Receipt size={28} className="text-primary" aria-hidden="true" />
+          <div className="flex flex-col items-center justify-center py-10 text-center">
+            <div className="bg-muted mb-4 flex h-12 w-12 items-center justify-center rounded-xl">
+              <Receipt size={24} className="text-accent" aria-hidden="true" />
             </div>
-            <h3 className="mb-2 text-lg font-semibold">
+            <h3 className="mb-2 text-base font-medium">
               {t(bills.length ? 'filter.empty' : 'bills.emptyTitle')}
             </h3>
             <p className="text-muted-foreground max-w-md text-sm">
               {t(bills.length ? 'filter.emptyDescription' : 'bills.emptyDescription')}
             </p>
             {bills.length === 0 ? (
-              <Button className="mt-4" onClick={() => openRecurringDialog()}>
+              <Button className="mt-4 min-h-11" onClick={() => openRecurringDialog()}>
                 <Plus size={16} aria-hidden="true" />
                 {t('bills.addRecurring')}
               </Button>
             ) : null}
           </div>
         ) : (
-          <div>
-            {visibleBills.map((rule) => (
-              <BillRow key={rule.id} rule={rule} onEdit={() => openRecurringDialog(rule.id)} />
-            ))}
+          <div className="min-w-0">
+            <ul className="border-border min-w-0 border-t">
+              {visibleBills.map((rule) => (
+                <BillRow key={rule.id} rule={rule} onEdit={() => openRecurringDialog(rule.id)} />
+              ))}
+            </ul>
             <ShowMorePagination
               shown={visibleBills.length}
               total={filteredBills.length}
@@ -299,7 +319,7 @@ export function BillsPage() {
             />
           </div>
         )}
-      </div>
+      </section>
     </div>
   )
 }

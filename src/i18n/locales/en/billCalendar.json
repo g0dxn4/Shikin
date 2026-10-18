@@ -11,6 +11,40 @@
     "emptyTitle": "No recurring bills yet",
     "emptyDescription": "Add a recurring bill to track upcoming due dates from your local schedule."
   },
+  "horizon": {
+    "title": "Due horizon",
+    "scope": "Overdue, next 7 days, and later do not overlap and include every active expense rule. The list filter does not change these counts.",
+    "legend": "Due horizon by rule count",
+    "loading": "Loading due horizon",
+    "overdue": "Overdue",
+    "overdueWindow": "Before today",
+    "overdueCount": "{{count}} overdue, before today",
+    "next7": "Next 7 days",
+    "next7Window": "Today through 7 days ahead",
+    "next7Count": "{{count}} due today through 7 days ahead",
+    "later": "Later",
+    "laterWindow": "More than 7 days ahead",
+    "laterCount": "{{count}} due more than 7 days ahead",
+    "activeCount": "{{count}} active rules"
+  },
+  "frequency": {
+    "daily": "Daily",
+    "weekly": "Weekly",
+    "biweekly": "Biweekly",
+    "monthly": "Monthly",
+    "quarterly": "Quarterly",
+    "yearly": "Yearly"
+  },
+  "status": {
+    "paid": "Paid",
+    "unpaid": "Unpaid"
+  },
+  "calendar": {
+    "scrollRegion": "Month calendar",
+    "markLegend": "Day marks",
+    "paidCount": "{{count}} paid",
+    "unpaidCount": "{{count}} unpaid"
+  },
   "prevMonth": "Previous month",
   "nextMonth": "Next month",
   "upcomingBills": "Upcoming Bills",
@@ -55,6 +89,8 @@
   "schedule": {
     "allDays": "Whole month",
     "description": "Select a day. Paid amounts come from recorded transactions, not elapsed due dates.",
+    "list": "Scheduled bills",
+    "nativeAmounts": "Each amount stays in that bill’s own currency.",
     "unresolved": "Some legacy rules have ambiguous dates. Only the next known date is shown; review their recurrence anchor in Bills."
   }
 }

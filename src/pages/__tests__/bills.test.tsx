@@ -1,8 +1,9 @@
 import { act } from '@testing-library/react'
 import { useCurrencyStore } from '@/stores/currency-store'
 import { beforeEach, describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import dayjs from 'dayjs'
 import { MemoryRouter } from 'react-router'
 import { BillsPage } from '../bills'
 
@@ -202,5 +203,80 @@ describe('BillsPage', () => {
     expect(screen.queryByText('bills.emptyTitle')).not.toBeInTheDocument()
     expect(screen.queryByText('bills.emptyDescription')).not.toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: 'bills.addRecurring' })).toHaveLength(1)
+  })
+
+  it('partitions active expense rules into disjoint overdue, next-7, and later counts', async () => {
+    const user = userEvent.setup()
+    const today = dayjs().startOf('day')
+    const on = (offset: number) => today.add(offset, 'day').format('YYYY-MM-DD')
+    const rule = (overrides: Record<string, unknown>) => ({
+      ...recurringStoreMock.rules[0],
+      amount: 10000,
+      currency: 'USD',
+      ...overrides,
+    })
+    recurringStoreMock.rules = [
+      rule({ id: 'overdue', description: 'Overdue rent', next_date: on(-1) }),
+      rule({ id: 'today', description: 'Due today', next_date: on(0) }),
+      rule({ id: 'day7', description: 'Due on day 7', next_date: on(7) }),
+      rule({ id: 'day8', description: 'Due on day 8', next_date: on(8) }),
+      rule({ id: 'day30', description: 'Due in 30 days', next_date: on(30) }),
+      rule({ id: 'day31', description: 'Due in 31 days', next_date: on(31) }),
+      rule({ id: 'income', description: 'Paycheck', type: 'income', next_date: on(-1) }),
+      rule({
+        id: 'archived',
+        description: 'Archived utility',
+        account_is_archived: 1,
+        next_date: on(-1),
+      }),
+      rule({
+        id: 'ended',
+        description: 'Ended subscription',
+        next_date: on(10),
+        end_date: on(-2),
+      }),
+      rule({ id: 'inactive', description: 'Inactive bill', active: 0, next_date: on(-1) }),
+    ]
+
+    render(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
+
+    const summaryName = 'horizon.overdueCount 1. horizon.next7Count 2. horizon.laterCount 3.'
+    expect(screen.getByRole('img', { name: summaryName })).toBeInTheDocument()
+    expect(screen.getByText('horizon.activeCount 6')).toBeInTheDocument()
+    const legend = screen.getByRole('list', { name: 'horizon.legend' })
+    expect(within(legend).getAllByRole('listitem')).toHaveLength(3)
+    expect(
+      within(legend).getByRole('listitem', { name: 'horizon.overdueCount 1' })
+    ).toHaveTextContent('1')
+    expect(
+      within(legend).getByRole('listitem', { name: 'horizon.next7Count 2' })
+    ).toHaveTextContent('2')
+    expect(
+      within(legend).getByRole('listitem', { name: 'horizon.laterCount 3' })
+    ).toHaveTextContent('3')
+    expect(within(legend).getByText('horizon.overdueWindow')).toBeInTheDocument()
+    expect(within(legend).getByText('horizon.next7Window')).toBeInTheDocument()
+    expect(within(legend).getByText('horizon.laterWindow')).toBeInTheDocument()
+    expect(within(legend).queryByText(/[$€]|MX\$/)).not.toBeInTheDocument()
+    expect(screen.getAllByText('Due today')).toHaveLength(1)
+    expect(screen.getAllByText('Due on day 8')).toHaveLength(1)
+    expect(screen.queryByText('Paycheck')).not.toBeInTheDocument()
+    expect(screen.queryByText('Archived utility')).not.toBeInTheDocument()
+    expect(screen.queryByText('Ended subscription')).not.toBeInTheDocument()
+    expect(screen.queryByText('Inactive bill')).not.toBeInTheDocument()
+
+    await user.selectOptions(screen.getByRole('combobox'), 'soon')
+    expect(screen.getByText('Due today')).toBeInTheDocument()
+    expect(screen.getByText('Due on day 7')).toBeInTheDocument()
+    expect(screen.getByText('Due on day 8')).toBeInTheDocument()
+    expect(screen.getByText('Due in 30 days')).toBeInTheDocument()
+    expect(screen.queryByText('Due in 31 days')).not.toBeInTheDocument()
+    expect(screen.queryByText('Overdue rent')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'bills.addRecurring' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: summaryName })).toBeInTheDocument()
   })
 })

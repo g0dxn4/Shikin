@@ -277,7 +277,6 @@ export function SpendingHeatmap() {
   }
 
   const heatmapColumns = `1.75rem repeat(${computedWeeksCount}, minmax(12px, 1fr))`
-  const squareCells = computedWeeksCount >= 10
 
   return (
     <div className="page-content min-w-0">
@@ -411,8 +410,7 @@ export function SpendingHeatmap() {
                                 if (value !== null) setSelectedDate(dateLabel)
                               }}
                               className={cn(
-                                'focus-visible:ring-ring w-full min-w-[12px] rounded-[2px] focus-visible:ring-2 focus-visible:outline-none',
-                                squareCells ? 'aspect-square' : 'h-[clamp(16px,2.6vw,36px)]',
+                                'focus-visible:ring-ring h-[clamp(20px,3.2vw,36px)] w-full min-w-[12px] rounded-[2px] focus-visible:ring-2 focus-visible:outline-none',
                                 selected && 'ring-ring ring-2 ring-inset'
                               )}
                               style={heatmapCellStyle(value, maxSpend)}
@@ -436,8 +434,10 @@ export function SpendingHeatmap() {
                 </div>
               </div>
 
-              <div className="mt-4 min-w-0">
-                <h3 className="text-sm font-semibold">{t('spendingHeatmap.dayList')}</h3>
+              <details className="mt-4 min-w-0">
+                <summary className="focus-visible:ring-ring flex min-h-11 cursor-pointer items-center text-sm font-semibold focus-visible:rounded-md focus-visible:ring-2 focus-visible:outline-none">
+                  {t('spendingHeatmap.dayList')}
+                </summary>
                 <ul className="mt-2 max-h-72 min-w-0 overflow-y-auto">
                   {rangeDays.map((day) => (
                     <li key={day.date}>
@@ -466,7 +466,7 @@ export function SpendingHeatmap() {
                     </li>
                   ))}
                 </ul>
-              </div>
+              </details>
             </>
           )}
         </NativePanel>

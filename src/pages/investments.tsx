@@ -527,19 +527,21 @@ export function Investments() {
               ))}
             </ul>
           </div>
-          <table id="investment-allocation-table" className="sr-only">
-            <caption>
-              {t('chart.allocation')} {allocation.currency}
-            </caption>
-            <tbody>
-              {allocation.segments.map((segment) => (
-                <tr key={segment.type}>
-                  <th scope="row">{t(`types.${segment.type}` as 'types.stock')}</th>
-                  <td>{formatMoney(segment.amountCentavos, allocation.currency)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="sr-only">
+            <table id="investment-allocation-table">
+              <caption>
+                {t('chart.allocation')} {allocation.currency}
+              </caption>
+              <tbody>
+                {allocation.segments.map((segment) => (
+                  <tr key={segment.type}>
+                    <th scope="row">{t(`types.${segment.type}` as 'types.stock')}</th>
+                    <td>{formatMoney(segment.amountCentavos, allocation.currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </NativePanel>
       ) : null}
 
@@ -611,7 +613,12 @@ export function Investments() {
               onChange={setTimeRange}
             />
           </div>
-          <div className="h-40 min-w-0">
+          <div
+            className="h-40 min-w-0"
+            role="img"
+            aria-label={t('chart.currentQuantities')}
+            aria-describedby="investment-quote-history-table"
+          >
             <SafeChart>
               <AreaChart
                 data={quotePlot.points.map((point) => ({
@@ -652,17 +659,19 @@ export function Investments() {
               </AreaChart>
             </SafeChart>
           </div>
-          <table className="sr-only" data-testid="quote-history-table">
-            <caption>{t('chart.currentQuantities')}</caption>
-            <tbody>
-              {quotePlot.points.map((point) => (
-                <tr key={point.date}>
-                  <th scope="row">{point.date}</th>
-                  <td>{formatMoney(point.valueCentavos, quotePlot.currency)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="sr-only">
+            <table id="investment-quote-history-table" data-testid="quote-history-table">
+              <caption>{t('chart.currentQuantities')}</caption>
+              <tbody>
+                {quotePlot.points.map((point) => (
+                  <tr key={point.date}>
+                    <th scope="row">{point.date}</th>
+                    <td>{formatMoney(point.valueCentavos, quotePlot.currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </NativePanel>
       ) : quotePlot.status === 'withheld' &&
         !(quotePlot.reason === 'history-missing' && priceHistory.size === 0) ? (

@@ -289,10 +289,36 @@ describe('SpendingHeatmap page', () => {
     expect(cell.className).not.toMatch(/bg-accent/)
     expect(cell.getAttribute('style') ?? '').not.toMatch(/accent/)
     expect(document.body.innerHTML).not.toMatch(/bg-accent/)
+    const grid = screen.getByRole('grid', { name: 'spendingHeatmap.dailyActivity' })
+    const cells = screen.getAllByRole('gridcell')
+    expect(cells.length).toBeGreaterThan(0)
+    for (const rowCell of cells) {
+      expect(rowCell.className).not.toContain('aspect-square')
+      expect(rowCell.className).toContain('h-[clamp(20px,3.2vw,36px)]')
+    }
+    expect(grid.querySelector('.aspect-square')).toBeNull()
 
-    fireEvent.click(
-      screen.getByRole('button', { name: new RegExp(`spendingHeatmap.dayList ${today}:`) })
-    )
+    const dayList = screen.getByText('spendingHeatmap.dayList').closest('details')
+    expect(dayList).not.toBeNull()
+    expect(dayList).toHaveProperty('open', false)
+    expect(dayList).not.toHaveAttribute('open')
+    expect(grid.compareDocumentPosition(dayList!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(
+      screen
+        .getByRole('button', { name: new RegExp(`spendingHeatmap.dayList ${today}:`) })
+        .closest('details')
+    ).toBe(dayList)
+
+    fireEvent.click(screen.getByText('spendingHeatmap.dayList'))
+    expect(dayList).toHaveProperty('open', true)
+    const dayButton = screen.getByRole('button', {
+      name: new RegExp(`spendingHeatmap.dayList ${today}:`),
+    })
+    expect(dayButton).toHaveClass('min-h-11')
+    expect(
+      screen.getAllByRole('button', { name: /spendingHeatmap\.dayList .+: \$0\.00/ }).length
+    ).toBeGreaterThan(0)
+    fireEvent.click(dayButton)
     expect(screen.getByText('Groceries')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'spendingHeatmap.openDay' })).toHaveAttribute(
       'href',

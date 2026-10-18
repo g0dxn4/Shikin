@@ -6,7 +6,9 @@ import { describe, expect, it } from 'vitest'
 import { Button } from '@/components/ui/button'
 
 const css = readFileSync(resolve(process.cwd(), 'src/styles/globals.css'), 'utf8')
+const themeSource = readFileSync(resolve(process.cwd(), 'src/lib/theme.ts'), 'utf8')
 const buttonSource = readFileSync(resolve(process.cwd(), 'src/components/ui/button.tsx'), 'utf8')
+const LEGACY_CUSTOM_CHART_3 = '#8eb7ed'
 
 function block(source: string, header: string): string {
   const start = source.indexOf(header)
@@ -56,6 +58,22 @@ function contrast(foreground: string, background: string): number {
   const lighter = Math.max(luminance(foreground), luminance(background))
   const darker = Math.min(luminance(foreground), luminance(background))
   return (lighter + 0.05) / (darker + 0.05)
+}
+
+function themeColor(header: string, field: string): string {
+  const match = block(themeSource, header).match(
+    new RegExp(`^\\s*${field}:\\s*'(#[0-9a-fA-F]{6})'`, 'm')
+  )
+  expect(match, `${header} ${field}`).not.toBeNull()
+  return match![1].toLowerCase()
+}
+
+function composite(foreground: string, background: string, amount: number): string {
+  const [frontRed, frontGreen, frontBlue] = channels(foreground)
+  const [backRed, backGreen, backBlue] = channels(background)
+  const mix = (front: number, back: number) => Math.round(front * amount + back * (1 - amount))
+  const mixed = [mix(frontRed, backRed), mix(frontGreen, backGreen), mix(frontBlue, backBlue)]
+  return `#${mixed.map((value) => value.toString(16).padStart(2, '0')).join('')}`
 }
 
 function hueAndSaturation(hex: string): { hue: number; saturation: number } {
@@ -295,6 +313,46 @@ describe('native ink violet palette', () => {
     expect(custom).toContain('--color-chart-grid: var(--color-border)')
     expect(custom).toContain('--color-chart-axis: var(--color-muted-foreground)')
     expect(css).toContain('Saved legacy themes keep their custom token and typography behavior.')
+  })
+
+  it('keeps legacy custom chart-3 legible without changing native series', () => {
+    const customColors = colors(custom)
+    const declarations = [...css.matchAll(/--color-chart-3:\s*([^;]+);/g)].map((match) =>
+      match[1].trim().toLowerCase()
+    )
+    const midnightSurface = themeColor('midnight: {', 'surface')
+    const midnightBackground = themeColor('midnight: {', 'background')
+    const midnightForeground = themeColor('midnight: {', 'foreground')
+    const defaultSurface = themeColor('export const defaultTheme: ThemeTokens = {', 'surface')
+    const defaultBackground = themeColor('export const defaultTheme: ThemeTokens = {', 'background')
+    const defaultForeground = themeColor('export const defaultTheme: ThemeTokens = {', 'foreground')
+
+    expect(light['color-chart-3']).toBe('#44525f')
+    expect(dark['color-chart-3']).toBe('#a9b7c4')
+    expect(declarations).toEqual(['#44525f', '#a9b7c4', LEGACY_CUSTOM_CHART_3])
+    expect(customColors['color-chart-3']).toBe(LEGACY_CUSTOM_CHART_3)
+    expect(customColors['color-chart-1']).toBeUndefined()
+    expect(custom).not.toMatch(/--color-(?:accent|background|foreground|surface)\s*:/)
+    expect(custom).not.toMatch(/--font-/)
+    expect(themeSource).toContain("root.style.setProperty('--color-chart-1', theme.accent)")
+    expect(themeSource).not.toMatch(/setProperty\(\s*'--color-chart-3'/)
+
+    const legacy = customColors['color-chart-3']
+    // Snowball chip uses bg-muted: 7% foreground mixed over the surface.
+    expect(contrast(legacy, midnightSurface)).toBeCloseTo(7.07, 2)
+    expect(contrast(legacy, midnightSurface)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(legacy, midnightBackground)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(legacy, defaultSurface)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(legacy, defaultBackground)).toBeGreaterThanOrEqual(4.5)
+    expect(
+      contrast(legacy, composite(midnightForeground, midnightSurface, 0.07))
+    ).toBeGreaterThanOrEqual(4.5)
+    expect(
+      contrast(legacy, composite(defaultForeground, defaultSurface, 0.07))
+    ).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(light['color-chart-3'], midnightSurface)).toBeCloseTo(1.82, 2)
+    expect(contrast(light['color-chart-3'], midnightSurface)).toBeLessThan(4.5)
+    expect(contrast(light['color-chart-3'], defaultSurface)).toBeLessThan(4.5)
   })
 
   it('styles link buttons with accent text instead of the low-contrast primary fill', () => {

@@ -185,6 +185,8 @@ html[data-appearance='custom'] {
   --color-sidebar-border: var(--color-border);
   --color-chart-grid: var(--color-border);
   --color-chart-axis: var(--color-muted-foreground);
+  /* Isolate the native chart-3 change. Saved custom themes keep the legacy series. */
+  --color-chart-3: #8eb7ed;
 }
 
 @font-face {

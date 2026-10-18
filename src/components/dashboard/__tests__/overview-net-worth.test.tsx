@@ -48,9 +48,31 @@ vi.mock('recharts', () => ({
   ),
   Line: ({ type }: { type?: string }) => <div data-testid="line" data-type={type ?? ''} />,
   CartesianGrid: () => null,
-  XAxis: () => null,
-  YAxis: () => null,
-  Tooltip: () => null,
+  XAxis: ({ dataKey, hide }: { dataKey?: string | number; hide?: boolean }) => (
+    <div
+      data-testid="x-axis"
+      data-key={dataKey === undefined ? '' : String(dataKey)}
+      data-hide={hide ? 'true' : 'false'}
+    />
+  ),
+  YAxis: () => <div data-testid="y-axis" />,
+  Tooltip: ({
+    labelFormatter,
+    formatter,
+  }: {
+    labelFormatter?: (label: unknown) => unknown
+    formatter?: (value: unknown) => unknown
+  }) => {
+    const label = labelFormatter?.('2026-06-15')
+    const formatted = formatter?.(123_400)
+    return (
+      <div
+        data-testid="tooltip-binding"
+        data-sample-label={typeof label === 'string' ? label : ''}
+        data-sample-amount={Array.isArray(formatted) ? String(formatted[0]) : ''}
+      />
+    )
+  },
   Legend: () => null,
 }))
 
@@ -364,6 +386,35 @@ describe('Overview summary visual', () => {
     expect(table.caption?.textContent).toContain('overview.period.6m')
     expect(summary.querySelector('[role="group"]')).toBeNull()
     expect(screen.queryByRole('button', { name: 'overview.period.6m' })).not.toBeInTheDocument()
+  })
+
+  it('binds summary tooltip dates to recorded snapshots without a visible axis', () => {
+    render(
+      <OverviewNetWorth
+        {...baseProps}
+        currentAmount={150_050}
+        history={[
+          { date: '2026-01-31', netWorth: 100_000 },
+          { date: '2026-06-15', netWorth: 123_400 },
+          { date: '2026-10-17', netWorth: 150_050 },
+        ]}
+      />
+    )
+    const summary = document.getElementById('overview-summary-panel')!
+    const chart = summary.querySelector('[data-testid="line-chart"]')
+    expect(chart).toHaveAttribute('data-points', '2026-01-31,2026-06-15,2026-10-17')
+    expect(chart?.querySelector('[data-testid="line"]')).toHaveAttribute('data-type', 'linear')
+    const axis = chart?.querySelector('[data-testid="x-axis"]')
+    expect(axis).toHaveAttribute('data-key', 'date')
+    expect(axis).toHaveAttribute('data-hide', 'true')
+    expect(chart?.querySelectorAll('[data-testid="x-axis"]')).toHaveLength(1)
+    expect(chart?.querySelector('[data-testid="y-axis"]')).toBeNull()
+    const tooltip = chart?.querySelector('[data-testid="tooltip-binding"]')
+    expect(tooltip).toHaveAttribute('data-sample-label', 'Jun 15, 2026')
+    expect(tooltip).toHaveAttribute('data-sample-amount', '$1,234.00')
+    expect(summary.querySelector('[role="group"]')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'overview.period.all' })).not.toBeInTheDocument()
+    expect(summary.querySelector('.h-28')).toBeTruthy()
   })
 
   it('does not draw a line for zero or one snapshot', () => {

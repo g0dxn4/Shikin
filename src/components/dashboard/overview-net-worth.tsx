@@ -489,6 +489,8 @@ function SummaryVisualSlot({
           >
             <SafeChart>
               <LineChart data={visual.points} margin={{ top: 12, right: 8, left: 8, bottom: 4 }}>
+                {/* Bind tooltip labels to snapshot dates; hide keeps the axis off the summary. */}
+                <XAxis dataKey="date" hide />
                 <Line
                   type="linear"
                   dataKey="netWorth"

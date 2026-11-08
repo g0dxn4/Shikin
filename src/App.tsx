@@ -10,6 +10,7 @@ import {
   OneClickUpdateCard,
   type OneClickUpdatePhase,
 } from '@/components/update/one-click-update-card'
+import { useUpdateDownloadProgress } from '@/hooks/use-update-download-progress'
 import { getErrorMessage } from '@/lib/errors'
 import { useRecurringStore } from '@/stores/recurring-store'
 import { useCurrencyStore } from '@/stores/currency-store'
@@ -73,8 +74,8 @@ export default function App() {
   const [updatePromptDismissed, setUpdatePromptDismissed] = useState(false)
   const [updatePhase, setUpdatePhase] = useState<OneClickUpdatePhase>('available')
   const [updateError, setUpdateError] = useState<string | null>(null)
-  const [downloadedBytes, setDownloadedBytes] = useState(0)
-  const [downloadTotalBytes, setDownloadTotalBytes] = useState<number | null>(null)
+  const { downloadedBytes, downloadTotalBytes, resetDownloadProgress, onDownloadProgress } =
+    useUpdateDownloadProgress()
   const [readyUpdateVersion, setReadyUpdateVersion] = useState<string | null>(null)
   const startupInFlightRef = useRef(false)
   const updateInFlightRef = useRef(false)
@@ -116,13 +117,12 @@ export default function App() {
       setReadyUpdateVersion(null)
       setUpdatePhase('available')
       setUpdateError(null)
-      setDownloadedBytes(0)
-      setDownloadTotalBytes(null)
+      resetDownloadProgress()
       setUpdatePromptDismissed(false)
     } catch (error) {
       console.error('Update check failed:', getErrorMessage(error))
     }
-  }, [])
+  }, [resetDownloadProgress])
 
   const restartForStartupUpdate = useCallback(async () => {
     setUpdatePhase('restarting')
@@ -154,22 +154,11 @@ export default function App() {
     updateInFlightRef.current = true
     setUpdatePhase('downloading')
     setUpdateError(null)
-    setDownloadedBytes(0)
-    setDownloadTotalBytes(null)
+    resetDownloadProgress()
 
     try {
       const version = startupUpdate.version
-      await installUpdate(startupUpdate, (progress) => {
-        if (progress.event === 'Started') {
-          setDownloadTotalBytes(progress.data.contentLength ?? null)
-          setDownloadedBytes(0)
-          return
-        }
-
-        if (progress.event === 'Progress') {
-          setDownloadedBytes((current) => current + progress.data.chunkLength)
-        }
-      })
+      await installUpdate(startupUpdate, onDownloadProgress)
       readyUpdateVersionRef.current = version
       setReadyUpdateVersion(version)
       setUpdatePhase('ready')
@@ -180,7 +169,13 @@ export default function App() {
     } finally {
       updateInFlightRef.current = false
     }
-  }, [readyUpdateVersion, restartForStartupUpdate, startupUpdate])
+  }, [
+    onDownloadProgress,
+    readyUpdateVersion,
+    resetDownloadProgress,
+    restartForStartupUpdate,
+    startupUpdate,
+  ])
 
   const runStartupTasks = useCallback(() => {
     if (startupInFlightRef.current) return

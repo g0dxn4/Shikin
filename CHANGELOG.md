@@ -26,6 +26,7 @@ All notable changes to Shikin are documented in this file.
 - The local data bridge has an explicit startup entry (`scripts/data-server-runtime.mjs`) and a separate migrations module (`scripts/data-server-migrations.mjs`). Importing them no longer starts a server; `node scripts/data-server.mjs` and `shikin web` behave as before.
 - Ledger posting legs (signs, transfer legs, pending/staged/archive eligibility) are built by one finance-core function with closed per-caller compatibility profiles for the CLI, app store, undo, and strict core. Every caller's results are unchanged.
 - The investment store's currency-history subscription uses the shared `currencyAuthorityKey` instead of its own copy of the comparison. Freshness behavior is unchanged.
+- App and Settings share per-instance update download progress mechanics (`src/hooks/use-update-download-progress.ts`). Their distinct install and restart flows are unchanged.
 
 ## [1.2.1] - 2026-10-17
 

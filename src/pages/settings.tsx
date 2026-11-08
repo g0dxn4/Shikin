@@ -37,6 +37,7 @@ import { ClassificationTypesSettings } from '@/components/settings/classificatio
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { ProgressBar } from '@/components/ui/progress-bar'
 import { ErrorBanner } from '@/components/ui/error-banner'
+import { useUpdateDownloadProgress } from '@/hooks/use-update-download-progress'
 import {
   getAvailableUpdate,
   getCurrentAppVersion,
@@ -104,8 +105,8 @@ export function SettingsPage() {
   const [isRestartingForUpdate, setIsRestartingForUpdate] = useState(false)
   const [updateCheckedAt, setUpdateCheckedAt] = useState<string | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
-  const [downloadedBytes, setDownloadedBytes] = useState(0)
-  const [downloadTotalBytes, setDownloadTotalBytes] = useState<number | null>(null)
+  const { downloadedBytes, downloadTotalBytes, resetDownloadProgress, onDownloadProgress } =
+    useUpdateDownloadProgress()
   const [closeToTrayEnabled, setCloseToTrayEnabled] = useState(DEFAULT_CLOSE_TO_TRAY_ENABLED)
   const [isSavingDesktopSettings, setIsSavingDesktopSettings] = useState(false)
   const [webServerEnabled, setWebServerEnabled] = useState(DEFAULT_WEB_SERVER_ENABLED)
@@ -276,8 +277,7 @@ export function SettingsPage() {
   const handleCheckForUpdates = async () => {
     setIsCheckingUpdates(true)
     setUpdateError(null)
-    setDownloadedBytes(0)
-    setDownloadTotalBytes(null)
+    resetDownloadProgress()
     setLastUpdateAction('check')
 
     try {
@@ -306,23 +306,12 @@ export function SettingsPage() {
 
     setIsInstallingUpdate(true)
     setUpdateError(null)
-    setDownloadedBytes(0)
-    setDownloadTotalBytes(null)
+    resetDownloadProgress()
     setLastUpdateAction('install')
 
     try {
       const version = availableUpdate.version
-      await installUpdate(availableUpdate, (progress) => {
-        if (progress.event === 'Started') {
-          setDownloadTotalBytes(progress.data.contentLength ?? null)
-          setDownloadedBytes(0)
-          return
-        }
-
-        if (progress.event === 'Progress') {
-          setDownloadedBytes((current) => current + progress.data.chunkLength)
-        }
-      })
+      await installUpdate(availableUpdate, onDownloadProgress)
       setAvailableUpdate(null)
       setReadyUpdateVersion(version)
       toast.success(t('updates.installedToast', { version }))

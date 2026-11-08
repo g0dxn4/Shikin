@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
+import type * as UpdateCardModule from '@/components/update/one-click-update-card'
+import type { installUpdate } from '@/lib/updater'
 
 const {
   mockMaterializeTransactions,
@@ -97,6 +99,20 @@ vi.mock('@/lib/updater', () => ({
   installUpdate: mockInstallUpdate,
   relaunchToApplyUpdate: mockRelaunchToApplyUpdate,
 }))
+
+type UpdateCardProps = Parameters<typeof UpdateCardModule.OneClickUpdateCard>[0]
+const { observeUpdateCard } = vi.hoisted(() => ({ observeUpdateCard: vi.fn() }))
+
+vi.mock('@/components/update/one-click-update-card', async (importOriginal) => {
+  const actual = await importOriginal<typeof UpdateCardModule>()
+  return {
+    ...actual,
+    OneClickUpdateCard: (props: UpdateCardProps) => {
+      observeUpdateCard(props)
+      return <actual.OneClickUpdateCard {...props} />
+    },
+  }
+})
 
 import App from '../App'
 
@@ -438,5 +454,105 @@ describe('App startup orchestration', () => {
       expect(mockInstallUpdate).toHaveBeenCalledTimes(1)
       expect(mockRelaunchToApplyUpdate).toHaveBeenCalledTimes(2)
     })
+  })
+
+  it('preserves literal progress tuples, reset, and the immediate duplicate-install guard', async () => {
+    const user = userEvent.setup()
+    mockGetAvailableUpdate.mockResolvedValueOnce({
+      available: true,
+      version: '0.2.7',
+      downloadAndInstall: vi.fn(),
+    })
+    let progress!: NonNullable<Parameters<typeof installUpdate>[1]>
+    let rejectInstall!: (error: unknown) => void
+    mockInstallUpdate.mockImplementationOnce(
+      (_update, callback) =>
+        new Promise<void>((_resolve, reject) => {
+          progress = callback
+          rejectInstall = reject
+        })
+    )
+    render(<App />)
+    await screen.findByRole('button', { name: 'Update & restart' })
+    const card = () => observeUpdateCard.mock.lastCall![0] as UpdateCardProps
+    act(() => {
+      const install = card().onUpdateAndRestart
+      install()
+      install()
+    })
+    expect(mockInstallUpdate).toHaveBeenCalledTimes(1)
+    const tuples: [number, number | null][] = []
+    const events: Parameters<typeof progress>[0][] = [
+      { event: 'Progress', data: { chunkLength: 2 } },
+      { event: 'Started', data: { contentLength: 0 } },
+      { event: 'Progress', data: { chunkLength: 3 } },
+      { event: 'Progress', data: { chunkLength: 4 } },
+      { event: 'Finished' },
+      { event: 'Started', data: {} },
+    ]
+    for (const event of events) {
+      act(() => progress(event))
+      tuples.push([card().downloadedBytes, card().totalBytes])
+    }
+    expect(tuples).toEqual([
+      [2, null],
+      [0, 0],
+      [3, 0],
+      [7, 0],
+      [7, 0],
+      [0, null],
+    ])
+    act(() => {
+      progress({ event: 'Started', data: { contentLength: 10 } })
+      progress({ event: 'Progress', data: { chunkLength: 12 } })
+    })
+    expect([card().downloadedBytes, card().totalBytes]).toEqual([12, 10])
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('button', { name: 'Updating...' })).toBeDisabled()
+    await act(async () => rejectInstall({}))
+    expect(await screen.findByText('Unknown error')).toBeInTheDocument()
+
+    let finishInstall!: () => void
+    mockInstallUpdate.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finishInstall = resolve))
+    )
+    await user.click(screen.getByRole('button', { name: 'Update & restart' }))
+    expect([card().downloadedBytes, card().totalBytes]).toEqual([0, null])
+    await act(async () => finishInstall())
+    expect(mockRelaunchToApplyUpdate).toHaveBeenCalledTimes(1)
+    expect(mockInitPriceScheduler).toHaveBeenCalledTimes(1)
+    expect(mockGetAvailableUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the pending install lifecycle after unmount and starts fresh on remount', async () => {
+    const user = userEvent.setup()
+    const update = { available: true, version: '0.2.7', downloadAndInstall: vi.fn() }
+    mockGetAvailableUpdate.mockResolvedValue(update)
+    let progress!: NonNullable<Parameters<typeof installUpdate>[1]>
+    let finishInstall!: () => void
+    mockInstallUpdate.mockImplementationOnce(
+      (_update, callback) =>
+        new Promise<void>((resolve) => {
+          progress = callback
+          finishInstall = resolve
+        })
+    )
+    const first = render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Update & restart' }))
+    first.unmount()
+    expect(mockStopPriceScheduler).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      progress({ event: 'Progress', data: { chunkLength: 5 } })
+      finishInstall()
+    })
+    expect(mockRelaunchToApplyUpdate).toHaveBeenCalledTimes(1)
+    render(<App />)
+    await screen.findByRole('button', { name: 'Update & restart' })
+    const props = observeUpdateCard.mock.lastCall![0] as UpdateCardProps
+    expect([props.downloadedBytes, props.totalBytes, props.readyToRestart]).toEqual([
+      0,
+      null,
+      false,
+    ])
   })
 })

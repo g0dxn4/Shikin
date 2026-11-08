@@ -3,6 +3,8 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { SettingsPage } from '../settings'
+import type * as ButtonModule from '@/components/ui/button'
+import type { installUpdate } from '@/lib/updater'
 
 const mockChangeLanguage = vi.fn()
 
@@ -117,6 +119,19 @@ vi.mock('@/lib/storage', () => ({
     save: storageMocks.save,
   }),
 }))
+
+type ButtonProps = Parameters<typeof ButtonModule.Button>[0]
+const { observeButton } = vi.hoisted(() => ({ observeButton: vi.fn() }))
+vi.mock('@/components/ui/button', async (importOriginal) => {
+  const actual = await importOriginal<typeof ButtonModule>()
+  return {
+    ...actual,
+    Button: (props: ButtonProps) => {
+      observeButton(props)
+      return <actual.Button {...props} />
+    },
+  }
+})
 
 function renderSettings(initialEntry = '/settings') {
   return render(
@@ -632,6 +647,125 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(mockRelaunchToApplyUpdate).toHaveBeenCalledTimes(2)
     })
+  })
+
+  it('offers both install and restart after rechecking the installed version', async () => {
+    const user = userEvent.setup()
+    const update = { available: true, version: '0.2.0', downloadAndInstall: vi.fn() }
+    mockGetAvailableUpdate.mockResolvedValueOnce(update).mockResolvedValueOnce(update)
+    renderSettings('/settings?section=data')
+    await user.click(screen.getByRole('button', { name: 'updates.check' }))
+    await user.click(await screen.findByRole('button', { name: 'updates.install' }))
+    expect(await screen.findByRole('button', { name: 'updates.restart' })).toBeEnabled()
+    expect(mockRelaunchToApplyUpdate).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'updates.check' }))
+    expect(await screen.findByRole('button', { name: 'updates.install' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'updates.restart' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'updates.install' }))
+    expect(mockInstallUpdate).toHaveBeenCalledTimes(2)
+    expect(mockRelaunchToApplyUpdate).not.toHaveBeenCalled()
+  })
+
+  it('keeps the old same-render double-handler behavior without an immediate guard', async () => {
+    const user = userEvent.setup()
+    mockGetAvailableUpdate.mockResolvedValueOnce({
+      available: true,
+      version: '0.2.0',
+      downloadAndInstall: vi.fn(),
+    })
+    const pending: (() => void)[] = []
+    mockInstallUpdate.mockImplementation(
+      () => new Promise<void>((resolve) => pending.push(resolve))
+    )
+    renderSettings('/settings?section=data')
+    await user.click(screen.getByRole('button', { name: 'updates.check' }))
+    await screen.findByRole('button', { name: 'updates.install' })
+    const installProps = observeButton.mock.calls
+      .map(([props]) => props as ButtonProps)
+      .reverse()
+      .find((props) => Array.isArray(props.children) && props.children.includes('updates.install'))!
+    act(() => {
+      installProps.onClick!({} as Parameters<NonNullable<ButtonProps['onClick']>>[0])
+      installProps.onClick!({} as Parameters<NonNullable<ButtonProps['onClick']>>[0])
+    })
+    expect(mockInstallUpdate).toHaveBeenCalledTimes(2)
+    await act(async () => pending.forEach((resolve) => resolve()))
+    expect(mockToastSuccess.mock.calls).toEqual([
+      ['updates.availableToast'],
+      ['updates.installedToast'],
+      ['updates.installedToast'],
+    ])
+    expect(mockRelaunchToApplyUpdate).not.toHaveBeenCalled()
+    mockInstallUpdate.mockReset().mockResolvedValue(undefined)
+  })
+
+  it('accumulates chunks, ignores Finished, resets repeated starts and uses its install fallback', async () => {
+    const user = userEvent.setup()
+    mockGetAvailableUpdate.mockResolvedValueOnce({
+      available: true,
+      version: '0.2.0',
+      downloadAndInstall: vi.fn(),
+    })
+    let progress!: NonNullable<Parameters<typeof installUpdate>[1]>
+    let rejectInstall!: (error: unknown) => void
+    mockInstallUpdate.mockImplementationOnce(
+      (_update, callback) =>
+        new Promise<void>((_resolve, reject) => {
+          progress = callback
+          rejectInstall = reject
+        })
+    )
+    renderSettings('/settings?section=data')
+    await user.click(screen.getByRole('button', { name: 'updates.check' }))
+    await user.click(await screen.findByRole('button', { name: 'updates.install' }))
+    act(() => progress({ event: 'Progress', data: { chunkLength: 2 } }))
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    act(() => progress({ event: 'Started', data: { contentLength: 10 } }))
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0')
+    act(() => {
+      progress({ event: 'Progress', data: { chunkLength: 3 } })
+      progress({ event: 'Progress', data: { chunkLength: 4 } })
+      progress({ event: 'Finished' })
+    })
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '70')
+    act(() => progress({ event: 'Started', data: {} }))
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    await act(async () => rejectInstall({}))
+    expect(await screen.findByText('updates.installErrorToast')).toBeInTheDocument()
+    expect(mockToastError).toHaveBeenCalledWith('updates.installErrorToast')
+  })
+
+  it('finishes a Settings install after unmount without restarting or retaining local ready state', async () => {
+    const user = userEvent.setup()
+    mockGetAvailableUpdate.mockResolvedValueOnce({
+      available: true,
+      version: '0.2.0',
+      downloadAndInstall: vi.fn(),
+    })
+    let finishInstall!: () => void
+    let progress!: NonNullable<Parameters<typeof installUpdate>[1]>
+    mockInstallUpdate.mockImplementationOnce(
+      (_update, callback) =>
+        new Promise<void>((resolve) => {
+          progress = callback
+          finishInstall = resolve
+        })
+    )
+    const first = renderSettings('/settings?section=data')
+    await user.click(screen.getByRole('button', { name: 'updates.check' }))
+    await user.click(await screen.findByRole('button', { name: 'updates.install' }))
+    first.unmount()
+    await act(async () => {
+      progress({ event: 'Progress', data: { chunkLength: 5 } })
+      finishInstall()
+    })
+    expect(mockToastSuccess).toHaveBeenCalledWith('updates.installedToast')
+    expect(mockRelaunchToApplyUpdate).not.toHaveBeenCalled()
+    renderSettings('/settings?section=data')
+    expect(await screen.findByText('0.1.0')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'updates.restart' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
   })
 
   it('shows specific error toast when data export fails', async () => {

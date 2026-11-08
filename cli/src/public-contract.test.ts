@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { ToolDefinition } from './tools.js'
 
@@ -24,13 +24,27 @@ const { createMcpServer, createMcpToolHandler, registerMcpResources, registerMcp
 
 const inventory = JSON.parse(
   readFileSync(resolve(process.cwd(), 'cli/src/fixtures/public-automation-inventory.json'), 'utf8')
-) as { tools: string[]; commands: string[]; toolOrder: string[]; commandOrder: string[] }
+) as {
+  tools: string[]
+  commands: string[]
+  toolOrder: string[]
+  commandOrder: string[]
+  builtinCatalog: unknown[]
+  commandHelp: Record<string, string>
+}
 const { version: cliPackageVersion } = JSON.parse(
   readFileSync(resolve(process.cwd(), 'cli/package.json'), 'utf8')
 ) as { version: string }
 
+afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
+
 describe('public automation contract', () => {
   it('pins every built-in tool and command plus independently versioned contracts', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-08T12:00:00.000Z'))
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const program = createProgram(builtInTools)
 
@@ -55,6 +69,7 @@ describe('public automation contract', () => {
       success: true,
       catalogVersion: COMMAND_CATALOG_VERSION,
       schemaVersion: 'cli-tools-json.v1',
+      generatedAt: '2026-11-08T12:00:00.000Z',
       commandCount: 123,
       toolCount: 118,
       compatibility: {
@@ -66,6 +81,7 @@ describe('public automation contract', () => {
 
     const commands = catalog.commands as Array<{ name: string; effects?: unknown }>
     expect(commands.map((command) => command.name)).toEqual(inventory.commandOrder)
+    expect(commands.slice(0, 5)).toEqual(inventory.builtinCatalog)
     expect(commands.find((command) => command.name === 'get-spending-recap')?.effects).toEqual({
       readOnly: true,
       writesTo: [],
@@ -121,6 +137,31 @@ describe('public automation contract', () => {
       ],
     })
   })
+
+  it.each(['shikin', 'diagnose', 'tools', 'validate', 'web', 'record'])(
+    'preserves the complete %s help bytes from the unchanged built CLI',
+    async (name) => {
+      let stdout = ''
+      let stderr = ''
+      const program = createProgram(builtInTools)
+        .exitOverride()
+        .configureOutput({
+          writeOut: (text) => {
+            stdout += text
+          },
+          writeErr: (text) => {
+            stderr += text
+          },
+        })
+      for (const command of program.commands) command.exitOverride()
+
+      await expect(
+        program.parseAsync(['node', 'shikin', ...(name === 'shikin' ? [] : [name]), '--help'])
+      ).rejects.toMatchObject({ code: 'commander.helpDisplayed', exitCode: 0 })
+      expect(stdout).toBe(inventory.commandHelp[name])
+      expect(stderr).toBe('')
+    }
+  )
 
   it('keeps plugin-like tools additive without changing the built-in fixture', () => {
     const pluginLikeTool: ToolDefinition = {

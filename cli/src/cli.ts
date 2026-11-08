@@ -41,18 +41,79 @@ type DescribedOption = ReturnType<typeof zodToOptions>[number] & {
   enumValues?: string[]
 }
 
-const OUTPUT_OPTION_KEYS = new Set(['json', 'pretty', 'quiet', 'redacted'])
+type CommandOptionDescriptor = {
+  name: string
+  flag: string
+  type: string
+  required: false
+  defaultValue?: number
+  enumValues?: string[]
+  description: string
+  helpDescription?: string
+  valueName?: string
+  commanderDefault?: string
+}
+
+type BuiltInCommandDescriptor = {
+  name: 'diagnose' | 'tools' | 'validate' | 'web' | 'record'
+  kind: 'builtin'
+  validateable: false
+  description: string
+  aliases: string[]
+  arguments: {
+    name: string
+    required: boolean
+    variadic?: boolean
+    helpDescription: string
+  }[]
+  options: CommandOptionDescriptor[]
+  outputOptions: 'default' | 'validate' | 'none'
+}
+
+const OUTPUT_OPTIONS: CommandOptionDescriptor[] = [
+  {
+    name: 'json',
+    flag: 'json',
+    type: 'boolean',
+    required: false,
+    description: 'Print compact JSON output',
+  },
+  {
+    name: 'pretty',
+    flag: 'pretty',
+    type: 'boolean',
+    required: false,
+    description: 'Print pretty JSON output',
+    helpDescription: 'Print pretty JSON output (default)',
+  },
+  {
+    name: 'quiet',
+    flag: 'quiet',
+    type: 'boolean',
+    required: false,
+    description: 'Suppress successful output',
+    helpDescription: 'Suppress successful output; failures still print JSON',
+  },
+  {
+    name: 'redacted',
+    flag: 'redacted',
+    type: 'boolean',
+    required: false,
+    description: 'Redact sensitive output fields',
+    helpDescription: 'Redact future sensitive fields from output',
+  },
+]
+
+const OUTPUT_OPTION_KEYS = new Set(OUTPUT_OPTIONS.map((option) => option.name))
 const SENSITIVE_KEY_PATTERN =
   /(?:account[_-]?number|routing[_-]?number|card[_-]?number|iban|swift|secret|token|password|private[_-]?key|payer|project[_-]?reference|invoice[_-]?reference|notes?|description|source|account[_-]?name)/i
 
 function addOutputOptions(cmd: Command, options: { includeRedacted?: boolean } = {}): Command {
-  const withBaseOptions = cmd
-    .option('--json', 'Print compact JSON output')
-    .option('--pretty', 'Print pretty JSON output (default)')
-    .option('--quiet', 'Suppress successful output; failures still print JSON')
-  return options.includeRedacted === false
-    ? withBaseOptions
-    : withBaseOptions.option('--redacted', 'Redact future sensitive fields from output')
+  for (const option of OUTPUT_OPTIONS) {
+    if (options.includeRedacted === false && option.name === 'redacted') continue
+    cmd.option(`--${option.flag}`, option.helpDescription ?? option.description)
+  }
+  return cmd
 }
 
 function getOutputOptions(opts: Record<string, unknown>): OutputOptions {
@@ -169,42 +230,20 @@ function errorFromUnknown(err: unknown): Record<string, unknown> {
   return errorResult('COMMAND_ERROR', err instanceof Error ? err.message : String(err))
 }
 
+function describeCommandOption(option: CommandOptionDescriptor) {
+  const {
+    helpDescription: _helpDescription,
+    valueName: _valueName,
+    commanderDefault: _commanderDefault,
+    ...catalogOption
+  } = option
+  return catalogOption
+}
+
 function describeOutputOptions(options: { includeRedacted?: boolean } = {}) {
-  const outputOptions = [
-    {
-      name: 'json',
-      flag: 'json',
-      type: 'boolean',
-      required: false,
-      description: 'Print compact JSON output',
-    },
-    {
-      name: 'pretty',
-      flag: 'pretty',
-      type: 'boolean',
-      required: false,
-      description: 'Print pretty JSON output',
-    },
-    {
-      name: 'quiet',
-      flag: 'quiet',
-      type: 'boolean',
-      required: false,
-      description: 'Suppress successful output',
-    },
-  ]
-  return options.includeRedacted === false
-    ? outputOptions
-    : [
-        ...outputOptions,
-        {
-          name: 'redacted',
-          flag: 'redacted',
-          type: 'boolean',
-          required: false,
-          description: 'Redact sensitive output fields',
-        },
-      ]
+  return OUTPUT_OPTIONS.filter(
+    (option) => options.includeRedacted !== false || option.name !== 'redacted'
+  ).map(describeCommandOption)
 }
 
 function describeToolOutputOptions(schema: z.ZodObject<any>) {
@@ -282,9 +321,217 @@ function describeToolEffects(effects: ToolDefinition['effects']) {
   return Object.keys(described).length > 0 ? described : undefined
 }
 
+const BUILT_IN_COMMANDS: BuiltInCommandDescriptor[] = [
+  {
+    name: 'diagnose',
+    kind: 'builtin',
+    validateable: false,
+    description: 'Validate shared database connectivity and print CLI/MCP health details',
+    aliases: [],
+    arguments: [],
+    options: [
+      {
+        name: 'deep',
+        flag: 'deep',
+        type: 'boolean',
+        required: false,
+        description: 'Run read-only integrity, foreign-key, migration, and balance checks',
+      },
+    ],
+    outputOptions: 'default',
+  },
+  {
+    name: 'tools',
+    kind: 'builtin',
+    validateable: false,
+    description: 'Return machine-readable command discovery metadata',
+    aliases: [],
+    arguments: [],
+    options: [],
+    outputOptions: 'default',
+  },
+  {
+    name: 'validate',
+    kind: 'builtin',
+    validateable: false,
+    description: 'Validate another command without executing it',
+    aliases: [],
+    arguments: [
+      { name: 'commandName', required: true, helpDescription: 'Command to validate' },
+      {
+        name: 'args',
+        required: false,
+        variadic: true,
+        helpDescription: 'Command options to validate',
+      },
+    ],
+    options: [],
+    outputOptions: 'validate',
+  },
+  {
+    name: 'web',
+    kind: 'builtin',
+    validateable: false,
+    description: 'Serve the packaged Shikin web app and data API on loopback for Tailscale Serve',
+    aliases: [],
+    arguments: [],
+    options: [
+      {
+        name: 'port',
+        flag: 'port',
+        type: 'number',
+        required: false,
+        defaultValue: WEB_DEFAULT_PORT,
+        description: 'Loopback port to serve (1024-65535)',
+        valueName: 'port',
+        commanderDefault: String(WEB_DEFAULT_PORT),
+      },
+    ],
+    outputOptions: 'none',
+  },
+  {
+    name: 'record',
+    kind: 'builtin',
+    validateable: false,
+    description: 'Parse a natural-language transaction entry and return a confirmation preview',
+    aliases: [],
+    arguments: [
+      {
+        name: 'entry',
+        required: true,
+        variadic: true,
+        helpDescription: 'Natural-language transaction entry',
+      },
+    ],
+    options: [
+      {
+        name: 'apply',
+        flag: 'apply',
+        type: 'boolean',
+        required: false,
+        description: 'Apply the parsed transaction noninteractively',
+      },
+      {
+        name: 'dryRun',
+        flag: 'dry-run',
+        type: 'boolean',
+        required: false,
+        description: 'Validate and preview without writing (default)',
+        helpDescription: 'Validate and preview the parsed transaction without writing it',
+      },
+      {
+        name: 'strict',
+        flag: 'strict',
+        type: 'boolean',
+        required: false,
+        description: 'Fail when natural-language parsing is ambiguous or low-confidence',
+      },
+      {
+        name: 'minConfidence',
+        flag: 'min-confidence',
+        type: 'number',
+        required: false,
+        description: 'Minimum parse confidence from 0 to 1 before recording',
+        valueName: 'value',
+      },
+      {
+        name: 'requireExplicitType',
+        flag: 'require-explicit-type',
+        type: 'boolean',
+        required: false,
+        description: 'Require income or expense intent to be explicit in the entry',
+        helpDescription: 'Require income or expense intent to be explicit',
+      },
+      {
+        name: 'requireExplicitAccount',
+        flag: 'require-explicit-account',
+        type: 'boolean',
+        required: false,
+        description:
+          'Require an account via --account, --account-id, or an account phrase in the entry',
+        helpDescription: 'Require account via flag or account phrase',
+      },
+      {
+        name: 'requireExplicitAmount',
+        flag: 'require-explicit-amount',
+        type: 'boolean',
+        required: false,
+        description: 'Require an explicit amount in the entry',
+      },
+      {
+        name: 'allowDuplicate',
+        flag: 'allow-duplicate',
+        type: 'boolean',
+        required: false,
+        description: 'Apply even when an exact or likely duplicate transaction is detected',
+        helpDescription: 'Apply even when an exact or likely duplicate is detected',
+      },
+      {
+        name: 'account',
+        flag: 'account',
+        type: 'string',
+        required: false,
+        description: 'Account alias, exact account ID, or exact account name',
+        valueName: 'value',
+      },
+      {
+        name: 'accountId',
+        flag: 'account-id',
+        type: 'string',
+        required: false,
+        description: 'Canonical account ID',
+        valueName: 'value',
+      },
+      {
+        name: 'category',
+        flag: 'category',
+        type: 'string',
+        required: false,
+        description: 'Category name override',
+        valueName: 'value',
+      },
+      {
+        name: 'status',
+        flag: 'status',
+        type: 'enum',
+        required: false,
+        enumValues: ['pending', 'posted', 'cleared'],
+        description: 'Transaction status',
+        valueName: 'status',
+        helpDescription: 'Transaction status: pending, posted, or cleared',
+      },
+      {
+        name: 'notes',
+        flag: 'notes',
+        type: 'string',
+        required: false,
+        description: 'User transaction notes',
+        valueName: 'value',
+      },
+      {
+        name: 'source',
+        flag: 'source',
+        type: 'string',
+        required: false,
+        description: 'Automation source or origin label for transaction provenance',
+        valueName: 'value',
+        helpDescription: 'Automation source or origin label for transaction provenance',
+      },
+      {
+        name: 'note',
+        flag: 'note',
+        type: 'string',
+        required: false,
+        description: 'Workflow changelog note for transaction provenance',
+        valueName: 'value',
+      },
+    ],
+    outputOptions: 'default',
+  },
+]
+
 function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
   const defaultOutputOptions = describeOutputOptions()
-  const validateOutputOptions = describeOutputOptions({ includeRedacted: false })
   const cliUnavailableTools = toolDefinitions
     .filter((tool) => tool.cliUnavailableMessage)
     .map((tool) => tool.name)
@@ -294,186 +541,21 @@ function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
     .map((tool) => tool.name)
     .sort()
   const latestRequiredMigration = CURRENT_SHIKIN_MIGRATIONS.at(-1) ?? null
-  const builtInCommands = [
-    {
-      name: 'diagnose',
-      kind: 'builtin',
-      validateable: false,
-      description: 'Validate shared database connectivity and print CLI/MCP health details',
-      aliases: [],
-      arguments: [],
-      options: [
-        {
-          name: 'deep',
-          flag: 'deep',
-          type: 'boolean',
-          required: false,
-          description: 'Run read-only integrity, foreign-key, migration, and balance checks',
-        },
-      ],
-      outputOptions: defaultOutputOptions,
-    },
-    {
-      name: 'tools',
-      kind: 'builtin',
-      validateable: false,
-      description: 'Return machine-readable command discovery metadata',
-      aliases: [],
-      arguments: [],
-      options: [],
-      outputOptions: defaultOutputOptions,
-    },
-    {
-      name: 'validate',
-      kind: 'builtin',
-      validateable: false,
-      description: 'Validate another command without executing it',
-      aliases: [],
-      arguments: [
-        { name: 'commandName', required: true },
-        { name: 'args', required: false, variadic: true },
-      ],
-      options: [],
-      outputOptions: validateOutputOptions,
-    },
-    {
-      name: 'web',
-      kind: 'builtin',
-      validateable: false,
-      description: 'Serve the packaged Shikin web app and data API on loopback for Tailscale Serve',
-      aliases: [],
-      arguments: [],
-      options: [
-        {
-          name: 'port',
-          flag: 'port',
-          type: 'number',
-          required: false,
-          defaultValue: WEB_DEFAULT_PORT,
-          description: 'Loopback port to serve (1024-65535)',
-        },
-      ],
-      outputOptions: [],
-    },
-    {
-      name: 'record',
-      kind: 'builtin',
-      validateable: false,
-      description: 'Parse a natural-language transaction entry and return a confirmation preview',
-      aliases: [],
-      arguments: [{ name: 'entry', required: true, variadic: true }],
-      options: [
-        {
-          name: 'apply',
-          flag: 'apply',
-          type: 'boolean',
-          required: false,
-          description: 'Apply the parsed transaction noninteractively',
-        },
-        {
-          name: 'dryRun',
-          flag: 'dry-run',
-          type: 'boolean',
-          required: false,
-          description: 'Validate and preview without writing (default)',
-        },
-        {
-          name: 'strict',
-          flag: 'strict',
-          type: 'boolean',
-          required: false,
-          description: 'Fail when natural-language parsing is ambiguous or low-confidence',
-        },
-        {
-          name: 'minConfidence',
-          flag: 'min-confidence',
-          type: 'number',
-          required: false,
-          description: 'Minimum parse confidence from 0 to 1 before recording',
-        },
-        {
-          name: 'requireExplicitType',
-          flag: 'require-explicit-type',
-          type: 'boolean',
-          required: false,
-          description: 'Require income or expense intent to be explicit in the entry',
-        },
-        {
-          name: 'requireExplicitAccount',
-          flag: 'require-explicit-account',
-          type: 'boolean',
-          required: false,
-          description:
-            'Require an account via --account, --account-id, or an account phrase in the entry',
-        },
-        {
-          name: 'requireExplicitAmount',
-          flag: 'require-explicit-amount',
-          type: 'boolean',
-          required: false,
-          description: 'Require an explicit amount in the entry',
-        },
-        {
-          name: 'allowDuplicate',
-          flag: 'allow-duplicate',
-          type: 'boolean',
-          required: false,
-          description: 'Apply even when an exact or likely duplicate transaction is detected',
-        },
-        {
-          name: 'account',
-          flag: 'account',
-          type: 'string',
-          required: false,
-          description: 'Account alias, exact account ID, or exact account name',
-        },
-        {
-          name: 'accountId',
-          flag: 'account-id',
-          type: 'string',
-          required: false,
-          description: 'Canonical account ID',
-        },
-        {
-          name: 'category',
-          flag: 'category',
-          type: 'string',
-          required: false,
-          description: 'Category name override',
-        },
-        {
-          name: 'status',
-          flag: 'status',
-          type: 'enum',
-          required: false,
-          enumValues: ['pending', 'posted', 'cleared'],
-          description: 'Transaction status',
-        },
-        {
-          name: 'notes',
-          flag: 'notes',
-          type: 'string',
-          required: false,
-          description: 'User transaction notes',
-        },
-        {
-          name: 'source',
-          flag: 'source',
-          type: 'string',
-          required: false,
-          description: 'Automation source or origin label for transaction provenance',
-        },
-        {
-          name: 'note',
-          flag: 'note',
-          type: 'string',
-          required: false,
-          description: 'Workflow changelog note for transaction provenance',
-        },
-      ],
-      outputOptions: defaultOutputOptions,
-    },
-  ]
+  const builtInCommands = BUILT_IN_COMMANDS.map((command) => ({
+    name: command.name,
+    kind: command.kind,
+    validateable: command.validateable,
+    description: command.description,
+    aliases: command.aliases,
+    arguments: command.arguments.map(
+      ({ helpDescription: _helpDescription, ...argument }) => argument
+    ),
+    options: command.options.map(describeCommandOption),
+    outputOptions:
+      command.outputOptions === 'none'
+        ? []
+        : describeOutputOptions({ includeRedacted: command.outputOptions !== 'validate' }),
+  }))
 
   const toolCommands = toolDefinitions.map((tool) => {
     const effects = describeToolEffects(tool.effects)
@@ -2262,20 +2344,55 @@ export function createProgram(toolDefinitions: ToolDefinition[] = tools): Comman
 }
 
 function registerBuiltInCommands(program: Command, toolDefinitions: ToolDefinition[]): void {
-  registerDiagnoseCommand(program, toolDefinitions)
-  registerToolsCommand(program, toolDefinitions)
-  registerValidateCommand(program, toolDefinitions)
-  registerWebCommand(program)
-  registerRecordCommand(program, toolDefinitions)
-}
+  for (const descriptor of BUILT_IN_COMMANDS) {
+    const command = program.command(descriptor.name).description(descriptor.description)
+    for (const alias of descriptor.aliases) command.alias(alias)
+    for (const argument of descriptor.arguments) {
+      const name = `${argument.name}${argument.variadic ? '...' : ''}`
+      command.argument(argument.required ? `<${name}>` : `[${name}]`, argument.helpDescription)
+    }
+    for (const option of descriptor.options) {
+      command.option(
+        `--${option.flag}${option.valueName ? ` <${option.valueName}>` : ''}`,
+        option.helpDescription ?? option.description,
+        option.commanderDefault
+      )
+    }
+    if (descriptor.outputOptions !== 'none') {
+      addOutputOptions(command, { includeRedacted: descriptor.outputOptions !== 'validate' })
+    }
 
-function registerDiagnoseCommand(program: Command, toolDefinitions: ToolDefinition[]): void {
-  addOutputOptions(
-    program
-      .command('diagnose')
-      .description('Validate shared database connectivity and print CLI/MCP health details')
-      .option('--deep', 'Run read-only integrity, foreign-key, migration, and balance checks')
-  ).action((options: Record<string, unknown>) => runDiagnoseCommand(options, toolDefinitions))
+    switch (descriptor.name) {
+      case 'diagnose':
+        command.action((options: Record<string, unknown>) =>
+          runDiagnoseCommand(options, toolDefinitions)
+        )
+        break
+      case 'tools':
+        command.action((options: Record<string, unknown>) =>
+          runToolsCommand(options, toolDefinitions)
+        )
+        break
+      case 'validate':
+        command
+          .allowUnknownOption(true)
+          .allowExcessArguments(true)
+          .action((commandName: string, args: string[] = [], options: Record<string, unknown>) => {
+            runValidateCommand(commandName, args, options, toolDefinitions)
+          })
+        break
+      case 'web':
+        command.action(async (options: { port?: string }) => {
+          await startWebHost(options.port)
+        })
+        break
+      case 'record':
+        command.action((entryParts: string[], options: Record<string, unknown>) =>
+          runRecordCommand(entryParts, options, toolDefinitions)
+        )
+        break
+    }
+  }
 }
 
 function runDiagnoseCommand(
@@ -2296,33 +2413,12 @@ function runDiagnoseCommand(
   }
 }
 
-function registerToolsCommand(program: Command, toolDefinitions: ToolDefinition[]): void {
-  addOutputOptions(
-    program.command('tools').description('Return machine-readable command discovery metadata')
-  ).action((options: Record<string, unknown>) => runToolsCommand(options, toolDefinitions))
-}
-
 function runToolsCommand(
   options: Record<string, unknown>,
   toolDefinitions: ToolDefinition[]
 ): void {
   writeOutput(getCommandCatalog(toolDefinitions), getOutputOptions(options))
   close()
-}
-
-function registerValidateCommand(program: Command, toolDefinitions: ToolDefinition[]): void {
-  addOutputOptions(
-    program
-      .command('validate')
-      .description('Validate another command without executing it')
-      .argument('<commandName>', 'Command to validate')
-      .argument('[args...]', 'Command options to validate')
-      .allowUnknownOption(true)
-      .allowExcessArguments(true),
-    { includeRedacted: false }
-  ).action((commandName: string, args: string[] = [], options: Record<string, unknown>) => {
-    runValidateCommand(commandName, args, options, toolDefinitions)
-  })
 }
 
 function runValidateCommand(
@@ -2336,42 +2432,6 @@ function runValidateCommand(
   writeOutput(result, outputOptions)
   if (isFailureResult(normalizeResult(result))) process.exitCode = 1
   close()
-}
-
-function registerWebCommand(program: Command): void {
-  program
-    .command('web')
-    .description('Serve the packaged Shikin web app and data API on loopback for Tailscale Serve')
-    .option('--port <port>', 'Loopback port to serve (1024-65535)', String(WEB_DEFAULT_PORT))
-    .action(async (options: { port?: string }) => {
-      await startWebHost(options.port)
-    })
-}
-
-function registerRecordCommand(program: Command, toolDefinitions: ToolDefinition[]): void {
-  addOutputOptions(
-    program
-      .command('record')
-      .description('Parse a natural-language transaction entry and return a confirmation preview')
-      .argument('<entry...>', 'Natural-language transaction entry')
-      .option('--apply', 'Apply the parsed transaction noninteractively')
-      .option('--dry-run', 'Validate and preview the parsed transaction without writing it')
-      .option('--strict', 'Fail when natural-language parsing is ambiguous or low-confidence')
-      .option('--min-confidence <value>', 'Minimum parse confidence from 0 to 1 before recording')
-      .option('--require-explicit-type', 'Require income or expense intent to be explicit')
-      .option('--require-explicit-account', 'Require account via flag or account phrase')
-      .option('--require-explicit-amount', 'Require an explicit amount in the entry')
-      .option('--allow-duplicate', 'Apply even when an exact or likely duplicate is detected')
-      .option('--account <value>', 'Account alias, exact account ID, or exact account name')
-      .option('--account-id <value>', 'Canonical account ID')
-      .option('--category <value>', 'Category name override')
-      .option('--status <status>', 'Transaction status: pending, posted, or cleared')
-      .option('--notes <value>', 'User transaction notes')
-      .option('--source <value>', 'Automation source or origin label for transaction provenance')
-      .option('--note <value>', 'Workflow changelog note for transaction provenance')
-  ).action((entryParts: string[], options: Record<string, unknown>) =>
-    runRecordCommand(entryParts, options, toolDefinitions)
-  )
 }
 
 async function runRecordCommand(

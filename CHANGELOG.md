@@ -30,6 +30,7 @@ All notable changes to Shikin are documented in this file.
 - Statement import, account maintenance, and legacy import-identity actions keep their post-commit refresh and invalidation steps in dedicated `src/lib/*-actions.ts` modules, separate from persistence. Refresh and invalidation behavior is unchanged.
 - The large CLI tool bundles (`audit-and-context`, `data-ops`, `investments-and-subscriptions`) are split into focused modules (transaction queries, spending summary, audit history, automation context, finance sanity, CSV import, export, backup, finance profile, investments, subscriptions, upcoming bills). All 118 tools keep their order, names, schemas, and output; the public inventory now also pins tool order.
 - Manual and scheduled investment quote updates share one publication sequence (`src/lib/investment-price-publication.ts`: failures → save → timestamp → holdings refresh). Provider calls, cadence, and partial-failure behavior are unchanged.
+- Built-in CLI commands are described once in an ordered descriptor list that drives both Commander registration and catalog discovery. Help text, flags, defaults, aliases, and `tools --json` output are byte-identical.
 
 ## [1.2.1] - 2026-10-17
 

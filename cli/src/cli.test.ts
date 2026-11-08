@@ -4,6 +4,7 @@ import { z } from 'zod'
 import dayjs from 'dayjs'
 import type * as ToolsModule from './tools.js'
 import { CURRENT_SHIKIN_MIGRATIONS } from '@shikin/finance-core'
+import { startWebHost } from './web-host.js'
 
 vi.mock('./tools.js', () => ({ tools: [] }))
 vi.mock('./database.js', () => ({
@@ -14,6 +15,10 @@ vi.mock('./database.js', () => ({
   DATABASE_BACKUP_SETTING_KEY: 'database_backups',
 }))
 
+vi.mock('./web-host.js', () => ({
+  WEB_DEFAULT_PORT: 8480,
+  startWebHost: vi.fn(async () => {}),
+}))
 const { close, query } = await import('./database.js')
 const { tools: actualTools } = await vi.importActual<typeof ToolsModule>('./tools.js')
 const {
@@ -29,6 +34,8 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.mocked(close).mockReset()
   vi.mocked(query).mockReset()
+  vi.mocked(startWebHost).mockReset()
+  vi.mocked(startWebHost).mockResolvedValue(undefined)
   process.exitCode = undefined
 })
 
@@ -106,6 +113,248 @@ describe('CLI option registration', () => {
       required: false,
       defaultValue: true,
     })
+  })
+})
+
+describe('built-in Commander boundaries', () => {
+  it('keeps all fifteen record flags raw and preserves conflict precedence and close order', async () => {
+    const trace: unknown[] = []
+    vi.spyOn(console, 'log').mockImplementation((text) => trace.push(['stdout', text]))
+    vi.mocked(close).mockImplementation(() => {
+      trace.push(['close'])
+    })
+    const program = createProgram([])
+    program.hook('preAction', (_, command) => {
+      trace.push(['arguments', command.processedArgs.slice(0, 1), { ...command.opts() }])
+    })
+
+    await program.parseAsync([
+      'node',
+      'shikin',
+      'record',
+      'paid',
+      '4.50',
+      'for',
+      'Coffee',
+      '--apply',
+      '--dry-run',
+      '--strict',
+      '--min-confidence',
+      'not-a-number',
+      '--require-explicit-type',
+      '--require-explicit-account',
+      '--require-explicit-amount',
+      '--allow-duplicate',
+      '--account',
+      'checking',
+      '--account-id',
+      'acct-1',
+      '--category',
+      'Food',
+      '--status',
+      'INVALID',
+      '--notes',
+      'user memo',
+      '--source',
+      'automation',
+      '--note',
+      'workflow memo',
+      '--json',
+      '--pretty',
+      '--quiet',
+      '--redacted',
+    ])
+
+    expect(trace).toEqual([
+      [
+        'arguments',
+        [['paid', '4.50', 'for', 'Coffee']],
+        {
+          apply: true,
+          dryRun: true,
+          strict: true,
+          minConfidence: 'not-a-number',
+          requireExplicitType: true,
+          requireExplicitAccount: true,
+          requireExplicitAmount: true,
+          allowDuplicate: true,
+          account: 'checking',
+          accountId: 'acct-1',
+          category: 'Food',
+          status: 'INVALID',
+          notes: 'user memo',
+          source: 'automation',
+          note: 'workflow memo',
+          json: true,
+          pretty: true,
+          quiet: true,
+          redacted: true,
+        },
+      ],
+      [
+        'stdout',
+        '{\n  "success": false,\n  "code": "RECORD_FLAG_CONFLICT",\n  "message": "Use either --apply or --dry-run, not both."\n}',
+      ],
+      ['close'],
+    ])
+    expect(process.exitCode).toBe(1)
+  })
+
+  it.each(['tools', 'diagnose', 'record'])(
+    'leaves absent %s booleans undefined at the action boundary',
+    async (name) => {
+      vi.spyOn(console, 'log').mockImplementation(() => {})
+      vi.mocked(query).mockReturnValue([])
+      let options: unknown
+      const program = createProgram([])
+      program.hook('preAction', (_, command) => {
+        options = { ...command.opts() }
+      })
+      await program.parseAsync([
+        'node',
+        'shikin',
+        name,
+        ...(name === 'record' ? ['Coffee', '5'] : []),
+      ])
+      expect(options).toEqual({})
+      expect(close).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it.each([
+    [[], '8480'],
+    [['--port', '9001'], '9001'],
+    [['--port', '8480x'], '8480x'],
+    [['--port', '1023'], '1023'],
+  ])('forwards raw web port %j without catalog-driven coercion', async (args, port) => {
+    await createProgram([]).parseAsync(['node', 'shikin', 'web', ...args])
+    expect(startWebHost).toHaveBeenCalledExactlyOnceWith(port)
+    expect(close).not.toHaveBeenCalled()
+    expect(process.exitCode).toBeUndefined()
+  })
+
+  it('awaits web startup and propagates its rejection without closing the ledger', async () => {
+    let rejectStartup!: (error: Error) => void
+    // This CLI targets ES2022, before Promise.withResolvers is available.
+    const startup = new Promise<void>((_, reject) => {
+      rejectStartup = reject
+    })
+    vi.mocked(startWebHost).mockReturnValue(startup)
+    let settled = false
+    const parsed = createProgram([]).parseAsync(['node', 'shikin', 'web'])
+    void parsed.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      }
+    )
+    expect(startWebHost).toHaveBeenCalledExactlyOnceWith('8480')
+    expect(settled).toBe(false)
+    const failure = new Error('startup-failed')
+    rejectStartup(failure)
+    await expect(parsed).rejects.toBe(failure)
+    expect(close).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    [
+      ['--min-confidence', 'invalid'],
+      'minConfidence',
+      'Minimum confidence must be a number from 0 to 1.',
+    ],
+    [['--status', 'INVALID'], 'status', 'Status must be pending, posted, or cleared.'],
+  ])('retains handler validation for raw record values %j', async (args, path, message) => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    await createProgram([]).parseAsync([
+      'node',
+      'shikin',
+      'record',
+      'paid',
+      '5',
+      'for',
+      'Coffee',
+      ...args,
+      '--json',
+    ])
+    expect(log).toHaveBeenCalledExactlyOnceWith(
+      JSON.stringify({
+        success: false,
+        code: 'VALIDATION_ERROR',
+        message: 'Validation error',
+        issues: [{ path: [path], message }],
+      })
+    )
+    expect(process.exitCode).toBe(1)
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['diagnose', 'tools', 'validate', 'web', 'record'])(
+    'does not add schema validation for built-in %s',
+    async (name) => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+      await createProgram([]).parseAsync(['node', 'shikin', 'validate', name, '--json'])
+      expect(log).toHaveBeenCalledExactlyOnceWith(
+        JSON.stringify({
+          success: false,
+          code: 'UNKNOWN_COMMAND',
+          message: `Command ${name} was not found.`,
+          hint: 'Run shikin tools --pretty to list available commands.',
+        })
+      )
+      expect(process.exitCode).toBe(1)
+      expect(close).toHaveBeenCalledTimes(1)
+    }
+  )
+
+  it('forwards validate unknown options and excess arguments to the existing validator', async () => {
+    const tool = {
+      name: 'forward-demo',
+      description: 'Forwarding fixture',
+      schema: z.object({}),
+      execute: vi.fn(),
+    }
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    for (const [args, message] of [
+      [['--unknown', 'value'], 'Unknown option --unknown for forward-demo.'],
+      [['extra', 'argument'], 'Unexpected positional argument "extra". Use --option value pairs.'],
+    ] as const) {
+      await createProgram([tool]).parseAsync([
+        'node',
+        'shikin',
+        'validate',
+        'forward-demo',
+        ...args,
+        '--json',
+      ])
+      expect(log).toHaveBeenLastCalledWith(
+        JSON.stringify({
+          success: false,
+          code: 'COMMAND_ERROR',
+          message,
+        })
+      )
+      expect(process.exitCode).toBe(1)
+    }
+    expect(tool.execute).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    [[], false, false],
+    [['--json'], true, false],
+    [['--json', '--pretty'], false, false],
+    [['--quiet'], false, true],
+  ])('preserves built-in output formatting for %j', async (flags, compact, quiet) => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    await createProgram([]).parseAsync(['node', 'shikin', 'tools', ...flags])
+    if (quiet) expect(log).not.toHaveBeenCalled()
+    else {
+      const text = String(log.mock.calls[0]?.[0])
+      expect(text).toBe(JSON.stringify(JSON.parse(text), null, compact ? undefined : 2))
+    }
+    expect(close).toHaveBeenCalledTimes(1)
   })
 })
 

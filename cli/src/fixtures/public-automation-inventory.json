@@ -488,5 +488,314 @@
     "list-plugins",
     "enable-plugin",
     "disable-plugin"
-  ]
+  ],
+  "builtinCatalog": [
+    {
+      "name": "diagnose",
+      "kind": "builtin",
+      "validateable": false,
+      "description": "Validate shared database connectivity and print CLI/MCP health details",
+      "aliases": [],
+      "arguments": [],
+      "options": [
+        {
+          "name": "deep",
+          "flag": "deep",
+          "type": "boolean",
+          "required": false,
+          "description": "Run read-only integrity, foreign-key, migration, and balance checks"
+        }
+      ],
+      "outputOptions": [
+        {
+          "name": "json",
+          "flag": "json",
+          "type": "boolean",
+          "required": false,
+          "description": "Print compact JSON output"
+        },
+        {
+          "name": "pretty",
+          "flag": "pretty",
+          "type": "boolean",
+          "required": false,
+          "description": "Print pretty JSON output"
+        },
+        {
+          "name": "quiet",
+          "flag": "quiet",
+          "type": "boolean",
+          "required": false,
+          "description": "Suppress successful output"
+        },
+        {
+          "name": "redacted",
+          "flag": "redacted",
+          "type": "boolean",
+          "required": false,
+          "description": "Redact sensitive output fields"
+        }
+      ]
+    },
+    {
+      "name": "tools",
+      "kind": "builtin",
+      "validateable": false,
+      "description": "Return machine-readable command discovery metadata",
+      "aliases": [],
+      "arguments": [],
+      "options": [],
+      "outputOptions": [
+        {
+          "name": "json",
+          "flag": "json",
+          "type": "boolean",
+          "required": false,
+          "description": "Print compact JSON output"
+        },
+        {
+          "name": "pretty",
+          "flag": "pretty",
+          "type": "boolean",
+          "required": false,
+          "description": "Print pretty JSON output"
+        },
+        {
+          "name": "quiet",
+          "flag": "quiet",
+          "type": "boolean",
+          "required": false,
+          "description": "Suppress successful output"
+        },
+        {
+          "name": "redacted",
+          "flag": "redacted",
+          "type": "boolean",
+          "required": false,
+          "description": "Redact sensitive output fields"
+        }
+      ]
+    },
+    {
+      "name": "validate",
+      "kind": "builtin",
+      "validateable": false,
+      "description": "Validate another command without executing it",
+      "aliases": [],
+      "arguments": [
+        {
+          "name": "commandName",
+          "required": true
+        },
+        {
+          "name": "args",
+          "required": false,
+          "variadic": true
+        }
+      ],
+      "options": [],
+      "outputOptions": [
+        {
+          "name": "json",
+          "flag": "json",
+          "type": "boolean",
+          "required": false,
+          "description": "Print compact JSON output"
+        },
+        {
+          "name": "pretty",
+          "flag": "pretty",
+          "type": "boolean",
+          "required": false,
+          "description": "Print pretty JSON output"
+        },
+        {
+          "name": "quiet",
+          "flag": "quiet",
+          "type": "boolean",
+          "required": false,
+          "description": "Suppress successful output"
+        }
+      ]
+    },
+    {
+      "name": "web",
+      "kind": "builtin",
+      "validateable": false,
+      "description": "Serve the packaged Shikin web app and data API on loopback for Tailscale Serve",
+      "aliases": [],
+      "arguments": [],
+      "options": [
+        {
+          "name": "port",
+          "flag": "port",
+          "type": "number",
+          "required": false,
+          "defaultValue": 8480,
+          "description": "Loopback port to serve (1024-65535)"
+        }
+      ],
+      "outputOptions": []
+    },
+    {
+      "name": "record",
+      "kind": "builtin",
+      "validateable": false,
+      "description": "Parse a natural-language transaction entry and return a confirmation preview",
+      "aliases": [],
+      "arguments": [
+        {
+          "name": "entry",
+          "required": true,
+          "variadic": true
+        }
+      ],
+      "options": [
+        {
+          "name": "apply",
+          "flag": "apply",
+          "type": "boolean",
+          "required": false,
+          "description": "Apply the parsed transaction noninteractively"
+        },
+        {
+          "name": "dryRun",
+          "flag": "dry-run",
+          "type": "boolean",
+          "required": false,
+          "description": "Validate and preview without writing (default)"
+        },
+        {
+          "name": "strict",
+          "flag": "strict",
+          "type": "boolean",
+          "required": false,
+          "description": "Fail when natural-language parsing is ambiguous or low-confidence"
+        },
+        {
+          "name": "minConfidence",
+          "flag": "min-confidence",
+          "type": "number",
+          "required": false,
+          "description": "Minimum parse confidence from 0 to 1 before recording"
+        },
+        {
+          "name": "requireExplicitType",
+          "flag": "require-explicit-type",
+          "type": "boolean",
+          "required": false,
+          "description": "Require income or expense intent to be explicit in the entry"
+        },
+        {
+          "name": "requireExplicitAccount",
+          "flag": "require-explicit-account",
+          "type": "boolean",
+          "required": false,
+          "description": "Require an account via --account, --account-id, or an account phrase in the entry"
+        },
+        {
+          "name": "requireExplicitAmount",
+          "flag": "require-explicit-amount",
+          "type": "boolean",
+          "required": false,
+          "description": "Require an explicit amount in the entry"
+        },
+        {
+          "name": "allowDuplicate",
+          "flag": "allow-duplicate",
+          "type": "boolean",
+          "required": false,
+          "description": "Apply even when an exact or likely duplicate transaction is detected"
+        },
+        {
+          "name": "account",
+          "flag": "account",
+          "type": "string",
+          "required": false,
+          "description": "Account alias, exact account ID, or exact account name"
+        },
+        {
+          "name": "accountId",
+          "flag": "account-id",
+          "type": "string",
+          "required": false,
+          "description": "Canonical account ID"
+        },
+        {
+          "name": "category",
+          "flag": "category",
+          "type": "string",
+          "required": false,
+          "description": "Category name override"
+        },
+        {
+          "name": "status",
+          "flag": "status",
+          "type": "enum",
+          "required": false,
+          "enumValues": ["pending", "posted", "cleared"],
+          "description": "Transaction status"
+        },
+        {
+          "name": "notes",
+          "flag": "notes",
+          "type": "string",
+          "required": false,
+          "description": "User transaction notes"
+        },
+        {
+          "name": "source",
+          "flag": "source",
+          "type": "string",
+          "required": false,
+          "description": "Automation source or origin label for transaction provenance"
+        },
+        {
+          "name": "note",
+          "flag": "note",
+          "type": "string",
+          "required": false,
+          "description": "Workflow changelog note for transaction provenance"
+        }
+      ],
+      "outputOptions": [
+        {
+          "name": "json",
+          "flag": "json",
+          "type": "boolean",
+          "required": false,
+          "description": "Print compact JSON output"
+        },
+        {
+          "name": "pretty",
+          "flag": "pretty",
+          "type": "boolean",
+          "required": false,
+          "description": "Print pretty JSON output"
+        },
+        {
+          "name": "quiet",
+          "flag": "quiet",
+          "type": "boolean",
+          "required": false,
+          "description": "Suppress successful output"
+        },
+        {
+          "name": "redacted",
+          "flag": "redacted",
+          "type": "boolean",
+          "required": false,
+          "description": "Redact sensitive output fields"
+        }
+      ]
+    }
+  ],
+  "commandHelp": {
+    "shikin": "Usage: shikin [options] [command]\n\nShikin — control your finances from the command line\n\nOptions:\n  -V, --version                                   output the version number\n  -h, --help                                      display help for command\n\nCommands:\n  diagnose [options]                              Validate shared database connectivity and print CLI/MCP health details\n  tools [options]                                 Return machine-readable command discovery metadata\n  validate [options] <commandName> [args...]      Validate another command without executing it\n  web [options]                                   Serve the packaged Shikin web app and data API on loopback for Tailscale Serve\n  record [options] <entry...>                     Parse a natural-language transaction entry and return a confirmation preview\n  correct-transaction-metadata [options]          Audited metadata-only correction, including finalized ordinary rows. Null explicitly clears optional fields; omission preserves them. Optional splits explicitly replace allocations; classified allocations must be cleared first. Never changes original source, note, import identity or balances.\n  set-transaction-consumption [options]           Set an explicit allocation-level consumption classification. Choose one builtin role or one active custom type/current revision. Refund/principal treatments require a same-currency purchase classification; each treatment has an independent aggregate cap.\n  clear-transaction-consumption [options]         Clear an explicit classification only when no refund/principal references it. Does not change ledger rows or balances.\n  add-transaction [options]                       Add a new financial transaction (expense, income, or transfer). Use this when the user wants to record spending, earnings, or money movement between accounts.\n  bind-transaction-import-identity [options]      Preview and explicitly bind verified source/external-ID identity to one legacy transaction without inferring original financial content.\n  update-transaction [options]                    Update an existing transaction. Use this when the user wants to change the amount, description, category, date, or other details of a transaction.\n  delete-transaction [options]                    Delete a transaction. Use this when the user wants to remove a transaction. The account balance will be adjusted accordingly.\n  query-transactions|list-transactions [options]  Search and exhaustively traverse transactions with a bounded, snapshot-consistent keyset cursor.\n  match-transfer-transactions [options]           Preview or atomically link an exact expense/income pair as one transfer while preserving the imported mirror as archived provenance.\n  unmatch-transfer-transactions [options]         Preview or atomically reverse a matched transfer, restoring the source expense and archived income mirror without deleting statement provenance.\n  tag-transaction [options]                       Add a tag to an existing transaction using the transaction tags JSON field.\n  untag-transaction [options]                     Remove a tag from an existing transaction.\n  list-tags [options]                             List transaction tags with usage counts.\n  create-placeholder-transaction [options]        Create an unresolved placeholder transaction when the amount is known but final merchant/category details are not yet confirmed.\n  list-placeholder-transactions [options]         List transactions marked as placeholders, optionally filtered by placeholder status.\n  resolve-placeholder-transaction [options]       Resolve an unresolved placeholder by updating the original transaction with final known details while preserving placeholder audit metadata.\n  split-placeholder-transaction [options]         Resolve an unresolved placeholder into multiple concrete transactions whose amounts exactly equal the original placeholder amount.\n  get-spending-summary [options]                  Scoped gross, net consumption, or separate recurring planning equivalents.\n  list-accounts [options]                         List all active accounts. Use this when the user asks about their accounts, balances, or needs to pick an account.\n  create-account [options]                        Create a new financial account. Use this when the user wants to add a bank account, credit card, cash wallet, or other account.\n  upsert-account [options]                        Idempotently create or update an account by accountId, account name, or account alias. Returns whether the account was created or updated.\n  update-account [options]                        Update an existing account. Use this to change the name, type, currency, balance, credit limit, or billing dates of an account.\n  set-account-alias [options]                     Assign a friendly alias to an existing account so future commands can use --account instead of a long account ID.\n  balance-snapshot [options]                      Record an observed account balance as a snapshot without treating it as income or expense.\n  reconcile [options]                             Preview/apply end-of-day observed balance reconciliation, retaining later activity. Nonzero changes crossing later anchors reject.\n  finalize-staged-statement-history [options]     Finalize exact posted/cleared ordinary staged membership with independent coverage. Batch compatibility selects only posted/cleared rows; pending holds never auto-promote.\n  settle-staged-transactions [options]            Deliberately settle exact pending ordinary staged rows to posted/cleared. Leaves them staged and balance-neutral; preserves financial/source identity.\n  set-source-coverage [options]                   Create or explicitly revise independent printed-period source evidence, including zero-row periods and gaps. Does not finalize transactions.\n  list-source-coverage [options]                  Read independent source coverage. Transaction date extrema are never coverage proof.\n  supersede-reconciliation-bridge [options]       Preview a protected bridge replacement; apply requires its exact reviewed token. Preserves original evidence, every later anchor and current stored/effective balances.\n  delete-account [options]                        Delete or archive an account. If the account has linked transactions it will be archived instead of deleted.\n  list-categories [options]                       List available transaction categories. Use this when the user asks about categories or needs to pick one.\n  get-balance-overview [options]                  Get a complete balance overview including total balance, per-account breakdown, and month-over-month change.\n  analyze-spending-trends [options]               Analyze spending trends over multiple months with category breakdowns and trend detection.\n  get-credit-card-status [options]                Get credit card status including credit utilization, persisted statement balances, minimum payments, payment status, due dates, and current-period spending.\n  record-card-payment [options]                   Record or preview a credit-card payment as an accounting transfer, cleanup expense, or statement-only payment update.\n  link-card-statement-payment [options]           Allocate an existing eligible posted payment transaction to a credit-card statement without creating transactions or changing account balances.\n  unlink-card-statement-payment [options]         Void a statement payment allocation while retaining immutable historical IDs. Does not delete or change its transaction or account balances.\n  list-card-statement-payment-links [options]     List active or historical credit-card statement payment evidence. This is a read-only operation.\n  credit-card-cycle-explain [options]             Explain a credit-card statement cycle, due-date status, next upcoming due date, and optional purchase-date classification.\n  create-credit-card-statement [options]          Create a persisted credit-card statement with closing/due dates, statement balance, minimum payment, paid amount, status, source, and note.\n  update-credit-card-statement [options]          Update a persisted credit-card statement, including paid amount and payment status.\n  list-credit-card-statements [options]           List persisted credit-card statements with payment amounts and statuses.\n  delete-credit-card-statement [options]          Delete a persisted credit-card statement with a dry-run preview.\n  create-budget [options]                         Create a scoped budget; optional budgetId makes identical replays a no-op.\n  upsert-budget [options]                         Idempotently create or update a scoped budget.\n  get-budget-status [options]                     Inspect current-definition budget usage in inclusive resolved windows.\n  delete-budget [options]                         Delete a budget. Use this when the user wants to remove a budget they no longer need.\n  get-net-worth [options]                         Calculate ownership-aware net worth. Returns native-currency components and only returns a converted total when ownership, verified prices, and FX are complete.\n  manage-investment [options]                     Add, update, or delete an investment holding. Use this to track US/MX stocks, ETFs, crypto, bonds, CETES, mutual funds, and other investments.\n  list-investments [options]                      List investment holdings with optional type, account, symbol, and text filters. Returns stable holding snapshots for CLI and MCP automation.\n  get-upcoming-bills [options]                    Get upcoming bills from credit card due dates and recurring transactions. Returns a sorted list of bills due within the specified number of days.\n  create-subscription [options]                   Create a subscription with optional account/category resolution and a dry-run preview.\n  create-subscription-from-transaction [options]  Create a subscription using an existing transaction as the default source for amount, account, category, name, and currency.\n  update-subscription [options]                   Update a subscription by ID with optional account/category resolution and a dry-run preview.\n  delete-subscription [options]                   Delete a subscription by ID with a dry-run preview.\n  list-subscriptions [options]                    List subscriptions stored in Shikin. Shows amounts, billing cycles, next payment dates, and monthly/yearly cost equivalents.\n  get-subscription-spending [options]             Analyze subscription spending from Shikin data. Groups active subscriptions by category and billing cycle with monthly/yearly totals.\n  write-notebook [options]                        Write or update a markdown note in the notebook. Use for research findings, portfolio reviews, market signals, and educational content.\n  read-notebook [options]                         Read a note from the notebook. Use to reference previous research, reviews, or educational content.\n  list-notebook [options]                         List notes and directories in the notebook. Use to discover available research, reviews, and educational content.\n  generate-portfolio-review [options]             Generate a portfolio review and save it to the notebook. Reviews include performance summary, top/worst performers, and a holdings table.\n  manage-category-rules [options]                 Manage auto-categorization rules. List learned rules, create new rules, delete rules, or suggest a category for a description.\n  suggest-category [options]                      Suggest a category for a transaction description using the existing auto-categorization rules, optionally enqueueing the suggestion for review.\n  review-suggestions [options]                    List queued category suggestions for review.\n  approve-suggestion [options]                    Approve a queued category suggestion and optionally create or update a category rule for the approved pattern.\n  reject-suggestion [options]                     Reject a queued category suggestion with optional source and note metadata.\n  manage-recurring-transaction [options]          Create, update, delete, list, or toggle recurring transaction rules. Recurring rules automatically generate transactions on a schedule.\n  materialize-recurring [options]                 Manually trigger materialization of due recurring transactions. Creates actual transactions for any recurring rules whose next_date has passed.\n  get-recurring-expected-vs-paid [options]        Report expected recurring bills over a date range using the current next_date schedule with paid, unpaid, or late status. Uses recurring_rule_id links first and clearly marks conservative fallback matches.\n  get-spending-anomalies [options]                Detect and return spending anomalies such as unusual charges, duplicate transactions, spending spikes, and large transactions. Native detections are retained; mainConversion supplies dated main-currency statistics and provenance, with incomplete results withheld.\n  get-forecasted-cash-flow [options]              Get native and main-currency cash flow forecasts showing projected balances, burn rate, and danger dates. Main planning estimates use today’s manual rates; historical realized inputs are converted per transaction date before averaging.\n  backup-database|backup [options]                Create a consistent manual SQLite database backup under the Shikin app data backups directory.\n  restore-database|restore [options]              Preview a Shikin SQLite restore by default. Pass apply:true to restore after validation and create a rollback backup.\n  finance-profile [options]                       Get, set, or clear stable automation finance profile preferences stored in settings.\n  import-transactions [options]                   Preview or apply a UTF-8 CSV import. Required columns: date, description, amount. Optional: type, category, notes, status, currency, source, note, externalId.\n  export-data [options]                           Export core Shikin tables plus CLI QOL tables as deterministic JSON, CSV file map, or Markdown.\n  undo [options]                                  Preview or apply a safe rollback for the latest matching transaction or credit-card-statement audit entry. Dry-run is the default; pass apply=true to write.\n  finance-sanity-check [options]                  Run generic automation-safe finance checks for card statements, placeholders, duplicate-looking transactions, subscriptions, recurring rules, balances, uncategorized spending, and recent provenance writes.\n  audit-list [options]                            List audit history entries with filters for automation-safe triage. Supports redaction of free-text before/after/source/note details.\n  audit-show [options]                            Show one audit history entry by ID with optional free-text redaction.\n  automation-context [options]                    Return one consolidated automation context payload for setup readiness, accounts, aliases, budgets, subscriptions, cards, recurring bills, support surfaces, and recent audits.\n  create-bucket [options]                         Create a cashflow bucket for envelope-style allocation with dry-run support.\n  list-buckets [options]                          List cashflow buckets with balances and allocation summaries.\n  allocate-income [options]                       Allocate posted income into a cashflow bucket. Optional account inputs only validate source/currency; allocations persist bucket, optional transaction, amount, source, and note.\n  update-bucket [options]                         Update cashflow bucket name, description, target, sort order, or active flag. IDs and allocation history are preserved. Use clearFields to null description or targetAmount.\n  delete-bucket [options]                         Delete a cashflow bucket only when it is truly empty and has no allocation history. Funded or referenced buckets must be deactivated with update-bucket.\n  reverse-bucket-allocation [options]             Append an equal negative reversal for a positive cashflow allocation. Original rows are preserved. Does not change real account balances or transactions.\n  correct-bucket-allocation [options]             Atomically reverse an original cashflow allocation and insert a replacement or reallocation. Real account balances and transactions are never changed.\n  setup-status [options]                          Show missing or incomplete setup that affects CLI and automation workflows.\n  create-goal [options]                           Create a savings goal. Use this when the user wants to set a savings target, like an emergency fund, vacation, or big purchase.\n  update-goal [options]                           Update a savings goal. Can add/withdraw saved amounts, change the target, deadline, or other details. Null or clear flags remove optional deadline, notes, and account; omission preserves them.\n  get-goal-status [options]                       Get savings goal status showing progress toward each goal.\n  get-financial-health-score [options]            Calculate the user's financial health score (0-100) with a breakdown across savings rate, budget adherence, debt-to-income, emergency fund, and spending consistency. Native scores are retained; mainConversion uses dated cash flow, current balances at today’s manual rates, and budgets in their durable currencies.\n  get-spending-recap [options]                    Read a spending recap without saving. Gross cash flow by default; explicit net consumption is available with coverage status. Additive mainConversion retains transaction-date manual-rate provenance and incomplete/known amounts; saved recap text remains native.\n  save-spending-recap [options]                   Explicitly save a spending recap. Writes only recaps and audit_log; identity includes type, period, all-currencies scope and selected basis. Unchanged re-saves are no-ops.\n  get-education-tip [options]                     Get a contextual financial education tip. Use this when the user asks about financial concepts or when educational context would enhance the conversation.\n  get-debt-payoff-plan [options]                  Calculate a debt payoff plan using snowball or avalanche strategy. Pulls credit card debts from accounts automatically; MVP projections use 0% APR because accounts do not store APR yet.\n  convert-currency [options]                      Convert an amount with an effective-dated manual direct rate. No provider, inverse, triangulation, or future fallback is used.\n  split-transaction [options]                     Audited split correction across multiple categories. Amounts remain in the main currency unit. Finalized ordinary rows are supported; protected provenance and dependent evidence require their dedicated workflows.\n  manage-receivable [options]                     Create, update, cancel, or delete a receivable. Amount inputs and display fields use main currency units; stored values use centavos.\n  list-receivables [options]                      List receivables with lifecycle, due-date, payer, account, overdue, and text filters. Returns stable centavo and display fields.\n  match-receivable [options]                      Preview or apply a posted/cleared income transaction against an open receivable. Matching defaults to dry-run; set apply to true to write.\n  unmatch-receivable [options]                    Preview or atomically detach a matched income transaction from a receivable while preserving both records.\n  get-runtime-diagnostics [options]               Read build, schema, database lineage, local-instance identity, revision, and last financial write diagnostics without changing storage.\n  get-currency-settings [options]                 Read the explicitly configured database-backed main currency. An absent main currency is reported as unconfigured.\n  set-main-currency [options]                     Explicitly save the database-backed main reporting currency. This never relabels accounts, transactions, plans, snapshots, or other records.\n  list-exchange-rates [options]                   List the complete immutable manual direct-rate history, including corrected rows and effective dates.\n  set-exchange-rate [options]                     Append an effective-dated direct manual rate or immutable correction. Backdating and corrections require an audit note and explicit historical-change acknowledgement.\n  list-classification-types [options]             Discover fixed economic effects, eligible directions, reference requirements, active custom heads, immutable history, and Receivables/investment/card-payment workflow boundaries. Read-only.\n  create-classification-type [options]            Create an audited named type mapped to one fixed financial treatment. No custom formula or transaction mutation.\n  revise-classification-type [options]            Append an immutable named-type revision after checking the expected current head. Existing assignments remain pinned.\n  archive-classification-type [options]           Archive a custom type after checking its current head. Historical pinned assignments and reports remain valid.\n  preview-consumption-classifications [options]   Read-only atomic preview for 1-100 explicit allocations. Validates final-state direction, references, independent caps, dependents, custom heads, and protected workflows; never approves review state.\n  apply-consumption-classifications [options]     Atomically apply the exact reviewed classification preview. Rejects stale database identity/revision/evidence/type heads and performs no partial writes.\n  list-plugins [options]                          List local Shikin plugins discovered under the app data extensions directory.\n  enable-plugin [options]                         Enable a trusted-local plugin after explicitly approving its declared permissions.\n  disable-plugin [options]                        Disable a local plugin so its tools no longer appear in new CLI/MCP catalogs.\n  help [command]                                  display help for command\n",
+    "diagnose": "Usage: shikin diagnose [options]\n\nValidate shared database connectivity and print CLI/MCP health details\n\nOptions:\n  --deep      Run read-only integrity, foreign-key, migration, and balance\n              checks\n  --json      Print compact JSON output\n  --pretty    Print pretty JSON output (default)\n  --quiet     Suppress successful output; failures still print JSON\n  --redacted  Redact future sensitive fields from output\n  -h, --help  display help for command\n",
+    "tools": "Usage: shikin tools [options]\n\nReturn machine-readable command discovery metadata\n\nOptions:\n  --json      Print compact JSON output\n  --pretty    Print pretty JSON output (default)\n  --quiet     Suppress successful output; failures still print JSON\n  --redacted  Redact future sensitive fields from output\n  -h, --help  display help for command\n",
+    "validate": "Usage: shikin validate [options] <commandName> [args...]\n\nValidate another command without executing it\n\nArguments:\n  commandName  Command to validate\n  args         Command options to validate\n\nOptions:\n  --json       Print compact JSON output\n  --pretty     Print pretty JSON output (default)\n  --quiet      Suppress successful output; failures still print JSON\n  -h, --help   display help for command\n",
+    "web": "Usage: shikin web [options]\n\nServe the packaged Shikin web app and data API on loopback for Tailscale Serve\n\nOptions:\n  --port <port>  Loopback port to serve (1024-65535) (default: \"8480\")\n  -h, --help     display help for command\n",
+    "record": "Usage: shikin record [options] <entry...>\n\nParse a natural-language transaction entry and return a confirmation preview\n\nArguments:\n  entry                       Natural-language transaction entry\n\nOptions:\n  --apply                     Apply the parsed transaction noninteractively\n  --dry-run                   Validate and preview the parsed transaction\n                              without writing it\n  --strict                    Fail when natural-language parsing is ambiguous or\n                              low-confidence\n  --min-confidence <value>    Minimum parse confidence from 0 to 1 before\n                              recording\n  --require-explicit-type     Require income or expense intent to be explicit\n  --require-explicit-account  Require account via flag or account phrase\n  --require-explicit-amount   Require an explicit amount in the entry\n  --allow-duplicate           Apply even when an exact or likely duplicate is\n                              detected\n  --account <value>           Account alias, exact account ID, or exact account\n                              name\n  --account-id <value>        Canonical account ID\n  --category <value>          Category name override\n  --status <status>           Transaction status: pending, posted, or cleared\n  --notes <value>             User transaction notes\n  --source <value>            Automation source or origin label for transaction\n                              provenance\n  --note <value>              Workflow changelog note for transaction provenance\n  --json                      Print compact JSON output\n  --pretty                    Print pretty JSON output (default)\n  --quiet                     Suppress successful output; failures still print\n                              JSON\n  --redacted                  Redact future sensitive fields from output\n  -h, --help                  display help for command\n"
+  }
 }

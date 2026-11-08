@@ -1,3 +1,10 @@
+import {
+  checkReceivableAccount,
+  planReceivableRemoval,
+  planReceivableUpdate,
+  receivableStatusForAmounts,
+  type ReceivablePolicyAccount,
+} from '@shikin/finance-core'
 import { create } from 'zustand'
 import { query, withTransaction } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
@@ -38,12 +45,6 @@ interface ReceivableState {
   cancel: (id: string) => Promise<void>
   remove: (id: string) => Promise<void>
   getById: (id: string) => ReceivableWithDetails | undefined
-}
-
-function deriveStatus(receivedAmount: number, amount: number): ReceivableStatus {
-  if (receivedAmount <= 0) return 'open'
-  if (receivedAmount >= amount) return 'received'
-  return 'partial'
 }
 
 function computeIsOverdue(dueDate: string, status: ReceivableStatus): boolean {
@@ -97,18 +98,19 @@ export const useReceivableStore = create<ReceivableState>((set, get) => ({
       const now = new Date().toISOString()
       const amountCentavos = toCentavos(data.amount)
       await withTransaction(async (tx) => {
-        if (data.accountId) {
-          const accounts = await tx.query<{ currency: string; is_archived: number }>(
-            'SELECT currency, is_archived FROM accounts WHERE id = ? LIMIT 1',
-            [data.accountId]
-          )
-          if (!accounts[0] || accounts[0].is_archived !== 0) {
-            throw new Error('The linked account is unavailable or archived.')
-          }
-          if (accounts[0].currency.trim().toUpperCase() !== data.currency.trim().toUpperCase()) {
-            throw new Error('Receivable currency must match the linked account currency.')
-          }
-        }
+        const amounts = receivableStatusForAmounts(amountCentavos, 0)
+        if (!amounts.success) throw new Error(amounts.message)
+        const account =
+          data.accountId === null
+            ? null
+            : ((
+                await tx.query<ReceivablePolicyAccount>(
+                  'SELECT currency, is_archived FROM accounts WHERE id = ? LIMIT 1',
+                  [data.accountId]
+                )
+              )[0] ?? null)
+        const accountFailure = checkReceivableAccount(data.accountId, data.currency, account)
+        if (accountFailure) throw new Error(accountFailure.message)
         await tx.execute(
           `INSERT INTO receivables
              (id, payer, amount, received_amount, currency, due_date, project_reference, invoice_reference, status, account_id, matched_transaction_id, notes, source, note, created_at, updated_at)
@@ -152,58 +154,48 @@ export const useReceivableStore = create<ReceivableState>((set, get) => ({
         )
         const existing = existingRows[0]
         if (!existing) throw new Error(`Receivable ${id} not found.`)
-        const normalizedCurrency = data.currency.trim().toUpperCase()
-        if (
-          existing.received_amount > 0 &&
-          (amountCentavos !== existing.amount ||
-            normalizedCurrency !== existing.currency.trim().toUpperCase() ||
-            data.accountId !== existing.account_id)
-        ) {
-          throw new Error(
-            'Amount, currency, and account cannot change after a receipt is recorded.'
-          )
-        }
-        if (amountCentavos < existing.received_amount) {
-          throw new Error('Amount cannot be less than the amount already received.')
-        }
-        if (data.accountId) {
-          const accounts = await tx.query<{ currency: string; is_archived: number }>(
-            'SELECT currency, is_archived FROM accounts WHERE id = ? LIMIT 1',
-            [data.accountId]
-          )
-          if (!accounts[0] || accounts[0].is_archived !== 0) {
-            throw new Error('The linked account is unavailable or archived.')
-          }
-          if (accounts[0].currency.trim().toUpperCase() !== normalizedCurrency) {
-            throw new Error('Receivable currency must match the linked account currency.')
-          }
-        }
-        const status =
-          existing.status === 'cancelled'
-            ? 'cancelled'
-            : deriveStatus(existing.received_amount, amountCentavos)
+        const account =
+          data.accountId === null
+            ? null
+            : ((
+                await tx.query<ReceivablePolicyAccount>(
+                  'SELECT currency, is_archived FROM accounts WHERE id = ? LIMIT 1',
+                  [data.accountId]
+                )
+              )[0] ?? null)
+        const plan = planReceivableUpdate(
+          existing,
+          {
+            amount: amountCentavos,
+            currency: data.currency,
+            accountId: data.accountId,
+          },
+          account
+        )
+        if (!plan.success) throw new Error(plan.message)
         const result = await tx.execute(
           `UPDATE receivables
            SET payer = ?, amount = ?, currency = ?, due_date = ?, project_reference = ?,
                invoice_reference = ?, status = ?, account_id = ?, notes = ?, updated_at = ?
            WHERE id = ? AND status = ? AND received_amount = ?
-             AND matched_transaction_id IS ? AND updated_at = ?`,
+             AND matched_transaction_id IS ? AND updated_at = ? AND amount = ?`,
           [
             data.payer,
-            amountCentavos,
-            normalizedCurrency,
+            plan.amount,
+            plan.currency,
             data.dueDate,
             data.projectReference,
             data.invoiceReference,
-            status,
-            data.accountId,
+            plan.status,
+            plan.accountId,
             data.notes,
             now,
             id,
-            existing.status,
-            existing.received_amount,
-            existing.matched_transaction_id,
-            existing.updated_at,
+            plan.expected.status,
+            plan.expected.received_amount,
+            plan.expected.matched_transaction_id,
+            plan.expected.updated_at,
+            plan.expected.amount,
           ]
         )
         if (result.rowsAffected !== 1)
@@ -231,15 +223,14 @@ export const useReceivableStore = create<ReceivableState>((set, get) => ({
         ])
         const existing = rows[0]
         if (!existing) throw new Error(`Receivable ${id} not found.`)
-        if (existing.status === 'received' || existing.received_amount > 0) {
-          throw new Error('A receivable with recorded receipts cannot be cancelled.')
-        }
-        if (existing.status === 'cancelled') return
+        const plan = planReceivableRemoval(existing, 'cancel')
+        if (!plan.success) throw new Error(plan.message)
+        if (!plan.changed) return
         const result = await tx.execute(
           `UPDATE receivables SET status = 'cancelled', updated_at = ?
            WHERE id = ? AND status = ? AND received_amount = 0
-             AND matched_transaction_id IS NULL AND updated_at = ?`,
-          [now, id, existing.status, existing.updated_at]
+             AND matched_transaction_id IS NULL AND updated_at = ? AND amount = ?`,
+          [now, id, plan.expected.status, plan.expected.updated_at, plan.expected.amount]
         )
         if (result.rowsAffected !== 1)
           throw new Error('Receivable changed while it was being cancelled.')
@@ -265,14 +256,13 @@ export const useReceivableStore = create<ReceivableState>((set, get) => ({
         ])
         const existing = rows[0]
         if (!existing) throw new Error(`Receivable ${id} not found.`)
-        if (existing.matched_transaction_id || existing.received_amount > 0) {
-          throw new Error('Receivables with recorded receipts cannot be deleted.')
-        }
+        const plan = planReceivableRemoval(existing, 'delete')
+        if (!plan.success) throw new Error(plan.message)
         const result = await tx.execute(
           `DELETE FROM receivables
            WHERE id = ? AND received_amount = 0 AND matched_transaction_id IS NULL
-             AND status = ? AND updated_at = ?`,
-          [id, existing.status, existing.updated_at]
+             AND status = ? AND updated_at = ? AND amount = ?`,
+          [id, plan.expected.status, plan.expected.updated_at, plan.expected.amount]
         )
         if (result.rowsAffected !== 1)
           throw new Error('Receivable changed while it was being deleted.')

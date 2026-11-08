@@ -1,4 +1,12 @@
 import {
+  checkReceivableAccount,
+  planReceivableRemoval,
+  planReceivableUpdate,
+  receivableStatusForAmounts,
+  type ReceivablePolicyAccount,
+  type ReceivableStatus,
+} from '@shikin/finance-core'
+import {
   z,
   query,
   execute,
@@ -17,8 +25,6 @@ import {
   writeAuditLog,
   type ToolDefinition,
 } from './shared.js'
-
-type ReceivableStatus = 'open' | 'partial' | 'received' | 'cancelled'
 
 type ReceivableRow = {
   id: string
@@ -146,32 +152,14 @@ function resolveOptionalAccount(accountId?: string, account?: string) {
   }
 }
 
-function linkedAccountCurrency(accountId: string | null): string | null {
-  if (!accountId) return null
+function getLinkedAccount(accountId: string | null): ReceivablePolicyAccount | null {
+  if (accountId === null) return null
   return (
-    query<{ currency: string }>('SELECT currency FROM accounts WHERE id = $1 LIMIT 1', [
-      accountId,
-    ])[0]?.currency ?? null
+    query<ReceivablePolicyAccount>(
+      'SELECT currency, is_archived FROM accounts WHERE id = $1 LIMIT 1',
+      [accountId]
+    )[0] ?? null
   )
-}
-
-function accountCurrencyFailure(currency: string, accountCurrency: string | null) {
-  if (
-    !accountCurrency ||
-    normalizeCurrencyCode(currency) === normalizeCurrencyCode(accountCurrency)
-  ) {
-    return null
-  }
-  return {
-    success: false as const,
-    reason: 'receivable_currency_mismatch' as const,
-    message: `Receivable currency ${currency} does not match linked account currency ${accountCurrency}.`,
-  }
-}
-
-function statusForAmounts(amount: number, receivedAmount: number): ReceivableStatus {
-  if (receivedAmount >= amount) return 'received'
-  return receivedAmount > 0 ? 'partial' : 'open'
 }
 
 const manageReceivable: ToolDefinition = {
@@ -254,57 +242,73 @@ const manageReceivable: ToolDefinition = {
     note,
     redacted,
     apply,
-  }) => {
-    if (action === 'create') {
-      if (!payer || amount === undefined || !dueDate) {
-        return {
-          success: false,
-          reason: 'missing_required_fields',
-          message: 'payer, amount, and dueDate are required when creating a receivable.',
+  }) =>
+    transaction(() => {
+      if (action === 'create') {
+        if (!payer || amount === undefined || !dueDate) {
+          return {
+            success: false,
+            reason: 'missing_required_fields',
+            message: 'payer, amount, and dueDate are required when creating a receivable.',
+          }
         }
-      }
 
-      const resolvedAccount = resolveOptionalAccount(accountId, account)
-      if (!resolvedAccount.success) return resolvedAccount
-      const resolvedCurrency = normalizeCurrencyCode(currency ?? resolvedAccount.currency ?? 'USD')
-      const currencyFailure = accountCurrencyFailure(resolvedCurrency, resolvedAccount.currency)
-      if (currencyFailure) return currencyFailure
-      const now = dayjs().toISOString()
-      const receivable: ReceivableWithAccountRow = {
-        id: generateId(),
-        payer,
-        amount: toCentavos(amount),
-        received_amount: 0,
-        currency: resolvedCurrency,
-        due_date: dueDate,
-        project_reference: optionalText(projectReference),
-        invoice_reference: optionalText(invoiceReference),
-        status: 'open',
-        account_id: resolvedAccount.id,
-        account_name: resolvedAccount.name,
-        matched_transaction_id: null,
-        notes: optionalText(notes),
-        source: optionalText(source),
-        note: optionalText(note),
-        created_at: now,
-        updated_at: now,
-      }
-      const snapshot = receivableSnapshot(receivable)
-      const outputSnapshot = receivableSnapshot(receivable, { redacted })
-
-      if (!apply) {
-        return {
-          success: true,
-          action: 'created' as const,
-          dryRun: true,
-          wouldCreate: outputSnapshot,
-          message: redacted
-            ? 'Dry run: the receivable would be created.'
-            : `Dry run: receivable from ${payer} would be created.`,
+        const resolvedAccount = resolveOptionalAccount(accountId, account)
+        if (!resolvedAccount.success) return resolvedAccount
+        const resolvedCurrency = normalizeCurrencyCode(
+          currency ?? resolvedAccount.currency ?? 'USD'
+        )
+        const amountCentavos = toCentavos(amount)
+        const amounts = receivableStatusForAmounts(amountCentavos, 0)
+        if (!amounts.success) return amounts
+        const linkedAccount = getLinkedAccount(resolvedAccount.id)
+        const currencyFailure = checkReceivableAccount(
+          resolvedAccount.id,
+          resolvedCurrency,
+          linkedAccount
+        )
+        if (currencyFailure)
+          return currencyFailure.reason === 'receivable_currency_mismatch'
+            ? {
+                ...currencyFailure,
+                message: `Receivable currency ${resolvedCurrency} does not match linked account currency ${linkedAccount!.currency}.`,
+              }
+            : currencyFailure
+        const now = dayjs().toISOString()
+        const receivable: ReceivableWithAccountRow = {
+          id: generateId(),
+          payer,
+          amount: amountCentavos,
+          received_amount: 0,
+          currency: resolvedCurrency,
+          due_date: dueDate,
+          project_reference: optionalText(projectReference),
+          invoice_reference: optionalText(invoiceReference),
+          status: 'open',
+          account_id: resolvedAccount.id,
+          account_name: resolvedAccount.name,
+          matched_transaction_id: null,
+          notes: optionalText(notes),
+          source: optionalText(source),
+          note: optionalText(note),
+          created_at: now,
+          updated_at: now,
         }
-      }
+        const snapshot = receivableSnapshot(receivable)
+        const outputSnapshot = receivableSnapshot(receivable, { redacted })
 
-      transaction(() => {
+        if (!apply) {
+          return {
+            success: true,
+            action: 'created' as const,
+            dryRun: true,
+            wouldCreate: outputSnapshot,
+            message: redacted
+              ? 'Dry run: the receivable would be created.'
+              : `Dry run: receivable from ${payer} would be created.`,
+          }
+        }
+
         execute(
           `INSERT INTO receivables (
              id, payer, amount, received_amount, currency, due_date, project_reference,
@@ -339,130 +343,130 @@ const manageReceivable: ToolDefinition = {
           source: receivable.source,
           note: receivable.note,
         })
-      })
 
-      return {
-        success: true,
-        action: 'created' as const,
-        dryRun: false,
-        receivable: outputSnapshot,
-        message: redacted
-          ? `Created receivable: ${resolvedCurrency} ${amount.toFixed(2)}.`
-          : `Created receivable from ${payer}: ${resolvedCurrency} ${amount.toFixed(2)}.`,
-      }
-    }
-
-    if (!receivableId) {
-      return {
-        success: false,
-        reason: 'receivable_id_required',
-        message: `receivableId is required for ${action}.`,
-      }
-    }
-
-    const existing = getReceivable(receivableId)
-    if (!existing) {
-      return {
-        success: false,
-        reason: 'receivable_not_found',
-        message: `Receivable ${receivableId} not found.`,
-      }
-    }
-    const beforeSnapshot = receivableSnapshot(existing)
-    const beforeOutput = receivableSnapshot(existing, { redacted })
-
-    if (action === 'update') {
-      const accountWasProvided = accountId !== undefined || account !== undefined
-      const resolvedAccount = accountWasProvided ? resolveOptionalAccount(accountId, account) : null
-      if (resolvedAccount && !resolvedAccount.success) return resolvedAccount
-      const nextAccountId = resolvedAccount?.success ? resolvedAccount.id : existing.account_id
-      const nextAccountName = resolvedAccount?.success
-        ? resolvedAccount.name
-        : existing.account_name
-      const nextCurrency = normalizeCurrencyCode(currency ?? existing.currency)
-      const currencyFailure = accountCurrencyFailure(
-        nextCurrency,
-        linkedAccountCurrency(nextAccountId)
-      )
-      if (currencyFailure) return currencyFailure
-      const nextAmount = amount === undefined ? existing.amount : toCentavos(amount)
-      if (nextAmount < existing.received_amount) {
-        return {
-          success: false,
-          reason: 'amount_below_received',
-          message: 'Amount cannot be reduced below the amount already received.',
-        }
-      }
-      if (
-        existing.received_amount > 0 &&
-        (nextAmount !== existing.amount ||
-          nextCurrency !== existing.currency ||
-          nextAccountId !== existing.account_id)
-      ) {
-        return {
-          success: false,
-          reason: 'receivable_has_receipts',
-          message: 'Amount, currency, and account cannot change after a receipt is recorded.',
-        }
-      }
-
-      const fieldsChanged =
-        payer !== undefined ||
-        amount !== undefined ||
-        dueDate !== undefined ||
-        currency !== undefined ||
-        accountWasProvided ||
-        projectReference !== undefined ||
-        invoiceReference !== undefined ||
-        notes !== undefined ||
-        source !== undefined ||
-        note !== undefined
-      if (!fieldsChanged) {
-        return { success: false, reason: 'no_receivable_changes', message: 'No fields to update.' }
-      }
-
-      const now = dayjs().toISOString()
-      const updated: ReceivableWithAccountRow = {
-        ...existing,
-        payer: payer ?? existing.payer,
-        amount: nextAmount,
-        currency: nextCurrency,
-        due_date: dueDate ?? existing.due_date,
-        project_reference:
-          projectReference === undefined
-            ? existing.project_reference
-            : optionalText(projectReference),
-        invoice_reference:
-          invoiceReference === undefined
-            ? existing.invoice_reference
-            : optionalText(invoiceReference),
-        account_id: nextAccountId,
-        account_name: nextAccountName,
-        notes: notes === undefined ? existing.notes : optionalText(notes),
-        source: source === undefined ? existing.source : optionalText(source),
-        note: note === undefined ? existing.note : optionalText(note),
-        status:
-          existing.status === 'cancelled'
-            ? 'cancelled'
-            : statusForAmounts(nextAmount, existing.received_amount),
-        updated_at: now,
-      }
-      const afterSnapshot = receivableSnapshot(updated)
-      const afterOutput = receivableSnapshot(updated, { redacted })
-
-      if (!apply) {
         return {
           success: true,
-          action: 'updated' as const,
-          dryRun: true,
-          wouldUpdate: { receivableId, before: beforeOutput, after: afterOutput },
+          action: 'created' as const,
+          dryRun: false,
+          receivable: outputSnapshot,
           message: redacted
-            ? 'Dry run: the receivable would be updated.'
-            : `Dry run: receivable from ${updated.payer} would be updated.`,
+            ? `Created receivable: ${resolvedCurrency} ${amount.toFixed(2)}.`
+            : `Created receivable from ${payer}: ${resolvedCurrency} ${amount.toFixed(2)}.`,
         }
       }
 
-      transaction(() => {
+      if (!receivableId) {
+        return {
+          success: false,
+          reason: 'receivable_id_required',
+          message: `receivableId is required for ${action}.`,
+        }
+      }
+
+      const existing = getReceivable(receivableId)
+      if (!existing) {
+        return {
+          success: false,
+          reason: 'receivable_not_found',
+          message: `Receivable ${receivableId} not found.`,
+        }
+      }
+      const beforeSnapshot = receivableSnapshot(existing)
+      const beforeOutput = receivableSnapshot(existing, { redacted })
+
+      if (action === 'update') {
+        const accountWasProvided = accountId !== undefined || account !== undefined
+        const resolvedAccount = accountWasProvided
+          ? resolveOptionalAccount(accountId, account)
+          : null
+        if (resolvedAccount && !resolvedAccount.success) return resolvedAccount
+        const nextAccountId = resolvedAccount?.success ? resolvedAccount.id : existing.account_id
+        const nextAccountName = resolvedAccount?.success
+          ? resolvedAccount.name
+          : existing.account_name
+        const linkedAccount = getLinkedAccount(nextAccountId)
+        const plan = planReceivableUpdate(
+          existing,
+          {
+            amount: amount === undefined ? undefined : toCentavos(amount),
+            currency,
+            accountId: nextAccountId,
+          },
+          linkedAccount
+        )
+        if (!plan.success) {
+          if (plan.reason === 'receivable_currency_mismatch') {
+            return {
+              ...plan,
+              message: `Receivable currency ${normalizeCurrencyCode(currency ?? existing.currency)} does not match linked account currency ${linkedAccount!.currency}.`,
+            }
+          }
+          if (plan.reason === 'amount_below_received') {
+            return {
+              ...plan,
+              message: 'Amount cannot be reduced below the amount already received.',
+            }
+          }
+          return plan
+        }
+
+        const fieldsChanged =
+          payer !== undefined ||
+          amount !== undefined ||
+          dueDate !== undefined ||
+          currency !== undefined ||
+          accountWasProvided ||
+          projectReference !== undefined ||
+          invoiceReference !== undefined ||
+          notes !== undefined ||
+          source !== undefined ||
+          note !== undefined
+        if (!fieldsChanged) {
+          return {
+            success: false,
+            reason: 'no_receivable_changes',
+            message: 'No fields to update.',
+          }
+        }
+
+        const now = dayjs().toISOString()
+        const updated: ReceivableWithAccountRow = {
+          ...existing,
+          payer: payer ?? existing.payer,
+          amount: plan.amount,
+          currency: plan.currency,
+          due_date: dueDate ?? existing.due_date,
+          project_reference:
+            projectReference === undefined
+              ? existing.project_reference
+              : optionalText(projectReference),
+          invoice_reference:
+            invoiceReference === undefined
+              ? existing.invoice_reference
+              : optionalText(invoiceReference),
+          account_id: nextAccountId,
+          account_name: nextAccountName,
+          notes: notes === undefined ? existing.notes : optionalText(notes),
+          source: source === undefined ? existing.source : optionalText(source),
+          note: note === undefined ? existing.note : optionalText(note),
+          status: plan.status,
+          updated_at: now,
+        }
+        const afterSnapshot = receivableSnapshot(updated)
+        const afterOutput = receivableSnapshot(updated, { redacted })
+
+        if (!apply) {
+          return {
+            success: true,
+            action: 'updated' as const,
+            dryRun: true,
+            wouldUpdate: { receivableId, before: beforeOutput, after: afterOutput },
+            message: redacted
+              ? 'Dry run: the receivable would be updated.'
+              : `Dry run: receivable from ${updated.payer} would be updated.`,
+          }
+        }
+
         const result = execute(
           `UPDATE receivables
            SET payer = $1, amount = $2, currency = $3, due_date = $4, project_reference = $5,
@@ -472,7 +476,7 @@ const manageReceivable: ToolDefinition = {
               AND status = $14
               AND received_amount = $15
               AND matched_transaction_id IS $16
-              AND updated_at = $17`,
+              AND updated_at = $17 AND amount = $18`,
           [
             updated.payer,
             updated.amount,
@@ -487,10 +491,11 @@ const manageReceivable: ToolDefinition = {
             updated.note,
             updated.updated_at,
             receivableId,
-            existing.status,
-            existing.received_amount,
-            existing.matched_transaction_id,
-            existing.updated_at,
+            plan.expected.status,
+            plan.expected.received_amount,
+            plan.expected.matched_transaction_id,
+            plan.expected.updated_at,
+            plan.expected.amount,
           ]
         )
         assertSingleRowUpdated(result, `Receivable ${receivableId} could not be updated safely.`)
@@ -503,67 +508,63 @@ const manageReceivable: ToolDefinition = {
           source: updated.source,
           note: updated.note,
         })
-      })
 
-      return {
-        success: true,
-        action: 'updated' as const,
-        dryRun: false,
-        receivable: afterOutput,
-        message: redacted ? 'Updated receivable.' : `Updated receivable from ${updated.payer}.`,
-      }
-    }
-
-    if (action === 'cancel') {
-      if (existing.status === 'cancelled') {
-        return {
-          success: false,
-          reason: 'already_cancelled',
-          message: 'Receivable is already cancelled.',
-        }
-      }
-      if (existing.status === 'received') {
-        return {
-          success: false,
-          reason: 'received_receivable',
-          message:
-            'A received receivable cannot be cancelled. Keep it for the payment audit trail.',
-        }
-      }
-
-      const cancelled: ReceivableWithAccountRow = {
-        ...existing,
-        status: 'cancelled',
-        updated_at: dayjs().toISOString(),
-      }
-      const afterSnapshot = receivableSnapshot(cancelled)
-      const afterOutput = receivableSnapshot(cancelled, { redacted })
-      if (!apply) {
         return {
           success: true,
-          action: 'cancelled' as const,
-          dryRun: true,
-          wouldCancel: { receivableId, before: beforeOutput, after: afterOutput },
-          message: redacted
-            ? 'Dry run: the receivable would be cancelled.'
-            : `Dry run: receivable from ${existing.payer} would be cancelled.`,
+          action: 'updated' as const,
+          dryRun: false,
+          receivable: afterOutput,
+          message: redacted ? 'Updated receivable.' : `Updated receivable from ${updated.payer}.`,
         }
       }
 
-      transaction(() => {
+      if (action === 'cancel') {
+        const plan = planReceivableRemoval(existing, 'cancel')
+        if (!plan.success) return plan
+        if (!plan.changed) {
+          return {
+            success: true,
+            action: 'cancelled' as const,
+            dryRun: !apply,
+            changed: false,
+            receivable: beforeOutput,
+            message: 'Receivable is already cancelled.',
+          }
+        }
+
+        const cancelled: ReceivableWithAccountRow = {
+          ...existing,
+          status: 'cancelled',
+          updated_at: dayjs().toISOString(),
+        }
+        const afterSnapshot = receivableSnapshot(cancelled)
+        const afterOutput = receivableSnapshot(cancelled, { redacted })
+        if (!apply) {
+          return {
+            success: true,
+            action: 'cancelled' as const,
+            dryRun: true,
+            wouldCancel: { receivableId, before: beforeOutput, after: afterOutput },
+            message: redacted
+              ? 'Dry run: the receivable would be cancelled.'
+              : `Dry run: receivable from ${existing.payer} would be cancelled.`,
+          }
+        }
+
         const result = execute(
           `UPDATE receivables
            SET status = $1, updated_at = $2
            WHERE id = $3 AND status = $4 AND received_amount = $5
-             AND matched_transaction_id IS $6 AND updated_at = $7`,
+             AND matched_transaction_id IS $6 AND updated_at = $7 AND amount = $8`,
           [
             cancelled.status,
             cancelled.updated_at,
             receivableId,
-            existing.status,
-            existing.received_amount,
-            existing.matched_transaction_id,
-            existing.updated_at,
+            plan.expected.status,
+            plan.expected.received_amount,
+            plan.expected.matched_transaction_id,
+            plan.expected.updated_at,
+            plan.expected.amount,
           ]
         )
         assertSingleRowUpdated(result, `Receivable ${receivableId} could not be cancelled safely.`)
@@ -576,45 +577,37 @@ const manageReceivable: ToolDefinition = {
           source: cancelled.source,
           note: cancelled.note,
         })
-      })
 
-      return {
-        success: true,
-        action: 'cancelled' as const,
-        dryRun: false,
-        receivable: afterOutput,
-        message: redacted
-          ? 'Cancelled receivable.'
-          : `Cancelled receivable from ${existing.payer}.`,
+        return {
+          success: true,
+          action: 'cancelled' as const,
+          dryRun: false,
+          receivable: afterOutput,
+          message: redacted
+            ? 'Cancelled receivable.'
+            : `Cancelled receivable from ${existing.payer}.`,
+        }
       }
-    }
 
-    if (existing.matched_transaction_id || existing.received_amount > 0) {
-      return {
-        success: false,
-        reason: 'receivable_has_receipts',
-        message:
-          'Receivables with recorded receipts cannot be deleted. Cancel them to preserve the audit trail.',
+      const plan = planReceivableRemoval(existing, 'delete')
+      if (!plan.success) return plan
+      if (!apply) {
+        return {
+          success: true,
+          action: 'deleted' as const,
+          dryRun: true,
+          wouldDelete: beforeOutput,
+          message: redacted
+            ? 'Dry run: the receivable would be deleted.'
+            : `Dry run: receivable from ${existing.payer} would be deleted.`,
+        }
       }
-    }
-    if (!apply) {
-      return {
-        success: true,
-        action: 'deleted' as const,
-        dryRun: true,
-        wouldDelete: beforeOutput,
-        message: redacted
-          ? 'Dry run: the receivable would be deleted.'
-          : `Dry run: receivable from ${existing.payer} would be deleted.`,
-      }
-    }
 
-    transaction(() => {
       const result = execute(
         `DELETE FROM receivables
          WHERE id = $1 AND received_amount = 0 AND matched_transaction_id IS NULL
-           AND status = $2 AND updated_at = $3`,
-        [receivableId, existing.status, existing.updated_at]
+           AND status = $2 AND updated_at = $3 AND amount = $4`,
+        [receivableId, plan.expected.status, plan.expected.updated_at, plan.expected.amount]
       )
       assertSingleRowUpdated(result, `Receivable ${receivableId} could not be deleted safely.`)
       writeAuditLog({
@@ -626,16 +619,15 @@ const manageReceivable: ToolDefinition = {
         source: existing.source,
         note: existing.note,
       })
-    })
 
-    return {
-      success: true,
-      action: 'deleted' as const,
-      dryRun: false,
-      receivable: beforeOutput,
-      message: redacted ? 'Deleted receivable.' : `Deleted receivable from ${existing.payer}.`,
-    }
-  },
+      return {
+        success: true,
+        action: 'deleted' as const,
+        dryRun: false,
+        receivable: beforeOutput,
+        message: redacted ? 'Deleted receivable.' : `Deleted receivable from ${existing.payer}.`,
+      }
+    }),
 }
 
 const listReceivables: ToolDefinition = {

@@ -3,6 +3,7 @@ import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Receivables } from '../receivables'
 import { useCurrencyStore } from '@/stores/currency-store'
+import { toast } from 'sonner'
 
 // ResizeObserver polyfill for jsdom
 globalThis.ResizeObserver = class {
@@ -370,4 +371,26 @@ describe('Receivables', () => {
     expect(within(row).getByText('$180.00')).toBeInTheDocument()
     expect(screen.queryByText('subtitle')).not.toBeInTheDocument()
   })
+
+  it.each([
+    ['cancel', 'cancelReceivable', 'A receivable with recorded receipts cannot be cancelled.'],
+    ['delete', 'actions.delete', 'Receivables with recorded receipts cannot be deleted.'],
+  ])(
+    'presents the %s evidence refusal without reporting success',
+    async (action, label, message) => {
+      const user = userEvent.setup()
+      mockReceivables = [makeReceivable({ matched_transaction_id: 't' })]
+      const mutation = action === 'cancel' ? mockCancel : mockRemove
+      mutation.mockRejectedValueOnce(new Error(message))
+      render(<Receivables />)
+
+      await user.click(screen.getByRole('button', { name: `${label} Acme Corp` }))
+      await user.click(screen.getByRole('button', { name: 'Confirm' }))
+
+      expect(mutation).toHaveBeenCalledWith('recv-1')
+      expect(toast.error).toHaveBeenCalledWith(message)
+      expect(toast.success).not.toHaveBeenCalled()
+      expect(screen.getByTestId('confirm-dialog')).toBeInTheDocument()
+    }
+  )
 })

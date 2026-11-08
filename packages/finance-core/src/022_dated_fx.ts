@@ -1,8 +1,9 @@
-import { FX_CURRENCIES } from './fx.js'
+// Historical 022 vocabulary: changing runtime currencies must not change this SQL.
+const currencies =
+  "'USD', 'EUR', 'GBP', 'JPY', 'MXN', 'BRL', 'ARS', 'COP', 'CLP', 'PEN', 'CAD', 'AUD'"
 
 export const DATED_FX_MIGRATION = '022_dated_fx'
 export const DATED_FX_VERSION = 22
-const currencies = FX_CURRENCIES.map((code) => `'${code}'`).join(', ')
 const currency = (name: string) => `TEXT NOT NULL CHECK (${name} IN (${currencies}))`
 const decimal = (name: string) => `TEXT NOT NULL CHECK (
   length(${name}) BETWEEN 1 AND 81 AND ${name} NOT GLOB '*[^0-9.]*'

@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import { lstatSync, realpathSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { assertShikinSchemaReady } from './database.js'
-import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
+import { CURRENT_SHIKIN_MIGRATIONS } from '@shikin/finance-core'
 import { readRuntimeIdentity, type RuntimeIdentityStatus } from './runtime-identity.js'
 import { validateNativeSqliteBinding } from './storage-context.js'
 import type { StorageContext } from './app-data-dir.js'
@@ -94,7 +94,7 @@ export function getRuntimeDiagnostics(
       .prepare('SELECT id, name FROM _migrations ORDER BY id ASC')
       .all() as Array<{ id: number; name: string }>
     const currentMigration = migrations.at(-1)
-    const expectedMigration = CLI_DATABASE_MIGRATIONS.at(-1)
+    const expectedMigration = CURRENT_SHIKIN_MIGRATIONS.at(-1)
     if (!currentMigration || currentMigration.name !== expectedMigration) {
       throw new Error('Database schema is not ready for runtime diagnostics.')
     }

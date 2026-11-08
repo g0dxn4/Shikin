@@ -155,6 +155,26 @@ afterEach(() => {
 })
 
 describe('021 backend remediation foundation', () => {
+  it.each([19, 20, 21, 22, 23, 24] as const)(
+    'keeps the synthetic schema %i boundary exact before upgrading',
+    (version) => {
+      const db = database()
+      runHostedTestMigrations(db, version)
+      const markers = rows(db, 'SELECT id FROM _migrations ORDER BY id')
+      expect(markers).toEqual(
+        [1, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
+          .filter((id) => id <= version)
+          .map((id) => ({ id }))
+      )
+      const budgetColumns = (rows(db, 'PRAGMA table_info(budgets)') as Array<{ name: string }>).map(
+        (column) => column.name
+      )
+      expect(budgetColumns.includes('currency')).toBe(version >= 22)
+      expect(budgetColumns.includes('scope_json')).toBe(version >= 24)
+      expect(budgetColumns.includes('basis')).toBe(version >= 24)
+    }
+  )
+
   it('initializes fresh hosted schema once, with unknown last-write and independent random lineage', () => {
     const db = database()
     runHostedTestMigrations(db)

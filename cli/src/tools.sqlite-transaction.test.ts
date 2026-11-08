@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type * as DatabaseModule from './database.js'
 import type * as OsModule from 'node:os'
-import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
+import { CURRENT_SHIKIN_MIGRATIONS } from '@shikin/finance-core'
 import { applyFinancialSemanticsTestSchema } from './financial-semantics-test-schema.js'
 import { applyBackendFoundationTestSchema } from './backend-foundation-test-schema.js'
 
@@ -280,7 +280,7 @@ function seedDatabase({
   applyFinancialSemanticsTestSchema(db)
 
   // This fixture supplies the pre-021 schema; the helper installs the complete 021+ tail.
-  for (const migration of CLI_DATABASE_MIGRATIONS.filter(
+  for (const migration of CURRENT_SHIKIN_MIGRATIONS.filter(
     (name) => Number.parseInt(name, 10) < 21
   )) {
     db.prepare('INSERT INTO _migrations (id, name) VALUES (?, ?)').run(

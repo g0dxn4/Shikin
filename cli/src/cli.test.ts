@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import dayjs from 'dayjs'
 import type * as ToolsModule from './tools.js'
-import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
+import { CURRENT_SHIKIN_MIGRATIONS } from '@shikin/finance-core'
 
 vi.mock('./tools.js', () => ({ tools: [] }))
 vi.mock('./database.js', () => ({
@@ -115,8 +115,8 @@ describe('CLI command execution', () => {
   })
 
   it('uses the shared migration list for diagnose drift prevention', () => {
-    expect(EXPECTED_MIGRATIONS).toBe(CLI_DATABASE_MIGRATIONS)
-    expect(EXPECTED_MIGRATIONS).toHaveLength(CLI_DATABASE_MIGRATIONS.length)
+    expect(EXPECTED_MIGRATIONS).toBe(CURRENT_SHIKIN_MIGRATIONS)
+    expect(EXPECTED_MIGRATIONS).toHaveLength(CURRENT_SHIKIN_MIGRATIONS.length)
   })
 
   it('keeps all tool definitions discoverable as CLI commands', () => {
@@ -249,9 +249,9 @@ describe('CLI command execution', () => {
     })
     expect(webCommand.effects).toBeUndefined()
     expect(output.database).toMatchObject({
-      requiredMigrations: [...CLI_DATABASE_MIGRATIONS],
-      latestRequiredMigration: CLI_DATABASE_MIGRATIONS.at(-1),
-      migrationCount: CLI_DATABASE_MIGRATIONS.length,
+      requiredMigrations: [...CURRENT_SHIKIN_MIGRATIONS],
+      latestRequiredMigration: CURRENT_SHIKIN_MIGRATIONS.at(-1),
+      migrationCount: CURRENT_SHIKIN_MIGRATIONS.length,
       expectsCurrent016FoundationSchema: true,
       foundationMigration: '016_cli_qol_foundation',
     })
@@ -1550,7 +1550,7 @@ describe('CLI command execution', () => {
 
   it('includes deep integrity details for diagnose --deep', async () => {
     vi.mocked(query)
-      .mockReturnValueOnce(CLI_DATABASE_MIGRATIONS.map((name) => ({ name })))
+      .mockReturnValueOnce(CURRENT_SHIKIN_MIGRATIONS.map((name) => ({ name })))
       .mockReturnValueOnce([{ count: 2 }])
       .mockReturnValueOnce([{ count: 14 }])
       .mockReturnValueOnce([{ count: 42 }])
@@ -1611,8 +1611,8 @@ describe('CLI command execution', () => {
           },
           database: {
             ready: true,
-            migrationCount: CLI_DATABASE_MIGRATIONS.length,
-            latestMigration: CLI_DATABASE_MIGRATIONS.at(-1),
+            migrationCount: CURRENT_SHIKIN_MIGRATIONS.length,
+            latestMigration: CURRENT_SHIKIN_MIGRATIONS.at(-1),
             accountCount: 2,
             categoryCount: 14,
             transactionCount: 42,
@@ -1626,8 +1626,8 @@ describe('CLI command execution', () => {
                 violations: [],
               },
               migrations: {
-                expected: CLI_DATABASE_MIGRATIONS.length,
-                applied: CLI_DATABASE_MIGRATIONS.length,
+                expected: CURRENT_SHIKIN_MIGRATIONS.length,
+                applied: CURRENT_SHIKIN_MIGRATIONS.length,
                 missing: [],
                 unexpected: [],
               },
@@ -1699,9 +1699,9 @@ describe('CLI command execution', () => {
 
     const output = JSON.parse(logSpy.mock.calls[0]?.[0] as string)
     expect(output.database.integrity.migrations).toEqual({
-      expected: CLI_DATABASE_MIGRATIONS.length,
+      expected: CURRENT_SHIKIN_MIGRATIONS.length,
       applied: 3,
-      missing: CLI_DATABASE_MIGRATIONS.filter(
+      missing: CURRENT_SHIKIN_MIGRATIONS.filter(
         (migration) => migration !== '001_core_tables' && migration !== '003_credit_cards'
       ),
       unexpected: ['999_legacy_ai_memory'],

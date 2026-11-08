@@ -4,6 +4,10 @@ All notable changes to Shikin are documented in this file.
 
 ## [Unreleased]
 
+### Internal structure
+
+- Current database schema metadata (migration names, version, readiness columns) now has a single owner in finance-core, shared by the CLI, desktop/browser adapter, and data bridge. Historical migration vocabularies are pinned. No schema, migration output, or restore behavior changed.
+
 ## [1.2.1] - 2026-10-17
 
 Prepared release notes.

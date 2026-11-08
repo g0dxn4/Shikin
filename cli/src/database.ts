@@ -4,6 +4,8 @@ import {
   assertScopedBudgetsReady,
 } from '@shikin/finance-core/scoped-budgets-migration'
 import {
+  CURRENT_SHIKIN_MIGRATIONS,
+  CURRENT_SHIKIN_SCHEMA,
   CLASSIFICATION_TYPES_MIGRATION,
   CLASSIFICATION_TYPES_SCHEMA,
   classificationTypesStatements,
@@ -34,7 +36,6 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
 import { PRIVATE_FILE_MODE, ensurePrivateDirectory, hardenPathMode } from './app-data-dir.js'
 import { prepareStorageForWrite, storageContext } from './storage-context.js'
 
@@ -54,9 +55,9 @@ const REQUIRED_CORE_TABLES = [
   'settings',
 ] as const
 // fallow-ignore-next-line unused-export
-export const REQUIRED_MIGRATIONS = CLI_DATABASE_MIGRATIONS
+export const REQUIRED_MIGRATIONS = CURRENT_SHIKIN_MIGRATIONS
 const REQUIRED_CORE_SCHEMA: Record<string, readonly string[]> = {
-  _migrations: ['id', 'name', 'applied_at'],
+  _migrations: CURRENT_SHIKIN_SCHEMA._migrations,
 }
 // Minimum legacy inputs for the supported staged 019 -> 020 -> 021 path.
 // Do not substitute latest-schema requirements here.
@@ -76,7 +77,7 @@ const QUOTE_RECURRENCE_IMPORT_SCHEMA: Record<string, readonly string[]> = {
 }
 const REQUIRED_CLI_QOL_SCHEMA: Record<string, readonly string[]> = {
   accounts: ['account_mode'],
-  settings: ['key', 'value', 'updated_at'],
+  settings: CURRENT_SHIKIN_SCHEMA.settings,
   transactions: [
     'status',
     'source',
@@ -96,104 +97,13 @@ const REQUIRED_CLI_QOL_SCHEMA: Record<string, readonly string[]> = {
     'matched_transaction_id',
     'is_archived',
   ],
-  audit_log: [
-    'id',
-    'entity',
-    'entity_id',
-    'action',
-    'before_json',
-    'after_json',
-    'source',
-    'note',
-    'created_at',
-  ],
-  cashflow_buckets: [
-    'id',
-    'name',
-    'description',
-    'target_amount',
-    'balance',
-    'currency',
-    'sort_order',
-    'is_active',
-    'created_at',
-    'updated_at',
-  ],
-  cashflow_bucket_allocations: [
-    'id',
-    'bucket_id',
-    'transaction_id',
-    'amount',
-    'currency',
-    'allocation_date',
-    'source',
-    'note',
-    'created_at',
-  ],
-  category_suggestions: [
-    'id',
-    'transaction_id',
-    'description',
-    'suggested_category_id',
-    'suggested_subcategory_id',
-    'confidence',
-    'status',
-    'source',
-    'note',
-    'created_at',
-    'reviewed_at',
-  ],
-  credit_card_statements: [
-    'id',
-    'account_id',
-    'statement_start_date',
-    'statement_end_date',
-    'due_date',
-    'statement_balance',
-    'minimum_payment',
-    'paid_amount',
-    'currency',
-    'status',
-    'source',
-    'note',
-    'created_at',
-    'updated_at',
-  ],
-  account_reconciliations: [
-    'id',
-    'account_id',
-    'reconciliation_date',
-    'actual_balance',
-    'stored_balance_before',
-    'ledger_balance_before',
-    'ledger_balance_after',
-    'adjustment_amount',
-    'adjustment_transaction_id',
-    'staging_batch_id',
-    'statement_start_date',
-    'statement_end_date',
-    'source',
-    'note',
-    'created_at',
-  ],
-  receivables: [
-    'id',
-    'payer',
-    'amount',
-    'received_amount',
-    'currency',
-    'due_date',
-    'project_reference',
-    'invoice_reference',
-    'status',
-    'account_id',
-    'matched_transaction_id',
-    'notes',
-    'source',
-    'note',
-    'created_at',
-    'updated_at',
-  ],
+  audit_log: CURRENT_SHIKIN_SCHEMA.audit_log,
+  cashflow_buckets: CURRENT_SHIKIN_SCHEMA.cashflow_buckets,
+  cashflow_bucket_allocations: CURRENT_SHIKIN_SCHEMA.cashflow_bucket_allocations,
+  category_suggestions: CURRENT_SHIKIN_SCHEMA.category_suggestions,
+  credit_card_statements: CURRENT_SHIKIN_SCHEMA.credit_card_statements,
+  account_reconciliations: CURRENT_SHIKIN_SCHEMA.account_reconciliations,
+  receivables: CURRENT_SHIKIN_SCHEMA.receivables,
 }
 
 export type DatabaseBackupMetadata = {

@@ -48,16 +48,9 @@ export function runHostedTestMigrations(
 ): void {
   const source = readFileSync(new URL('../../scripts/data-server.mjs', import.meta.url), 'utf8')
   let migrations = source.slice(
-    source.indexOf('const CURRENT_SHIKIN_MIGRATIONS'),
+    source.indexOf('function tableHasColumn('),
     source.indexOf('\ntry {\n  runMigrations()')
   )
-  if (through <= 23)
-    migrations = migrations.replace(
-      "budgets: ['id', 'name', 'amount', 'period', 'currency', 'scope_json', 'basis']",
-      through <= 21
-        ? "budgets: ['id', 'name', 'amount', 'period']"
-        : "budgets: ['id', 'name', 'amount', 'period', 'currency']"
-    )
   if (through === 19)
     migrations = migrations.replace(
       "  if (!applied.has('020_quote_recurrence_import_identity')) {",
@@ -70,13 +63,11 @@ export function runHostedTestMigrations(
     )
   if (through === 21) {
     migrations = migrations
-      .replace('  DATED_FX_MIGRATION,\n', '')
       .replace(/ {2}assertDatedFxReady\([\s\S]*?\n {2}\)/, '')
       .replace('if (!migrations.some((row) => row.name === DATED_FX_MIGRATION))', 'if (false)')
   }
   if (through <= 22) {
     migrations = migrations
-      .replace('  CLASSIFICATION_TYPES_MIGRATION,\n', '')
       .replace(/ {2}assertClassificationTypesReady\([\s\S]*?\n {2}\)/, '')
       .replace(
         'if (!migrations.some((row) => row.name === CLASSIFICATION_TYPES_MIGRATION))',
@@ -85,7 +76,6 @@ export function runHostedTestMigrations(
   }
   if (through <= 23) {
     migrations = migrations
-      .replace('  SCOPED_BUDGETS_MIGRATION,\n', '')
       .replace(/ {2}assertScopedBudgetsReady\([\s\S]*?\n {2}\)/, '')
       .replace(
         'if (!migrations.some((row) => row.name === SCOPED_BUDGETS_MIGRATION))',
@@ -96,6 +86,19 @@ export function runHostedTestMigrations(
     db,
     ...foundation,
     ...scopedBudgets,
+    CURRENT_SHIKIN_MIGRATIONS: foundation.CURRENT_SHIKIN_MIGRATIONS.filter(
+      (name) => Number.parseInt(name, 10) <= through
+    ),
+    // Old synthetic databases must use their own readiness floor, not today's budget columns.
+    CURRENT_SHIKIN_SCHEMA: {
+      ...foundation.CURRENT_SHIKIN_SCHEMA,
+      budgets:
+        through <= 21
+          ? ['id', 'name', 'amount', 'period']
+          : through <= 23
+            ? ['id', 'name', 'amount', 'period', 'currency']
+            : foundation.CURRENT_SHIKIN_SCHEMA.budgets,
+    },
     console: { log() {} },
   })
 }

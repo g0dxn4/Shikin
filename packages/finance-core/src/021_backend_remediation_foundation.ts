@@ -306,16 +306,6 @@ export function backendFoundationStatements(
   return statements
 }
 
-/** Current supported version is 024. Keep historical 021 SQL above unchanged.
- * Only protects callers shipping this check; it cannot protect older binaries. */
-export function assertSupportedSchemaVersion(rows: readonly { id?: number; name: string }[]): void {
-  if (rows.some((row) => Number(row.id ?? 0) > 24 || Number.parseInt(row.name, 10) > 24)) {
-    throw new Error(
-      'Database schema is newer than this application supports. Upgrade the app, CLI and MCP together.'
-    )
-  }
-}
-
 /** Compare generated objects too, not just a migration marker/column names. */
 export function assertBackendFoundationReady(
   columns: Readonly<Record<string, readonly string[]>>,

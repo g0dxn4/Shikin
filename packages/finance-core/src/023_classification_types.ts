@@ -1,9 +1,10 @@
 import { BACKEND_FOUNDATION_OBJECTS } from './021_backend_remediation_foundation.js'
-import { consumptionRoles } from './classification-policy.js'
 
 export const CLASSIFICATION_TYPES_MIGRATION = '023_classification_types'
 export const CLASSIFICATION_TYPES_VERSION = 23
-const roles = consumptionRoles.map((role) => `'${role}'`).join(', ')
+// Historical 023 vocabulary: changing runtime treatments must not change this SQL.
+const roles =
+  "'purchase', 'fee', 'earned_income', 'refund', 'internal_inflow', 'cash_withdrawal', 'principal', 'other_income', 'principal_recovery', 'asset_acquisition'"
 const timestamp = "TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
 const assignmentTable = 'transaction_consumption_classifications'
 const replacementTable = 'classification_assignments_023'

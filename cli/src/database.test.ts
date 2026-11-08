@@ -12,8 +12,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
-import { BACKEND_FOUNDATION_MIGRATION, FINANCIAL_REVISION_TABLES } from '@shikin/finance-core'
+import {
+  CURRENT_SHIKIN_MIGRATIONS,
+  BACKEND_FOUNDATION_MIGRATION,
+  FINANCIAL_REVISION_TABLES,
+} from '@shikin/finance-core'
 import { applyBackendFoundationTestSchema } from './backend-foundation-test-schema.js'
 import { applyFinancialSemanticsTestSchema } from './financial-semantics-test-schema.js'
 
@@ -64,7 +67,7 @@ function createCliDatabasePathFromDataHome(dataHome: string): string {
 
 function seedCoreShikinSchema(
   dbPath: string,
-  migrations: readonly string[] = CLI_DATABASE_MIGRATIONS,
+  migrations: readonly string[] = CURRENT_SHIKIN_MIGRATIONS,
   options: {
     includeCliQolTransactionColumns?: boolean
     includeCliQolTables?: boolean
@@ -298,7 +301,8 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     tempHomes.add(homeDir)
 
     const { REQUIRED_MIGRATIONS } = await importFreshDatabaseModule(homeDir)
-    const { CLI_DATABASE_MIGRATIONS: sharedMigrations } = await import('./migrations.js')
+    // Match the freshly loaded database module after importFreshDatabaseModule resets modules.
+    const { CURRENT_SHIKIN_MIGRATIONS: sharedMigrations } = await import('@shikin/finance-core')
 
     expect(REQUIRED_MIGRATIONS).toBe(sharedMigrations)
     expect(REQUIRED_MIGRATIONS).toHaveLength(sharedMigrations.length)
@@ -408,7 +412,7 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     const dbPath = createCliDatabasePath(homeDir)
     seedCoreShikinSchema(
       dbPath,
-      CLI_DATABASE_MIGRATIONS.filter((m) => m !== '001_core_tables' && m !== '003_credit_cards')
+      CURRENT_SHIKIN_MIGRATIONS.filter((m) => m !== '001_core_tables' && m !== '003_credit_cards')
     )
     addCreditCardColumns(dbPath)
     const { query, close } = await importFreshDatabaseModule(homeDir)
@@ -431,7 +435,7 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
 
     seedCoreShikinSchema(
       createCliDatabasePath(homeDir),
-      CLI_DATABASE_MIGRATIONS.filter((migration) => migration !== '003_credit_cards')
+      CURRENT_SHIKIN_MIGRATIONS.filter((migration) => migration !== '003_credit_cards')
     )
 
     const { query, close } = await importFreshDatabaseModule(homeDir)
@@ -466,7 +470,7 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
 
     seedCoreShikinSchema(
       createCliDatabasePath(homeDir),
-      CLI_DATABASE_MIGRATIONS.filter((migration) => migration !== '010_transaction_splits')
+      CURRENT_SHIKIN_MIGRATIONS.filter((migration) => migration !== '010_transaction_splits')
     )
 
     const { query, close } = await importFreshDatabaseModule(homeDir)
@@ -482,7 +486,7 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
 
-    seedCoreShikinSchema(createCliDatabasePath(homeDir), CLI_DATABASE_MIGRATIONS, {
+    seedCoreShikinSchema(createCliDatabasePath(homeDir), CURRENT_SHIKIN_MIGRATIONS, {
       includeCliQolTransactionColumns: false,
     })
 
@@ -499,7 +503,7 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
 
-    seedCoreShikinSchema(createCliDatabasePath(homeDir), CLI_DATABASE_MIGRATIONS, {
+    seedCoreShikinSchema(createCliDatabasePath(homeDir), CURRENT_SHIKIN_MIGRATIONS, {
       transactionStatusDefinition: "status TEXT DEFAULT 'pending'",
     })
 
@@ -534,7 +538,7 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'shikin-db-'))
     tempHomes.add(homeDir)
 
-    seedCoreShikinSchema(createCliDatabasePath(homeDir), CLI_DATABASE_MIGRATIONS, {
+    seedCoreShikinSchema(createCliDatabasePath(homeDir), CURRENT_SHIKIN_MIGRATIONS, {
       includeCliQolTables: false,
     })
 
@@ -694,7 +698,7 @@ describe('CLI database readiness', { timeout: 20_000 }, () => {
     const dbPath = createCliDatabasePath(homeDir)
     const candidatePath = join(homeDir, 'candidate-v019.db')
     seedCoreShikinSchema(dbPath)
-    seedCoreShikinSchema(candidatePath, CLI_DATABASE_MIGRATIONS.slice(0, -1))
+    seedCoreShikinSchema(candidatePath, CURRENT_SHIKIN_MIGRATIONS.slice(0, -1))
     insertAccount(candidatePath, 'previous schema account')
     const previousSchemaDb = new Database(candidatePath)
     previousSchemaDb

@@ -4,6 +4,7 @@ export * from './reconciliation.js'
 export * from './recurrence.js'
 export * from './reporting.js'
 export * from './statement-fingerprint.js'
+export * from './current-schema.js'
 export {
   BACKEND_FOUNDATION_MIGRATION,
   BACKEND_FOUNDATION_VERSION,
@@ -12,7 +13,6 @@ export {
   BACKEND_FOUNDATION_OBJECTS,
   FINANCIAL_REVISION_TABLES,
   backendFoundationStatements,
-  assertSupportedSchemaVersion,
   assertBackendFoundationReady,
 } from './021_backend_remediation_foundation.js'
 

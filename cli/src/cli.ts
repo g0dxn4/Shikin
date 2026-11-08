@@ -11,13 +11,13 @@ import {
   transactionDuplicateReason,
   type TransactionDuplicateCheck,
 } from './duplicate-detection.js'
-import { CLI_DATABASE_MIGRATIONS } from './migrations.js'
+import { CURRENT_SHIKIN_MIGRATIONS } from '@shikin/finance-core'
 import { toCentavos } from './money.js'
 import { startWebHost, WEB_DEFAULT_PORT } from './web-host.js'
 import { z } from 'zod'
 import dayjs from 'dayjs'
 
-export const EXPECTED_MIGRATIONS = CLI_DATABASE_MIGRATIONS
+export const EXPECTED_MIGRATIONS = CURRENT_SHIKIN_MIGRATIONS
 export { COMMAND_CATALOG_VERSION } from './contracts.js'
 export const CLI_SCHEMA_VERSION = 'cli-tools-json.v1'
 export const CLI_FOUNDATION_MIGRATION = '016_cli_qol_foundation'
@@ -293,7 +293,7 @@ function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
     .filter((tool) => tool.mcpUnavailableMessage)
     .map((tool) => tool.name)
     .sort()
-  const latestRequiredMigration = CLI_DATABASE_MIGRATIONS.at(-1) ?? null
+  const latestRequiredMigration = CURRENT_SHIKIN_MIGRATIONS.at(-1) ?? null
   const builtInCommands = [
     {
       name: 'diagnose',
@@ -529,10 +529,11 @@ function getCommandCatalog(toolDefinitions: ToolDefinition[]) {
       },
     },
     database: {
-      requiredMigrations: [...CLI_DATABASE_MIGRATIONS],
+      requiredMigrations: [...CURRENT_SHIKIN_MIGRATIONS],
       latestRequiredMigration,
-      migrationCount: CLI_DATABASE_MIGRATIONS.length,
-      expectsCurrent016FoundationSchema: CLI_DATABASE_MIGRATIONS.includes(CLI_FOUNDATION_MIGRATION),
+      migrationCount: CURRENT_SHIKIN_MIGRATIONS.length,
+      expectsCurrent016FoundationSchema:
+        CURRENT_SHIKIN_MIGRATIONS.includes(CLI_FOUNDATION_MIGRATION),
       foundationMigration: CLI_FOUNDATION_MIGRATION,
       readinessContract: {
         migrationsAreRequired: true,

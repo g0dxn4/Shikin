@@ -116,6 +116,40 @@ afterEach(() => {
 })
 
 describe('atomic CLI import', () => {
+  it('imports through the real mutation primitive without loading tool-definition objects', async () => {
+    vi.resetModules()
+    const loadToolDefinitions = vi.fn(() => {
+      throw new Error('Transaction tool definitions must not load for atomic imports.')
+    })
+    vi.doMock('./tools/transactions.js', loadToolDefinitions)
+    try {
+      // Reload the importer after resetting the cache to exercise its module-loading boundary.
+      const { executeAtomicImport: importWithoutTools } = await import('./import-transactions.js')
+      const preview = importWithoutTools(request(['Independent import']))
+      expect(preview).toMatchObject({ success: true, mode: 'preview' })
+      expect(
+        importWithoutTools({
+          ...request(['Independent import']),
+          apply: true,
+          previewToken: String(preview.previewToken),
+        })
+      ).toMatchObject({ success: true, mode: 'reviewed_atomic' })
+      expect(db.prepare('SELECT amount, import_source FROM transactions').all()).toEqual([
+        { amount: 1000, import_source: 'Bank CSV' },
+      ])
+      expect(db.prepare("SELECT balance FROM accounts WHERE id='account-1'").get()).toEqual({
+        balance: 9000,
+      })
+      expect(db.prepare('SELECT entity, action FROM audit_log').all()).toEqual([
+        { entity: 'transaction', action: 'create' },
+      ])
+      expect(loadToolDefinitions).not.toHaveBeenCalled()
+    } finally {
+      vi.doUnmock('./tools/transactions.js')
+      vi.resetModules()
+    }
+  })
+
   it('previews without writes, applies the exact token, and reimports idempotently', () => {
     const preview = executeAtomicImport(request()) as {
       success: boolean

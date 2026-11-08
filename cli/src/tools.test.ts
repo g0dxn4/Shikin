@@ -6380,6 +6380,251 @@ describe('CLI tool validation regressions', () => {
     ])
   })
 
+  describe('add and CSV preparation characterization', () => {
+    let db: Database.Database
+    let dir: string
+    let file: string
+
+    beforeEach(() => {
+      db = scopedSummaryFixture()
+      dir = mkdtempSync(join(tmpdir(), 'shikin-preparation-'))
+      file = join(dir, 'transactions.csv')
+      db.prepare("UPDATE accounts SET balance = ? WHERE id = 'bank'").run(
+        Number.MAX_SAFE_INTEGER - 1
+      )
+    })
+    afterEach(() => rmSync(dir, { recursive: true, force: true }))
+
+    it.each([
+      { status: 'posted', ledgerTreatment: 'normal', affectsBalances: true },
+      { status: 'pending', ledgerTreatment: 'normal', affectsBalances: false },
+      {
+        status: 'cleared',
+        ledgerTreatment: 'staged_no_balance_impact',
+        affectsBalances: false,
+      },
+    ])(
+      'keeps $status/$ledgerTreatment previews in entered units without ledger writes',
+      async ({ status, ledgerTreatment, affectsBalances }) => {
+        const before = db.serialize()
+        const input = {
+          amount: 0.1,
+          type: 'income',
+          description: 'Precision fixture',
+          account: 'Bank',
+          category: 'foo',
+          date: '2026-05-01',
+          status,
+          ledgerTreatment,
+          stagingBatchId: ledgerTreatment === 'normal' ? undefined : 'batch-e',
+          dryRun: true,
+        }
+        const added = await addTransaction.execute(addTransaction.schema.parse(input))
+        expect(added).toMatchObject({
+          success: true,
+          balanceImpact: { affectsBalances },
+          wouldCreate: {
+            accountId: 'bank',
+            amount: 0.1,
+            amountCentavos: 10,
+            inputAmountCentavos: 10,
+            currency: 'USD',
+            category: 'Food',
+            status,
+            ledgerTreatment,
+          },
+        })
+        if (affectsBalances) {
+          expect(added.balanceImpact.accounts[0]).toMatchObject({
+            previousBalanceCentavos: Number.MAX_SAFE_INTEGER - 1,
+            newBalanceCentavos: Number.MAX_SAFE_INTEGER - 1 + 10,
+          })
+        }
+        writeFileSync(
+          file,
+          `date,description,amount,category,status,currency\n2026-05-01,Precision fixture,0.10,foo,${status},USD\n`
+        )
+        const csvInput = importTransactions.schema.parse({
+          file,
+          account: 'Bank',
+          ledgerTreatment,
+          stagingBatchId: input.stagingBatchId,
+        })
+        const imported = await importTransactions.execute(csvInput)
+        expect(imported).toMatchObject({
+          success: true,
+          mode: 'preview',
+          dataRevision: expect.any(Number),
+          rows: [{ status: 'create' }],
+          summary: { totalRows: 1, importedRows: 1, skippedRows: 0 },
+        })
+        expect(await importTransactions.execute(csvInput)).toEqual(imported)
+        expect(db.serialize()).toEqual(before)
+        expect(mockExecute).not.toHaveBeenCalled()
+      }
+    )
+
+    it('preserves schema issue ordering before account and category lookup', async () => {
+      const before = db.serialize()
+      const parsed = addTransaction.schema.safeParse({
+        amount: 1,
+        type: 'expense',
+        description: 'x'.repeat(201),
+        date: '2026-02-30',
+        accountId: 'missing',
+        category: 'missing',
+        dryRun: true,
+      })
+      expect(parsed.success).toBe(false)
+      const messages = parsed.success ? [] : parsed.error.issues.map((issue) => issue.message)
+      expect(messages).toEqual([
+        'Description must be 200 characters or fewer',
+        'Date must be a real calendar date',
+      ])
+      writeFileSync(
+        file,
+        `date,description,amount,category\n2026-02-30,${'x'.repeat(201)},-1,missing\n`
+      )
+      const imported = await importTransactions.execute(
+        importTransactions.schema.parse({ file, accountId: 'bank' })
+      )
+      expect(imported).toMatchObject({
+        success: false,
+        reason: 'csv_validation_failed',
+        errors: [{ row: 2, lineNumber: 2, messages }],
+      })
+      expect(db.serialize()).toEqual(before)
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
+
+    it('preserves the different add and CSV account/category failure precedence', async () => {
+      const before = db.serialize()
+      const added = await addTransaction.execute(
+        addTransaction.schema.parse({
+          amount: 1,
+          type: 'expense',
+          description: 'Bad lookup',
+          accountId: 'missing',
+          category: 'missing',
+          dryRun: true,
+        })
+      )
+      expect(added).toEqual({
+        success: false,
+        message:
+          'Category "missing" not found. Use list-categories to pick an existing category name.',
+      })
+      writeFileSync(file, 'date,description,amount,category\n2026-05-01,Bad lookup,-1,missing\n')
+      expect(
+        await importTransactions.execute(
+          importTransactions.schema.parse({ file, accountId: 'missing' })
+        )
+      ).toEqual({ success: false, message: 'Account missing not found.' })
+      expect(
+        await importTransactions.execute(
+          importTransactions.schema.parse({ file, accountId: 'bank' })
+        )
+      ).toMatchObject({
+        success: false,
+        reason: 'csv_validation_failed',
+        errors: [{ messages: [added.message] }],
+      })
+      expect(db.serialize()).toEqual(before)
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
+
+    it('keeps foreign add conversion separate from CSV account-currency rejection', async () => {
+      db.exec(`INSERT INTO manual_exchange_rates
+        (id, from_currency, to_currency, rate_decimal, effective_from, created_at, source_note)
+        VALUES ('batch-e-rate', 'EUR', 'USD', '1.25', '2026-05-01', '2026-05-01T00:00:00Z', 'fixture');`)
+      const before = db.serialize()
+      const added = await addTransaction.execute(
+        addTransaction.schema.parse({
+          amount: 0.1,
+          inputCurrency: 'EUR',
+          type: 'expense',
+          description: 'FX fixture',
+          accountId: 'bank',
+          date: '2026-05-01',
+          dryRun: true,
+        })
+      )
+      expect(added).toMatchObject({
+        success: true,
+        fxPreview: {
+          inputAmountCentavos: 10,
+          accountAmountCentavos: 13,
+          accountAmount: 0.13,
+          conversion: { rateId: 'batch-e-rate', rateDecimal: '1.25' },
+        },
+        wouldCreate: { amount: 0.13, amountCentavos: 13, inputAmount: 0.1, currency: 'USD' },
+      })
+      writeFileSync(
+        file,
+        'date,description,amount,type,status,currency\nbad,FX fixture,0,transfer,bad,EUR\n'
+      )
+      expect(
+        await importTransactions.execute(
+          importTransactions.schema.parse({ file, accountId: 'bank' })
+        )
+      ).toMatchObject({
+        success: false,
+        errors: [
+          {
+            messages: [
+              'amount must be non-zero.',
+              'type must be expense or income when provided.',
+              'status must be pending, posted, or cleared when provided.',
+              'currency EUR does not match account currency USD.',
+            ],
+          },
+        ],
+      })
+      expect(db.serialize()).toEqual(before)
+      expect(mockExecute).not.toHaveBeenCalled()
+    })
+
+    it.each([false, true])(
+      'retains add duplicate warnings and candidate-specific CSV review with allowDuplicate=%s',
+      async (allowDuplicate) => {
+        scopedFixtureTransaction(db, 'existing-e', 100, 'USD', 'food', 'expense')
+        const date = dayjs().format('YYYY-MM-DD')
+        const before = db.serialize()
+        const added = await addTransaction.execute(
+          addTransaction.schema.parse({
+            amount: 1,
+            type: 'expense',
+            description: 'existing-e',
+            accountId: 'bank',
+            date,
+            dryRun: true,
+            allowDuplicate,
+          })
+        )
+        expect(added).toMatchObject({
+          success: true,
+          duplicatePolicy: { allowDuplicate, applyBlocked: !allowDuplicate },
+          duplicateWarnings: [{ existingTransactionId: 'existing-e', amountCentavos: 100 }],
+        })
+        writeFileSync(file, `date,description,amount\n${date},existing-e,-1\n`)
+        const imported = await importTransactions.execute(
+          importTransactions.schema.parse({ file, accountId: 'bank', allowDuplicate })
+        )
+        expect(imported).toMatchObject({
+          success: false,
+          requiredDecisions: [
+            {
+              existingTransactionId: 'existing-e',
+              allowedDecisions: ['keep_existing', 'distinct'],
+            },
+          ],
+        })
+        expect(db.serialize()).toEqual(before)
+        expect(mockExecute).not.toHaveBeenCalled()
+      }
+    )
+  })
+
   it('reports CSV validation failures without pretending explicit apply was a dry-run', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'shikin-csv-invalid-'))
     const file = join(dir, 'transactions.csv')

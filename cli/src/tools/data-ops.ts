@@ -12,7 +12,7 @@ import {
   FINANCE_PROFILE_SETTING_KEY,
   type ToolDefinition,
 } from './shared.js'
-import { transactionsTools } from './transactions.js'
+import { addTransactionInputSchema, prepareAddTransaction } from '../transaction-mutations.js'
 import { executeAtomicImport, type AtomicImportRow } from '../import-transactions.js'
 import type { ImportReviewDecision } from '@shikin/finance-core/imports'
 import { backupDatabase, restoreDatabase } from '../database.js'
@@ -88,6 +88,7 @@ type CsvImportPlan = {
   unsupportedHeaders: string[]
   errors: ImportValidationIssue[]
   previewRows: ImportRowOutput[]
+  atomicRows: AtomicImportRow[]
 }
 
 type CsvImportPlanResult =
@@ -100,6 +101,7 @@ type CsvImportPlanResult =
 type ImportRowPlan = {
   row: ImportRowOutput
   error?: ImportValidationIssue
+  atomicRow?: AtomicImportRow
 }
 
 type ExportTableSpec = {
@@ -134,8 +136,6 @@ const SUPPORTED_IMPORT_COLUMNS = new Set<string>([
   ...REQUIRED_IMPORT_COLUMNS,
   ...OPTIONAL_IMPORT_COLUMNS,
 ])
-
-const addTransactionTool = transactionsTools.find((tool) => tool.name === 'add-transaction')
 
 const EXPORT_TABLES: ExportTableSpec[] = [
   {
@@ -1222,7 +1222,7 @@ function createCsvImportPlan(text: string): CsvImportPlanResult {
 
   return {
     kind: 'plan',
-    plan: { dataRows, headers, unsupportedHeaders, errors, previewRows: [] },
+    plan: { dataRows, headers, unsupportedHeaders, errors, previewRows: [], atomicRows: [] },
   }
 }
 
@@ -1236,7 +1236,6 @@ async function planCsvImportRow({
   reportingTreatment,
   stagingBatchId,
   allowDuplicate,
-  importTool,
 }: {
   row: CsvRow
   rowNumber: number
@@ -1247,7 +1246,6 @@ async function planCsvImportRow({
   reportingTreatment: 'normal' | 'exclude_from_cashflow'
   stagingBatchId?: string
   allowDuplicate: boolean
-  importTool: ToolDefinition
 }): Promise<ImportRowPlan> {
   const built = buildImportRowInput({
     row,
@@ -1272,7 +1270,7 @@ async function planCsvImportRow({
     }
   }
 
-  const parsedInput = importTool.schema.safeParse(built.input)
+  const parsedInput = addTransactionInputSchema.safeParse(built.input)
   if (!parsedInput.success) {
     const messages = parsedInput.error.issues.map((issue) => issue.message)
     const error = { row: rowNumber, lineNumber: row.lineNumber, messages }
@@ -1287,7 +1285,12 @@ async function planCsvImportRow({
     }
   }
 
-  const validatedInput = parsedInput.data as ImportTransactionInput
+  const validatedInput: ImportTransactionInput = {
+    ...parsedInput.data,
+    accountId: built.input.accountId,
+    date: built.input.date,
+    type: built.input.type,
+  }
   const duplicate = findDuplicateImportTransaction(validatedInput, built.externalId)
   if (duplicate && !allowDuplicate) {
     return {
@@ -1308,12 +1311,13 @@ async function planCsvImportRow({
     }
   }
 
-  const dryRunResult = await importTool.execute({
-    ...validatedInput,
-    allowDuplicate: allowDuplicate ? true : undefined,
+  const prepared = prepareAddTransaction({
+    ...parsedInput.data,
+    dryRun: true,
+    allowDuplicate,
   })
-  if (dryRunResult?.success === false) {
-    const messages = [String(dryRunResult.message ?? 'Row failed validation.')]
+  if (!prepared.success) {
+    const messages = [String(prepared.message ?? 'Row failed validation.')]
     const error = { row: rowNumber, lineNumber: row.lineNumber, messages }
     return {
       error,
@@ -1327,6 +1331,26 @@ async function planCsvImportRow({
   }
 
   return {
+    atomicRow: {
+      row: rowNumber,
+      lineNumber: row.lineNumber,
+      externalId: built.externalId,
+      input: {
+        accountId: validatedInput.accountId,
+        amountCentavos: prepared.amountCentavos,
+        type: validatedInput.type,
+        description: validatedInput.description,
+        category: validatedInput.category,
+        date: validatedInput.date,
+        notes: validatedInput.notes,
+        status: validatedInput.status,
+        source: validatedInput.source,
+        note: validatedInput.note,
+        ledgerTreatment: validatedInput.ledgerTreatment,
+        reportingTreatment: validatedInput.reportingTreatment,
+        stagingBatchId: validatedInput.stagingBatchId,
+      },
+    },
     row: {
       row: rowNumber,
       lineNumber: row.lineNumber,
@@ -1339,7 +1363,7 @@ async function planCsvImportRow({
             duplicateOverride: importDuplicateOverride(duplicate),
           }
         : potentialDuplicateFields(duplicate)),
-      preview: dryRunResult.wouldCreate ?? dryRunResult,
+      preview: prepared.preview,
     },
   }
 }
@@ -1353,7 +1377,6 @@ async function planCsvImportRows({
   reportingTreatment,
   stagingBatchId,
   allowDuplicate,
-  importTool,
 }: {
   dataRows: CsvRow[]
   headers: string[]
@@ -1363,10 +1386,14 @@ async function planCsvImportRows({
   reportingTreatment: 'normal' | 'exclude_from_cashflow'
   stagingBatchId?: string
   allowDuplicate: boolean
-  importTool: ToolDefinition
-}): Promise<{ previewRows: ImportRowOutput[]; errors: ImportValidationIssue[] }> {
+}): Promise<{
+  previewRows: ImportRowOutput[]
+  atomicRows: AtomicImportRow[]
+  errors: ImportValidationIssue[]
+}> {
   const previewRows: ImportRowOutput[] = []
   const errors: ImportValidationIssue[] = []
+  const atomicRows: AtomicImportRow[] = []
 
   for (const [index, row] of dataRows.entries()) {
     const plannedRow = await planCsvImportRow({
@@ -1379,13 +1406,13 @@ async function planCsvImportRows({
       reportingTreatment,
       stagingBatchId,
       allowDuplicate,
-      importTool,
     })
     previewRows.push(plannedRow.row)
+    if (plannedRow.atomicRow) atomicRows.push(plannedRow.atomicRow)
     if (plannedRow.error) errors.push(plannedRow.error)
   }
 
-  return { previewRows, errors }
+  return { previewRows, atomicRows, errors }
 }
 
 async function planCsvImport({
@@ -1396,7 +1423,6 @@ async function planCsvImport({
   reportingTreatment,
   stagingBatchId,
   allowDuplicate,
-  importTool,
 }: {
   text: string
   account: ResolvedImportAccount
@@ -1405,7 +1431,6 @@ async function planCsvImport({
   reportingTreatment: 'normal' | 'exclude_from_cashflow'
   stagingBatchId?: string
   allowDuplicate: boolean
-  importTool: ToolDefinition
 }): Promise<CsvImportPlanResult> {
   const planResult = createCsvImportPlan(text)
   if (planResult.kind === 'empty' || planResult.plan.errors.length > 0) return planResult
@@ -1419,9 +1444,9 @@ async function planCsvImport({
     reportingTreatment,
     stagingBatchId,
     allowDuplicate,
-    importTool,
   })
   planResult.plan.previewRows.push(...plannedRows.previewRows)
+  planResult.plan.atomicRows.push(...plannedRows.atomicRows)
   planResult.plan.errors.push(...plannedRows.errors)
   return planResult
 }
@@ -1813,14 +1838,6 @@ const importTransactions: ToolDefinition = {
     })
     if (requestFailure) return requestFailure
 
-    if (!addTransactionTool) {
-      return {
-        success: false,
-        reason: 'import_tool_unavailable',
-        message: 'add-transaction tool is unavailable.',
-      }
-    }
-
     const resolvedAccount = resolveAccountId(accountId, account)
     if (!resolvedAccount.success) return resolvedAccount
 
@@ -1835,7 +1852,6 @@ const importTransactions: ToolDefinition = {
       reportingTreatment,
       stagingBatchId,
       allowDuplicate: true,
-      importTool: addTransactionTool,
     })
     if (planResult.kind === 'empty') {
       return {
@@ -1856,33 +1872,10 @@ const importTransactions: ToolDefinition = {
         plan,
       })
     }
-    const atomicRows: AtomicImportRow[] = plan.previewRows.map((previewRow) => {
-      const plannedInput = previewRow.input as ImportTransactionInput
-      return {
-        row: previewRow.row as number,
-        lineNumber: previewRow.lineNumber as number,
-        externalId: typeof previewRow.externalId === 'string' ? previewRow.externalId : null,
-        input: {
-          accountId: plannedInput.accountId,
-          amountCentavos: toCentavos(plannedInput.amount),
-          type: plannedInput.type,
-          description: plannedInput.description,
-          category: plannedInput.category,
-          date: plannedInput.date,
-          notes: plannedInput.notes,
-          status: plannedInput.status,
-          source: plannedInput.source,
-          note: plannedInput.note,
-          ledgerTreatment: plannedInput.ledgerTreatment,
-          reportingTreatment: plannedInput.reportingTreatment,
-          stagingBatchId: plannedInput.stagingBatchId,
-        },
-      }
-    })
     try {
       const atomicResult = executeAtomicImport({
         rawContent: fileContents.text,
-        rows: atomicRows,
+        rows: plan.atomicRows,
         options: {
           accountId: resolvedAccount.id,
           accountCurrency: resolvedAccount.currency,

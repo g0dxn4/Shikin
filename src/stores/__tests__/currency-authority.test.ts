@@ -67,7 +67,7 @@ describe('currency authority identity boundaries', () => {
     ).toBe('USD|r1')
   })
 
-  it('keeps reporting stricter than exact-key consumers on an equivalent history reload', () => {
+  it('shares exact-key currentness with reporting on an equivalent history reload', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-18T12:00:00Z'))
     const manualRates = [rate('r1')]
@@ -90,10 +90,8 @@ describe('currency authority identity boundaries', () => {
         manualRates: [...context.manualRates],
       })
     ).toBe('USD|r1')
-    expect(reportingContextIsCurrent(context)).toBe(false)
-    expect(() => assertReportingContextCurrent(context)).toThrow(
-      'Currency authority changed; refresh the report.'
-    )
+    expect(reportingContextIsCurrent(context)).toBe(true)
+    expect(() => assertReportingContextCurrent(context)).not.toThrow()
 
     useCurrencyStore.setState({ mainCurrency: 'MXN', manualRates })
     expect(reportingContextIsCurrent(context)).toBe(false)

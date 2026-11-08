@@ -23,11 +23,11 @@ type CurrencyAuthorityState = Pick<
 
 /**
  * Exact main-currency and ordered immutable history-ID identity; no normalization.
- * Consumers retain their own subscription/request guards. Reporting freshness
- * separately compares the history array by reference, not this key.
+ * Equivalent reloads remain current; consumers retain their pinned dates and
+ * independent subscription/request/period guards. Rate IDs are immutable evidence.
  */
 export function currencyAuthorityKey(
-  state: Pick<CurrencyState, 'mainCurrency' | 'manualRates'>
+  state: Pick<CapturedCurrencyAuthority, 'mainCurrency' | 'manualRates'>
 ): string {
   return `${state.mainCurrency ?? ''}|${state.manualRates.map((rate) => rate.id).join(',')}`
 }

@@ -8,6 +8,7 @@ import {
 } from '@shikin/finance-core/fx'
 import { query } from '@/lib/database'
 import { useCurrencyStore } from '@/stores/currency-store'
+import { currencyAuthorityKey } from '@/stores/currency-authority'
 import type { LedgerTreatment, ReportingTreatment, TransactionKind } from '@/types/database'
 
 /** Immutable authority captured before any asynchronous read. No live store methods. */
@@ -22,7 +23,7 @@ export function captureReportingContext(): ReportingContext {
 }
 export function reportingContextIsCurrent(context: ReportingContext): boolean {
   const state = useCurrencyStore.getState()
-  return state.mainCurrency === context.mainCurrency && state.manualRates === context.manualRates
+  return currencyAuthorityKey(state) === currencyAuthorityKey(context)
 }
 export function assertReportingContextCurrent(context: ReportingContext): void {
   if (!reportingContextIsCurrent(context))

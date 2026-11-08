@@ -251,3 +251,95 @@ it.each([false, true])(
     })
   }
 )
+
+it.each([
+  { change: 'unchanged', publishes: true },
+  { change: 'equivalent reload', publishes: true },
+  { change: 'appended correction', publishes: false },
+  { change: 'reordered history', publishes: false },
+  { change: 'lost authority', publishes: false },
+])('pins delayed insights publication after $change', async ({ change, publishes }) => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-04-18T12:00:00Z'))
+  const r1 = {
+    id: 'r1',
+    fromCurrency: 'EUR',
+    toCurrency: 'USD',
+    rateDecimal: '2',
+    effectiveFrom: '2000-01-01',
+    supersedesRateId: null,
+    createdAt: '2000-01-01',
+    sourceNote: null,
+  }
+  const r2 = { ...r1, id: 'r2', rateDecimal: '3', effectiveFrom: '2026-05-01' }
+  resetStore()
+  useCurrencyStore.setState({ mainCurrency: 'USD', manualRates: [r1, r2] })
+  const publications: unknown[] = []
+  const unsubscribe = useSpendingInsightsStore.subscribe((state) => {
+    publications.push([state.isLoading, state.complete, state.momCurrentTotal])
+  })
+  try {
+    let release!: () => void
+    const pending = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mockQuery.mockReset()
+    mockQuery.mockImplementation(async () => {
+      await pending
+      return [row({ date: '2026-04-18', currency: 'EUR' })]
+    })
+    const request = useSpendingInsightsStore.getState().loadComparisons()
+    vi.setSystemTime(new Date('2026-05-01T12:00:00Z'))
+    if (change === 'equivalent reload')
+      useCurrencyStore.setState({ manualRates: [{ ...r1 }, { ...r2 }] })
+    if (change === 'appended correction')
+      useCurrencyStore.setState({
+        manualRates: [r1, r2, { ...r1, id: 'r3', supersedesRateId: 'r1', rateDecimal: '4' }],
+      })
+    if (change === 'reordered history') useCurrencyStore.setState({ manualRates: [r2, r1] })
+    if (change === 'lost authority')
+      useCurrencyStore.setState({ mainCurrency: null, manualRates: [] })
+    release()
+    await request
+
+    if (publishes) {
+      expect(publications).toEqual([
+        [true, false, null],
+        [true, true, 20000],
+        [false, true, 20000],
+      ])
+      expect(useSpendingInsightsStore.getState()).toMatchObject({
+        authority: { mainCurrency: 'USD', today: '2026-04-18' },
+        currency: 'USD',
+        momComparisons: [{ categoryName: 'Food', current: 20000, previous: 20000 }],
+        momCurrentTotal: 20000,
+        momPreviousTotal: 20000,
+        yoyCurrentTotal: 20000,
+        yoyPreviousTotal: 20000,
+        reason: null,
+        error: null,
+      })
+    } else {
+      expect(publications).toEqual([
+        [true, false, null],
+        [false, false, null],
+      ])
+      expect(useSpendingInsightsStore.getState()).toMatchObject({
+        authority: null,
+        momComparisons: [],
+        momCurrentTotal: null,
+        reason: null,
+        error: null,
+      })
+    }
+    expect(mockQuery.mock.calls.map(([, params]) => params)).toEqual([
+      ['2026-04-01', '2026-04-30'],
+      ['2026-03-01', '2026-03-31'],
+      ['2025-04-01', '2025-04-30'],
+      ['2026-01-01', '2026-03-31'],
+    ])
+  } finally {
+    unsubscribe()
+    vi.useRealTimers()
+  }
+})

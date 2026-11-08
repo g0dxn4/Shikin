@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 function hasExactClass(root: HTMLElement, className: string) {
   return [root, ...root.querySelectorAll('*')].some((element) =>
@@ -246,5 +246,73 @@ describe('Forecast native view', () => {
     render(<Forecast />)
     expect(await screen.findByText('Forecast read failed')).toBeInTheDocument()
     expect(await screen.findByText('Subscription read failed')).toBeInTheDocument()
+  })
+
+  it.each([
+    { change: 'unchanged', requests: 1, visible: true, loading: false },
+    { change: 'equivalent reload', requests: 1, visible: true, loading: false },
+    { change: 'setup draft', requests: 1, visible: true, loading: false },
+    { change: 'main currency', requests: 2, visible: false, loading: true },
+    { change: 'added ID', requests: 2, visible: false, loading: true },
+    { change: 'removed ID', requests: 2, visible: false, loading: true },
+    { change: 'reordered IDs', requests: 2, visible: false, loading: true },
+    { change: 'lost authority', requests: 2, visible: false, loading: true },
+  ])('pins the rendered forecast after $change', async ({ change, requests, visible, loading }) => {
+    const r1 = {
+      id: 'r1',
+      fromCurrency: 'EUR',
+      toCurrency: 'USD',
+      rateDecimal: '2',
+      effectiveFrom: '2026-01-01',
+      supersedesRateId: null,
+      createdAt: '2026-01-01',
+      sourceNote: null,
+    }
+    const r2 = { ...r1, id: 'r2', effectiveFrom: '2026-02-01' }
+    useCurrencyStore.setState({ manualRates: [r1, r2] })
+    useForecastStore.setState({ selectedRange: 60, accountId: 'eur' })
+    const initialForecast = { ...forecast, authority: captureReportingContext() }
+    let release!: (value: typeof initialForecast) => void
+    const replacement = new Promise<typeof initialForecast>((resolve) => {
+      release = resolve
+    })
+    vi.mocked(generateCashFlowForecast)
+      .mockResolvedValueOnce(initialForecast)
+      .mockImplementation(() => replacement)
+    const page = render(<Forecast />)
+    try {
+      await screen.findByTestId('forecast-hero')
+      expect(generateCashFlowForecast).toHaveBeenCalledTimes(1)
+      expect(useForecastStore.getState().isLoading).toBe(false)
+      expect(screen.getByRole('table', { name: 'chart.title' })).toHaveTextContent('$100.00')
+
+      act(() => {
+        if (change === 'unchanged') useCurrencyStore.setState({ isLoading: true })
+        if (change === 'equivalent reload')
+          useCurrencyStore.setState({ manualRates: [{ ...r1 }, { ...r2 }] })
+        if (change === 'setup draft') useCurrencyStore.setState({ preferredCurrency: 'MXN' })
+        if (change === 'main currency') useCurrencyStore.setState({ mainCurrency: 'MXN' })
+        if (change === 'added ID')
+          useCurrencyStore.setState({ manualRates: [r1, r2, { ...r2, id: 'r3' }] })
+        if (change === 'removed ID') useCurrencyStore.setState({ manualRates: [r1] })
+        if (change === 'reordered IDs') useCurrencyStore.setState({ manualRates: [r2, r1] })
+        if (change === 'lost authority')
+          useCurrencyStore.setState({ mainCurrency: null, manualRates: [] })
+      })
+
+      expect(generateCashFlowForecast).toHaveBeenCalledTimes(requests)
+      expect(screen.queryByTestId('forecast-hero') !== null).toBe(visible)
+      expect(useForecastStore.getState().isLoading).toBe(loading)
+      expect(useForecastStore.getState()).toMatchObject({ selectedRange: 60, accountId: 'eur' })
+      expect(generateCashFlowForecast).toHaveBeenLastCalledWith(60, 0, { accountId: 'eur' })
+      if (visible) {
+        expect(useForecastStore.getState().forecast).toBe(initialForecast)
+        expect(screen.getByRole('table', { name: 'chart.title' })).toHaveTextContent('$100.00')
+        expect(screen.getByRole('table', { name: 'chart.title' })).toHaveTextContent('2028-01-01')
+      }
+    } finally {
+      page.unmount()
+      await act(async () => release(initialForecast))
+    }
   })
 })

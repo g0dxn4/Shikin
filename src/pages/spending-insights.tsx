@@ -21,6 +21,7 @@ import { ComparisonBars } from '@/components/insights/comparison-bars'
 import { useSpendingInsightsStore } from '@/stores/spending-insights-store'
 import type { SpendingComparison, SpendingInsight } from '@/stores/spending-insights-store'
 import { useCurrencyStore } from '@/stores/currency-store'
+import { currencyAuthorityKey } from '@/stores/currency-authority'
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import dayjs from 'dayjs'
@@ -48,7 +49,8 @@ export function SpendingInsights() {
     error,
     loadComparisons,
   } = useSpendingInsightsStore()
-  const { preferredCurrency, mainCurrency, manualRates, loadRates } = useCurrencyStore()
+  const { mainCurrency, manualRates, loadRates } = useCurrencyStore()
+  const authorityKey = currencyAuthorityKey({ mainCurrency, manualRates })
 
   useEffect(() => {
     void loadRates().catch(() => {})
@@ -56,12 +58,10 @@ export function SpendingInsights() {
 
   useEffect(() => {
     void loadComparisons()
-  }, [loadComparisons, preferredCurrency, mainCurrency, manualRates])
+  }, [loadComparisons, authorityKey])
 
   const complete =
-    storedComplete &&
-    authority?.mainCurrency === mainCurrency &&
-    authority?.manualRates === manualRates
+    storedComplete && authority !== null && currencyAuthorityKey(authority) === authorityKey
   const active =
     mode === 'yoy'
       ? {

@@ -15,6 +15,12 @@ const mockLoadComparisons = vi.fn()
 
 const mockLoadRates = vi.fn().mockResolvedValue(undefined)
 const mockManualRates: DatedExchangeRate[] = []
+let mockCurrencyState = {
+  preferredCurrency: 'USD',
+  mainCurrency: 'USD' as string | null,
+  manualRates: mockManualRates,
+  loadRates: mockLoadRates,
+}
 
 let mockState = {
   evidence: [],
@@ -62,12 +68,7 @@ vi.mock('react-i18next', () => ({
 }))
 
 vi.mock('@/stores/currency-store', () => ({
-  useCurrencyStore: () => ({
-    preferredCurrency: 'USD',
-    mainCurrency: 'USD',
-    manualRates: mockManualRates,
-    loadRates: mockLoadRates,
-  }),
+  useCurrencyStore: () => mockCurrencyState,
 }))
 
 vi.mock('@/stores/spending-insights-store', () => ({
@@ -99,8 +100,15 @@ function renderPage() {
 describe('SpendingInsights', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockCurrencyState = {
+      preferredCurrency: 'USD',
+      mainCurrency: 'USD',
+      manualRates: mockManualRates,
+      loadRates: mockLoadRates,
+    }
     mockState = {
       ...mockState,
+      authority: { mainCurrency: 'USD', manualRates: mockManualRates, today: '2026-06-18' },
       isLoading: false,
       complete: true,
       error: null,
@@ -201,5 +209,75 @@ describe('SpendingInsights', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.queryByText('spendingInsights.loadError')).not.toBeInTheDocument()
     expect(screen.queryByText('spendingInsights.incompleteTotals')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    { change: 'unchanged', requests: 1, visible: true },
+    { change: 'equivalent reload', requests: 1, visible: true },
+    { change: 'setup draft', requests: 1, visible: true },
+    { change: 'main currency', requests: 2, visible: false },
+    { change: 'added ID', requests: 2, visible: false },
+    { change: 'removed ID', requests: 2, visible: false },
+    { change: 'reordered IDs', requests: 2, visible: false },
+    { change: 'lost authority', requests: 2, visible: false },
+  ])('pins rendered insights after $change', ({ change, requests, visible }) => {
+    const r1 = {
+      id: 'r1',
+      fromCurrency: 'EUR',
+      toCurrency: 'USD',
+      rateDecimal: '2',
+      effectiveFrom: '2026-01-01',
+      supersedesRateId: null,
+      createdAt: '2026-01-01',
+      sourceNote: null,
+    }
+    const r2 = { ...r1, id: 'r2', effectiveFrom: '2026-02-01' }
+    mockCurrencyState = { ...mockCurrencyState, manualRates: [r1, r2] }
+    const authority = {
+      mainCurrency: 'USD',
+      manualRates: mockCurrencyState.manualRates,
+      today: '2026-06-18',
+    }
+    mockState = { ...mockState, authority, momCurrentTotal: 20000 }
+    const page = renderPage()
+    expect(mockLoadComparisons).toHaveBeenCalledTimes(1)
+    expect(
+      screen.getByRole('table', { name: 'spendingInsights.comparisonTableCaption' })
+    ).toHaveTextContent('$200.00')
+
+    if (change === 'equivalent reload')
+      mockCurrencyState = { ...mockCurrencyState, manualRates: [{ ...r1 }, { ...r2 }] }
+    if (change === 'setup draft')
+      mockCurrencyState = { ...mockCurrencyState, preferredCurrency: 'MXN' }
+    if (change === 'main currency')
+      mockCurrencyState = { ...mockCurrencyState, mainCurrency: 'MXN' }
+    if (change === 'added ID')
+      mockCurrencyState = { ...mockCurrencyState, manualRates: [r1, r2, { ...r2, id: 'r3' }] }
+    if (change === 'removed ID') mockCurrencyState = { ...mockCurrencyState, manualRates: [r1] }
+    if (change === 'reordered IDs')
+      mockCurrencyState = { ...mockCurrencyState, manualRates: [r2, r1] }
+    if (change === 'lost authority')
+      mockCurrencyState = { ...mockCurrencyState, mainCurrency: null, manualRates: [] }
+    page.rerender(
+      <MemoryRouter>
+        <SpendingInsights />
+      </MemoryRouter>
+    )
+
+    expect(mockLoadComparisons).toHaveBeenCalledTimes(requests)
+    expect(
+      screen.queryByRole('table', { name: 'spendingInsights.comparisonTableCaption' }) !== null
+    ).toBe(visible)
+    expect(screen.queryByRole('alert') === null).toBe(visible)
+    expect(mockLoadRates).toHaveBeenCalledTimes(1)
+    expect(mockState.authority).toBe(authority)
+    if (visible) {
+      expect(
+        screen.getByRole('table', { name: 'spendingInsights.comparisonTableCaption' })
+      ).toHaveTextContent('$200.00')
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    }
+    if (change === 'lost authority')
+      expect(screen.getByRole('alert')).toHaveTextContent('reportingFx.unconfigured')
   })
 })

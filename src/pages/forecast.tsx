@@ -3,6 +3,7 @@ import { ErrorBanner } from '@/components/ui/error-banner'
 import { ForecastProjectionChart } from '@/components/planning-scenarios/forecast-projection-chart'
 import { useAccountStore } from '@/stores/account-store'
 import { useCurrencyStore } from '@/stores/currency-store'
+import { currencyAuthorityKey } from '@/stores/currency-authority'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, Info, TrendingUp } from 'lucide-react'
@@ -99,9 +100,9 @@ export function Forecast() {
   } = useForecastStore()
   const { accounts, fetch: fetchAccounts, fetchError: accountsError } = useAccountStore()
   const { preferredCurrency, mainCurrency, manualRates } = useCurrencyStore()
+  const authorityKey = currencyAuthorityKey({ mainCurrency, manualRates })
   const forecast =
-    storedForecast?.authority.mainCurrency === mainCurrency &&
-    storedForecast.authority.manualRates === manualRates
+    storedForecast && currencyAuthorityKey(storedForecast.authority) === authorityKey
       ? storedForecast
       : null
   const money = (amount: number) => formatMoney(amount, forecast?.currency ?? preferredCurrency)
@@ -111,7 +112,7 @@ export function Forecast() {
 
   useEffect(() => {
     generateForecast()
-  }, [generateForecast, preferredCurrency, mainCurrency, manualRates])
+  }, [generateForecast, authorityKey])
 
   const ranges = [30, 60, 90] as const
   const endPoint = forecast?.complete ? forecast.points[forecast.points.length - 1] : undefined

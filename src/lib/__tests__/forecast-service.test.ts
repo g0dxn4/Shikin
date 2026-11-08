@@ -283,3 +283,82 @@ describe('captured authority races', () => {
     }
   )
 })
+
+describe('delayed forecast authority identity', () => {
+  it.each([
+    { change: 'unchanged', publishes: true },
+    { change: 'equivalent reload', publishes: true },
+    { change: 'appended correction', publishes: false },
+    { change: 'reordered history', publishes: false },
+    { change: 'lost authority', publishes: false },
+  ])('pins publication and money after $change', async ({ change, publishes }) => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-18T12:00:00Z'))
+    try {
+      const r1 = {
+        id: 'r1',
+        fromCurrency: 'MXN',
+        toCurrency: 'USD',
+        rateDecimal: '0.05',
+        effectiveFrom: '2026-01-01',
+        supersedesRateId: null,
+        createdAt: '2026-01-01',
+        sourceNote: null,
+      }
+      const r2 = { ...r1, id: 'r2', rateDecimal: '0.1', effectiveFrom: '2026-04-19' }
+      useCurrencyStore.setState({ mainCurrency: 'USD', manualRates: [r1, r2] })
+      let release!: (rows: unknown[]) => void
+      mockQuery.mockReset()
+      mockQuery
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              release = resolve
+            })
+        )
+        .mockResolvedValueOnce([
+          {
+            id: 'expense',
+            type: 'expense',
+            date: '2026-04-18',
+            amount: 9000,
+            currency: 'MXN',
+          },
+        ])
+        .mockResolvedValueOnce([{ amount: 3000, currency: 'MXN', billing_cycle: 'monthly' }])
+      const request = generateCashFlowForecast(1)
+      vi.setSystemTime(new Date('2026-04-19T12:00:00Z'))
+      if (change === 'equivalent reload')
+        useCurrencyStore.setState({ manualRates: [{ ...r1 }, { ...r2 }] })
+      if (change === 'appended correction')
+        useCurrencyStore.setState({
+          manualRates: [r1, r2, { ...r1, id: 'r3', supersedesRateId: 'r1', rateDecimal: '0.06' }],
+        })
+      if (change === 'reordered history') useCurrencyStore.setState({ manualRates: [r2, r1] })
+      if (change === 'lost authority')
+        useCurrencyStore.setState({ mainCurrency: null, manualRates: [] })
+      release([{ balance: 20000, currency: 'MXN' }])
+
+      if (publishes) {
+        await expect(request).resolves.toMatchObject({
+          complete: true,
+          currency: 'USD',
+          currentBalance: 1000,
+          dailyBurnRate: 5,
+          dailyIncome: 0,
+          estimateAsOf: '2026-04-18',
+          evidence: { totalCentavos: 450 },
+          points: [
+            { date: '2026-04-18', projected: 1000, optimistic: 1000, pessimistic: 1000 },
+            { date: '2026-04-19', projected: 995, optimistic: 996, pessimistic: 994 },
+          ],
+        })
+      } else {
+        await expect(request).rejects.toThrow('Currency authority changed; refresh the report.')
+      }
+      expect(mockQuery.mock.calls[1]?.[1]).toEqual(['2026-01-18', '2026-04-18'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

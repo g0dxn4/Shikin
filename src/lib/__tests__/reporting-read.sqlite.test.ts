@@ -1,9 +1,16 @@
 // @vitest-environment node
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
-const state = vi.hoisted(() => ({ db: null as Database.Database | null }))
+const state = vi.hoisted(() => ({
+  db: null as Database.Database | null,
+  readGate: null as Promise<void> | null,
+}))
 vi.mock('@/lib/database', () => ({
-  query: async (sql: string, params: unknown[] = []) => state.db!.prepare(sql).all(...params),
+  query: async (sql: string, params: unknown[] = []) => {
+    const rows = state.db!.prepare(sql).all(...params)
+    if (state.readGate) await state.readGate
+    return rows
+  },
   execute: vi.fn(),
   withTransaction: async (fn: (tx: unknown) => Promise<unknown>) => {
     const { query, execute } = await import('@/lib/database')
@@ -25,6 +32,7 @@ import { assertReportingReadComplete, CATEGORY_ALLOCATION_CTE } from '../reporti
 import { aggregateHeatmapSpending, fetchHeatmapLedgerRows } from '../spending-heatmap'
 
 beforeEach(() => {
+  state.readGate = null
   vi.useFakeTimers()
   vi.setSystemTime(new Date('2026-06-18T12:00:00Z'))
   const db = (state.db = new Database(':memory:'))
@@ -399,6 +407,92 @@ it('uses local today for current stocks and future subscription estimates, but h
     dailyIncome: null,
     points: [],
   })
+})
+
+it.each([
+  { change: 'unchanged', publishes: true },
+  { change: 'equivalent reload', publishes: true },
+  { change: 'appended correction', publishes: false },
+  { change: 'reordered history', publishes: false },
+  { change: 'main currency', publishes: false },
+  { change: 'lost authority', publishes: false },
+])('pins delayed SQLite forecast and insights after $change', async ({ change, publishes }) => {
+  seedDatedRows()
+  seedServiceTables()
+  state.db!.exec(
+    `INSERT INTO subscriptions VALUES ('sub',30000,'USD','monthly','usd',1,'2026-07-20');`
+  )
+  let release!: () => void
+  state.readGate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const forecast = generateCashFlowForecast(1, 0, { accountId: 'usd' })
+  const insights = useSpendingInsightsStore.getState().loadComparisons()
+  const rates = useCurrencyStore.getState().manualRates
+  if (change === 'equivalent reload')
+    useCurrencyStore.setState({ manualRates: rates.map((rate) => ({ ...rate })) })
+  if (change === 'appended correction')
+    useCurrencyStore.setState({
+      manualRates: [
+        ...rates,
+        { ...manualRate('r19', '19', '2026-06-15'), supersedesRateId: 'r18' },
+      ],
+    })
+  if (change === 'reordered history')
+    useCurrencyStore.setState({ manualRates: [...rates].reverse() })
+  if (change === 'main currency') useCurrencyStore.setState({ mainCurrency: 'USD' })
+  if (change === 'lost authority')
+    useCurrencyStore.setState({ mainCurrency: null, manualRates: [] })
+  vi.setSystemTime(new Date('2026-07-01T12:00:00Z'))
+  release()
+
+  if (publishes) {
+    await expect(forecast).resolves.toMatchObject({
+      complete: true,
+      currency: 'MXN',
+      currentBalance: 180000,
+      dailyBurnRate: 18000,
+      dailyIncome: 0,
+      estimateAsOf: '2026-06-18',
+      evidence: { totalCentavos: 350000 },
+      points: [
+        { date: '2026-06-18', projected: 180000, optimistic: 180000, pessimistic: 180000 },
+        { date: '2026-06-19', projected: 162000, optimistic: 165600, pessimistic: 158400 },
+      ],
+    })
+  } else {
+    await expect(forecast).rejects.toThrow('Currency authority changed; refresh the report.')
+  }
+  await insights
+  if (publishes) {
+    expect(useSpendingInsightsStore.getState()).toMatchObject({
+      complete: true,
+      isLoading: false,
+      currency: 'MXN',
+      authority: { today: '2026-06-18' },
+      momCurrentTotal: 350000,
+      momPreviousTotal: 0,
+      momComparisons: [{ categoryName: 'Food', current: 350000, previous: 0 }],
+      reason: null,
+      error: null,
+    })
+  } else {
+    expect(useSpendingInsightsStore.getState()).toMatchObject({
+      complete: false,
+      isLoading: false,
+      authority: null,
+      momCurrentTotal: null,
+      momComparisons: [],
+      reason: null,
+      error: null,
+    })
+  }
+  expect(
+    state.db!.prepare('SELECT id, amount, currency FROM transactions ORDER BY id').all()
+  ).toEqual([
+    { id: 'after', amount: 10000, currency: 'USD' },
+    { id: 'before', amount: 10000, currency: 'USD' },
+  ])
 })
 
 it('health compares the durable native plan and scoped usage without relabeling main valuations', async () => {

@@ -6,6 +6,7 @@ import type { TransactionPageRow } from '@/lib/transaction-query'
 import { TransactionFxEvidenceDetails } from './transaction-fx-evidence'
 import { LegacyImportIdentityAction } from './legacy-import-identity-dialog'
 import {
+  canDeleteTransaction,
   isEligibleLegacyImportIdentityRow,
   transactionProtection,
 } from './transaction-inspection-eligibility'
@@ -113,7 +114,7 @@ export function TransactionInspection({
             />
           </div>
         )}
-        {!protection && !transaction.is_finalized_statement && !transaction.finalization_id && (
+        {canDeleteTransaction(transaction) && (
           <Button
             type="button"
             variant="outline"

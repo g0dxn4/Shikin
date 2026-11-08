@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import dayjs from 'dayjs'
 import { query } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
-import type { NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
 import {
   getOverviewComparisonDateRange,
   type AccountBalanceSnapshot,
+  type NetWorthPeriod,
 } from '@/components/dashboard/overview-account-comparison-helpers'
 
 interface ComparisonHistoryState {

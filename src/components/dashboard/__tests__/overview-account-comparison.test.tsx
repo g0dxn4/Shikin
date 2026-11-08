@@ -3,8 +3,10 @@ import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { OverviewAccountComparison } from '@/components/dashboard/overview-account-comparison'
-import type { ComparisonDisplayMode } from '@/components/dashboard/overview-account-comparison-helpers'
-import type { NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
+import type {
+  ComparisonDisplayMode,
+  NetWorthPeriod,
+} from '@/components/dashboard/overview-account-comparison-helpers'
 import { buildRecordedBalanceModel } from '@/components/charts/recorded-balance-model'
 import enDashboard from '@/i18n/locales/en/dashboard.json'
 import esDashboard from '@/i18n/locales/es/dashboard.json'

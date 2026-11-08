@@ -17,7 +17,7 @@ import {
 } from '@/lib/constants'
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
-import type { NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
+import type { NetWorthPeriod } from '@/components/dashboard/overview-account-comparison-helpers'
 import {
   stepSummarySelection,
   summaryDateTickBudget,

@@ -27,7 +27,10 @@ import {
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import type { Account } from '@/types/database'
-import type { ComparisonDisplayMode } from '@/components/dashboard/overview-account-comparison-helpers'
+import type {
+  ComparisonDisplayMode,
+  NetWorthPeriod,
+} from '@/components/dashboard/overview-account-comparison-helpers'
 import { OverviewAccountComparison } from '@/components/dashboard/overview-account-comparison'
 import { OverviewRecordedFigure } from '@/components/dashboard/overview-recorded-figure'
 import {
@@ -35,7 +38,6 @@ import {
   type SummaryCompositionAccount,
 } from '@/components/dashboard/overview-summary-visual'
 
-export type NetWorthPeriod = 'month' | '3m' | '6m' | 'ytd' | '1y' | 'all'
 type OverviewView = 'summary' | 'history' | 'comparison'
 
 const OVERVIEW_PERIODS: NetWorthPeriod[] = ['month', '3m', '6m', 'ytd', '1y', 'all']

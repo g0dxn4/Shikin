@@ -25,13 +25,13 @@ import {
 import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import type { Account } from '@/types/database'
-import type { NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
 import {
   prepareAccountComparison,
   reconcileComparisonSelection,
   type ComparisonChartPoint,
   type ComparisonDisplayMode,
   type ConvertToPreferred,
+  type NetWorthPeriod,
   type PreparedAccountComparison,
 } from '@/components/dashboard/overview-account-comparison-helpers'
 import { useOverviewAccountComparison } from '@/components/dashboard/use-overview-account-comparison'

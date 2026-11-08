@@ -16,6 +16,7 @@ All notable changes to Shikin are documented in this file.
 - The bulk consumption-classification dialog's session logic (context, preview, apply, receipt) lives in a feature hook (`use-consumption-bulk-session.ts`), separate from allocation rendering. Reviewed payloads and apply protections are unchanged.
 - The statement-import dialog's session state and actions live in a feature hook (`use-statement-import-session.ts`). Reviewed-input binding, draft recovery, and commit-after-close refresh are unchanged.
 - Transaction full-edit, inline-review, delete, and metadata-only availability come from operation-specific selectors in `transaction-inspection-eligibility.ts` instead of inline page and dialog conditions. Availability and protection-message precedence are unchanged.
+- The dashboard `NetWorthPeriod` type lives in `overview-account-comparison-helpers.ts`, removing the only file-level import cycle in the app (type-only). No runtime change.
 
 ## [1.2.1] - 2026-10-17
 

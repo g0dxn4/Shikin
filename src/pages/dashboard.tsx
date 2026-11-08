@@ -24,7 +24,8 @@ import { buildDashboardAnalytics, type ConversionState } from '@/lib/dashboard-a
 import { currencyAuthorityKey } from '@/stores/currency-authority'
 import { useDashboardSplits } from '@/components/dashboard/use-dashboard-splits'
 import { SpendingAnalytics } from '@/components/dashboard/spending-analytics'
-import { OverviewNetWorth, type NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
+import { OverviewNetWorth } from '@/components/dashboard/overview-net-worth'
+import type { NetWorthPeriod } from '@/components/dashboard/overview-account-comparison-helpers'
 import { OverviewCategories } from '@/components/dashboard/overview-categories'
 import { GoalIcon } from '@/components/goals/goal-icon'
 

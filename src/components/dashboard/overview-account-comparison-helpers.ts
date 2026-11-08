@@ -1,5 +1,4 @@
 import dayjs, { type Dayjs } from 'dayjs'
-import type { NetWorthPeriod } from '@/components/dashboard/overview-net-worth'
 
 export interface AccountBalanceSnapshot {
   date: string
@@ -33,6 +32,7 @@ export type ConvertToPreferred = (
 ) => PreferredConversionResult
 
 export type ComparisonDisplayMode = 'balance' | 'change'
+export type NetWorthPeriod = 'month' | '3m' | '6m' | 'ytd' | '1y' | 'all'
 
 export interface ComparisonChartPoint {
   date: string

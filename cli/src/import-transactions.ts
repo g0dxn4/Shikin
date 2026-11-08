@@ -1,6 +1,9 @@
 import {
   canonicalReviewDecisions,
+  existingImportEvidenceFingerprint,
+  hasDistinctSameSourceExternalIdentity,
   importPlanToken,
+  matchesImportReviewDecision,
   prepareImportIdentities,
   sha256Fingerprint,
   type ImportReviewDecision,
@@ -97,24 +100,20 @@ function currentState(): { databaseId: string; revision: number } {
 }
 
 function existingEvidenceFingerprint(row: ExistingImportRow): string {
-  return sha256Fingerprint(
-    JSON.stringify({
-      version: 1,
-      namespace: 'shikin-existing-import-evidence',
-      id: row.id,
-      accountId: row.account_id,
-      sourceNamespace: row.import_source,
-      externalId: row.import_external_id,
-      identityFingerprint: row.import_fingerprint,
-      contentFingerprint: row.import_content_fingerprint,
-      type: row.type,
-      amountCentavos: row.amount,
-      currency: row.currency,
-      date: row.date,
-      transferToAccountId: row.transfer_to_account_id,
-      updatedAt: row.updated_at,
-    })
-  )
+  return existingImportEvidenceFingerprint({
+    id: row.id,
+    accountId: row.account_id,
+    sourceNamespace: row.import_source,
+    externalId: row.import_external_id,
+    identityFingerprint: row.import_fingerprint,
+    contentFingerprint: row.import_content_fingerprint,
+    type: row.type,
+    amountCentavos: row.amount,
+    currency: row.currency,
+    date: row.date,
+    transferToAccountId: row.transfer_to_account_id,
+    updatedAt: row.updated_at,
+  })
 }
 
 function exactIdentityRows(
@@ -157,40 +156,6 @@ function ambiguousCandidates(row: AtomicImportRow, accountCurrency: string): Exi
       row.input.date,
       row.input.date,
     ]
-  )
-}
-
-function hasDistinctSameSourceExternalIdentity(
-  row: ExistingImportRow,
-  sourceNamespace: string,
-  externalId: string | null
-): boolean {
-  const existingSource = row.import_source?.trim()
-  const incomingSource = sourceNamespace.trim()
-  const existingExternalId = row.import_external_id
-  return Boolean(
-    existingSource &&
-    incomingSource &&
-    existingSource === incomingSource &&
-    existingExternalId?.trim() &&
-    externalId?.trim() &&
-    existingExternalId !== externalId
-  )
-}
-
-function findDecision(
-  decisions: readonly ImportReviewDecision[],
-  identityKey: string,
-  contentFingerprint: string,
-  existing: ExistingImportRow
-): ImportReviewDecision | undefined {
-  const evidence = existingEvidenceFingerprint(existing)
-  return decisions.find(
-    (decision) =>
-      decision.candidateIdentityKey === identityKey &&
-      decision.candidateContentFingerprint === contentFingerprint &&
-      decision.existingTransactionId === existing.id &&
-      decision.existingEvidenceFingerprint === evidence
   )
 }
 
@@ -349,22 +314,31 @@ function planImport(request: AtomicImportRequest): ImportPlan {
       // Cross-namespace IDs and otherwise unbound legacy rows still require candidate review.
       if (
         hasDistinctSameSourceExternalIdentity(
-          possible,
+          possible.import_source,
+          possible.import_external_id,
           request.options.sourceNamespace,
           candidate.externalId
         )
       )
         continue
+      const evidence = existingEvidenceFingerprint(possible)
       const decision =
-        findDecision(decisions, identity.identityKey, identity.contentFingerprint, possible) ??
-        readPersistedDecision(identity.identityKey, identity.contentFingerprint, possible)
+        decisions.find((decision) =>
+          matchesImportReviewDecision(
+            decision,
+            identity.identityKey,
+            identity.contentFingerprint,
+            possible.id,
+            evidence
+          )
+        ) ?? readPersistedDecision(identity.identityKey, identity.contentFingerprint, possible)
       if (!decision) {
         requiredDecisions.push({
           row: candidate.row,
           candidateIdentityKey: identity.identityKey,
           candidateContentFingerprint: identity.contentFingerprint,
           existingTransactionId: possible.id,
-          existingEvidenceFingerprint: existingEvidenceFingerprint(possible),
+          existingEvidenceFingerprint: evidence,
           allowedDecisions: ['keep_existing', 'distinct'],
         })
         continue
@@ -522,11 +496,13 @@ export function executeAtomicImport(request: AtomicImportRequest): Record<string
         if (
           (request.decisions ?? []).some(
             (item) =>
-              item.candidateIdentityKey === decision.candidateIdentityKey &&
-              item.candidateContentFingerprint === decision.candidateContentFingerprint &&
-              item.existingTransactionId === decision.existingTransactionId &&
-              item.existingEvidenceFingerprint === decision.existingEvidenceFingerprint &&
-              item.decision === decision.decision
+              matchesImportReviewDecision(
+                item,
+                decision.candidateIdentityKey,
+                decision.candidateContentFingerprint,
+                decision.existingTransactionId,
+                decision.existingEvidenceFingerprint
+              ) && item.decision === decision.decision
           )
         ) {
           persistDecision(request.options.accountId, decision)

@@ -4,7 +4,10 @@ import { toCentavos } from '@/lib/money'
 import { parseStatement, type ParsedTransaction } from '@/lib/statement-parser'
 import {
   canonicalReviewDecisions,
+  existingImportEvidenceFingerprint,
+  hasDistinctSameSourceExternalIdentity,
   importPlanToken,
+  matchesImportReviewDecision,
   prepareImportIdentities,
   sha256Fingerprint,
   type ImportReviewDecision,
@@ -158,24 +161,20 @@ function statementSourceNamespace(fileName: string): string {
 }
 
 function evidenceFingerprint(row: ExistingRow): string {
-  return sha256Fingerprint(
-    JSON.stringify({
-      version: 1,
-      namespace: 'shikin-existing-import-evidence',
-      id: row.id,
-      accountId: row.account_id,
-      sourceNamespace: row.import_source,
-      externalId: row.import_external_id,
-      identityFingerprint: row.import_fingerprint,
-      contentFingerprint: row.import_content_fingerprint,
-      type: row.type,
-      amountCentavos: row.amount,
-      currency: row.currency,
-      date: row.date,
-      transferToAccountId: row.transfer_to_account_id,
-      updatedAt: row.updated_at,
-    })
-  )
+  return existingImportEvidenceFingerprint({
+    id: row.id,
+    accountId: row.account_id,
+    sourceNamespace: row.import_source,
+    externalId: row.import_external_id,
+    identityFingerprint: row.import_fingerprint,
+    contentFingerprint: row.import_content_fingerprint,
+    type: row.type,
+    amountCentavos: row.amount,
+    currency: row.currency,
+    date: row.date,
+    transferToAccountId: row.transfer_to_account_id,
+    updatedAt: row.updated_at,
+  })
 }
 
 async function validateAccount(tx: TransactionClient, accountId: string): Promise<AccountRow> {
@@ -201,24 +200,6 @@ async function validateAccount(tx: TransactionClient, accountId: string): Promis
     throw new Error(`Account ${accountId} balance is outside the safe integer range`)
   }
   return account
-}
-
-function hasDistinctSameSourceExternalIdentity(
-  row: ExistingRow,
-  sourceNamespace: string,
-  externalId: string | null
-): boolean {
-  const existingSource = row.import_source?.trim()
-  const incomingSource = sourceNamespace.trim()
-  const existingExternalId = row.import_external_id
-  return Boolean(
-    existingSource &&
-    incomingSource &&
-    existingSource === incomingSource &&
-    existingExternalId?.trim() &&
-    externalId?.trim() &&
-    existingExternalId !== externalId
-  )
 }
 
 function normalizeImportTreatment(
@@ -452,7 +433,15 @@ async function createPlan(
     for (const candidate of candidates) {
       // Only distinct IDs issued within the same namespace prove that two physical records differ.
       // Cross-namespace IDs and otherwise unbound legacy rows still require candidate review.
-      if (hasDistinctSameSourceExternalIdentity(candidate, sourceNamespace, externalId)) continue
+      if (
+        hasDistinctSameSourceExternalIdentity(
+          candidate.import_source,
+          candidate.import_external_id,
+          sourceNamespace,
+          externalId
+        )
+      )
+        continue
       const evidence = evidenceFingerprint(candidate)
       reviewCandidates.push({
         candidateIdentityKey: identity.identityKey,
@@ -474,12 +463,14 @@ async function createPlan(
           currency: candidate.currency.slice(0, 10),
         },
       })
-      const supplied = decisions.find(
-        (decision) =>
-          decision.candidateIdentityKey === identity.identityKey &&
-          decision.candidateContentFingerprint === identity.contentFingerprint &&
-          decision.existingTransactionId === candidate.id &&
-          decision.existingEvidenceFingerprint === evidence
+      const supplied = decisions.find((decision) =>
+        matchesImportReviewDecision(
+          decision,
+          identity.identityKey,
+          identity.contentFingerprint,
+          candidate.id,
+          evidence
+        )
       )
       const persisted = supplied
         ? undefined
@@ -803,13 +794,13 @@ export async function importStatementFile(
           if (
             !(options.decisions ?? []).some(
               (decision) =>
-                decision.candidateIdentityKey === reviewedDecision.candidateIdentityKey &&
-                decision.candidateContentFingerprint ===
-                  reviewedDecision.candidateContentFingerprint &&
-                decision.existingTransactionId === reviewedDecision.existingTransactionId &&
-                decision.existingEvidenceFingerprint ===
-                  reviewedDecision.existingEvidenceFingerprint &&
-                decision.decision === reviewedDecision.decision
+                matchesImportReviewDecision(
+                  decision,
+                  reviewedDecision.candidateIdentityKey,
+                  reviewedDecision.candidateContentFingerprint,
+                  reviewedDecision.existingTransactionId,
+                  reviewedDecision.existingEvidenceFingerprint
+                ) && decision.decision === reviewedDecision.decision
             )
           ) {
             continue

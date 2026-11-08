@@ -34,6 +34,21 @@ export interface ImportReviewDecision {
   decision: 'distinct' | 'keep_existing'
 }
 
+export interface ExistingImportEvidence {
+  id: string
+  accountId: string
+  sourceNamespace: string | null
+  externalId: string | null
+  identityFingerprint: string | null
+  contentFingerprint: string | null
+  type: ImportDirection
+  amountCentavos: number
+  currency: string
+  date: string
+  transferToAccountId: string | null
+  updatedAt: string | null
+}
+
 function requiredTrimmed(value: string, label: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new TypeError(`${label} must not be empty`)
   return value.trim()
@@ -168,6 +183,62 @@ export function sha256Fingerprint(value: string): string {
 
 export function importContentFingerprint(input: ImportFinancialContentInput): string {
   return sha256Fingerprint(canonicalImportFinancialContent(input))
+}
+
+/** Persisted review evidence uses stored values verbatim, including nulls and whitespace. */
+export function existingImportEvidenceFingerprint(evidence: ExistingImportEvidence): string {
+  return sha256Fingerprint(
+    JSON.stringify({
+      version: 1,
+      namespace: 'shikin-existing-import-evidence',
+      id: evidence.id,
+      accountId: evidence.accountId,
+      sourceNamespace: evidence.sourceNamespace,
+      externalId: evidence.externalId,
+      identityFingerprint: evidence.identityFingerprint,
+      contentFingerprint: evidence.contentFingerprint,
+      type: evidence.type,
+      amountCentavos: evidence.amountCentavos,
+      currency: evidence.currency,
+      date: evidence.date,
+      transferToAccountId: evidence.transferToAccountId,
+      updatedAt: evidence.updatedAt,
+    })
+  )
+}
+
+/** Namespace padding is insignificant, but external IDs remain opaque. */
+export function hasDistinctSameSourceExternalIdentity(
+  existingSourceNamespace: string | null,
+  existingExternalId: string | null,
+  sourceNamespace: string,
+  externalId: string | null
+): boolean {
+  const existingSource = existingSourceNamespace?.trim()
+  const incomingSource = sourceNamespace.trim()
+  return Boolean(
+    existingSource &&
+    incomingSource &&
+    existingSource === incomingSource &&
+    existingExternalId?.trim() &&
+    externalId?.trim() &&
+    existingExternalId !== externalId
+  )
+}
+
+export function matchesImportReviewDecision(
+  decision: ImportReviewDecision,
+  candidateIdentityKey: string,
+  candidateContentFingerprint: string,
+  existingTransactionId: string,
+  existingEvidenceFingerprint: string
+): boolean {
+  return (
+    decision.candidateIdentityKey === candidateIdentityKey &&
+    decision.candidateContentFingerprint === candidateContentFingerprint &&
+    decision.existingTransactionId === existingTransactionId &&
+    decision.existingEvidenceFingerprint === existingEvidenceFingerprint
+  )
 }
 
 export function prepareImportIdentities(

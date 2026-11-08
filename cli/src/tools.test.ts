@@ -2347,22 +2347,35 @@ describe('CLI tool validation regressions', () => {
     expect(after.account).toMatchObject({ name: 'Everyday Checking', type: 'savings' })
   })
 
-  it('previews budget upserts by category and default monthly period', async () => {
+  it('requires a name for a new category budget without writing', async () => {
     const db = scopedSummaryFixture()
     const before = db.prepare('SELECT * FROM budgets').all()
-    const result = await upsertBudget.execute(
-      upsertBudget.schema.parse({ categoryName: 'Food', amount: 500, dryRun: true })
-    )
-    expect(result).toMatchObject({
+    await expect(
+      upsertBudget.execute(
+        upsertBudget.schema.parse({ categoryName: 'Food', amount: 500, dryRun: true })
+      )
+    ).rejects.toThrow('A budget name is required.')
+    expect(db.prepare('SELECT * FROM budgets').all()).toEqual(before)
+    expect(db.prepare("SELECT * FROM audit_log WHERE entity='budget'").all()).toEqual([])
+  })
+
+  it('previews named category budget upserts with the default monthly period', async () => {
+    const db = scopedSummaryFixture()
+    const before = db.prepare('SELECT * FROM budgets').all()
+    expect(
+      await upsertBudget.execute(
+        upsertBudget.schema.parse({
+          categoryName: 'Food',
+          name: 'Food Budget',
+          amount: 500,
+          dryRun: true,
+        })
+      )
+    ).toMatchObject({
       success: true,
       action: 'created',
       dryRun: true,
-      wouldCreate: expect.objectContaining({
-        name: 'Food Budget',
-        amount: 500,
-        period: 'monthly',
-        categoryId: 'food',
-      }),
+      wouldCreate: { name: 'Food Budget', amount: 500, period: 'monthly', categoryId: 'food' },
     })
     expect(db.prepare('SELECT * FROM budgets').all()).toEqual(before)
     expect(db.prepare("SELECT * FROM audit_log WHERE entity='budget'").all()).toEqual([])

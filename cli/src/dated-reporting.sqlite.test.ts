@@ -313,11 +313,11 @@ describe('dated CLI readers on schema 22 SQLite', () => {
     })
     setMainCurrency('MXN')
     const before = rows('budgets')
-    expect(await run('create-budget', { amount: 10, dryRun: true })).toMatchObject({
+    expect(await run('create-budget', { name: 'Budget', amount: 10, dryRun: true })).toMatchObject({
       wouldCreate: { currency: 'MXN' },
     })
     expect(rows('budgets')).toEqual(before)
-    const budget = await run('create-budget', { amount: 10 })
+    const budget = await run('create-budget', { name: 'Budget', amount: 10 })
     const goal = await run('create-goal', { name: 'Trip', targetAmount: 20, accountId: 'cash' })
     expect(budget.budget.currency).toBe('MXN')
     expect(goal.goal.currency).toBe('MXN')
@@ -397,7 +397,9 @@ describe('dated CLI readers on schema 22 SQLite', () => {
     state.db
       .exec(`CREATE TRIGGER reject_budget_audit BEFORE INSERT ON audit_log WHEN NEW.entity = 'budget'
       BEGIN SELECT RAISE(ABORT, 'audit failure'); END`)
-    await expect(run('create-budget', { amount: 10 })).rejects.toThrow('audit failure')
+    await expect(run('create-budget', { name: 'Budget', amount: 10 })).rejects.toThrow(
+      'audit failure'
+    )
     await expect(run('upsert-budget', { name: 'New', amount: 10 })).rejects.toThrow('audit failure')
     expect({
       budgets: rows('budgets'),
@@ -453,14 +455,24 @@ describe('scoped budget adapter on disposable SQLite', () => {
     state.db.exec("UPDATE accounts SET currency='MXN' WHERE id='cash'")
     tx('now', 5000, '2026-09-14', 'MXN')
     tx('future', 2000, '2026-09-27', 'MXN')
-    await run('create-budget', { budgetId: 'a', amount: 100, scope: { categoryIds: ['food'] } })
+    await run('create-budget', {
+      budgetId: 'a',
+      name: 'Budget',
+      amount: 100,
+      scope: { categoryIds: ['food'] },
+    })
     expect(await run('get-budget-status', { budgetId: 'a', asOf: '2026-09-20' })).toMatchObject({
       budgets: [{ spentAmount: 50 }],
     })
     expect(
       await run('get-budget-status', { budgetId: 'a', asOf: '2026-09-20', through: 'period_end' })
     ).toMatchObject({ budgets: [{ spentAmount: 70 }] })
-    await run('create-budget', { budgetId: 'b', amount: 100, scope: { categoryIds: ['food'] } })
+    await run('create-budget', {
+      budgetId: 'b',
+      name: 'Budget',
+      amount: 100,
+      scope: { categoryIds: ['food'] },
+    })
     expect(await run('get-budget-status', { asOf: '2026-09-20' })).toMatchObject({
       summary: { totalSpent: null, reason: 'independent_budgets_nonadditive' },
     })
@@ -583,6 +595,7 @@ describe('budget mutation preservation', () => {
     setMainCurrency('MXN')
     const created = await run('upsert-budget', {
       budgetId: 'future',
+      name: 'Budget',
       amount: 100,
       currency: 'MXN',
       scope: { tags: ['business'], categoryIds: ['food'] },
@@ -729,6 +742,7 @@ describe('budget delete audit atomicity', () => {
     setMainCurrency('MXN')
     await run('create-budget', {
       budgetId: 'keep',
+      name: 'Budget',
       amount: 30,
       currency: 'MXN',
       basis: 'net_consumption',
@@ -883,8 +897,8 @@ describe('budget context scope redaction and one-clock status', () => {
 
   it('captures one reference instant even if the clock advances while projecting first budget', async () => {
     setMainCurrency('MXN')
-    await run('create-budget', { budgetId: 'first', amount: 100, currency: 'MXN' })
-    await run('create-budget', { budgetId: 'second', amount: 100, currency: 'MXN' })
+    await run('create-budget', { budgetId: 'first', name: 'Budget', amount: 100, currency: 'MXN' })
+    await run('create-budget', { budgetId: 'second', name: 'Budget', amount: 100, currency: 'MXN' })
     vi.setSystemTime(new Date('2026-09-30T23:59:00Z'))
     const original = state.db.prepare.bind(state.db)
     let advanced = false

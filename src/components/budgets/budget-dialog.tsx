@@ -35,9 +35,12 @@ export function BudgetDialog() {
         })
         toast.success(t('toast.updated'))
       } else {
-        if (data.amount === undefined) throw new Error(t('scoped.amountRequired'))
+        if (data.amount === undefined || data.name === undefined || data.period === undefined)
+          throw new Error(t('scoped.amountRequired'))
         await add({
           ...data,
+          name: data.name,
+          period: data.period,
           amount: data.amount,
           categoryId: data.categoryId,
         })

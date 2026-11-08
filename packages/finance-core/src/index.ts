@@ -27,6 +27,7 @@ export * from './dated-consumption.js'
 export * from './023_classification_types.js'
 
 export * from './report-scope.js'
+export * from './budget-definition.js'
 export * from './report-window.js'
 export * from './scoped-reporting.js'
 export * from './scoped-estimates.js'

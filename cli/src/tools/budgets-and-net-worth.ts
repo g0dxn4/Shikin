@@ -1,7 +1,10 @@
 import {
   budgetWindowComparability,
-  inspectReportScope,
-  resolveBudgetScope,
+  BudgetDefinitionError,
+  MAX_BUDGET_AMOUNT,
+  resolveBudgetDefinition,
+  type BudgetDefinition,
+  type NormalizedReportScope,
   resolveReportWindow,
 } from '@shikin/finance-core'
 import { getCurrencySettings } from '../fx-service.js'
@@ -61,14 +64,17 @@ const fields = {
     .describe('Exact source-account, allocation-category and recognition-tag scope'),
   currency: currencyCode('Stored plan currency; changing it requires amount').optional(),
   basis: z.enum(['gross_cashflow', 'net_consumption']).optional(),
-  amount: positiveMoneyAmount('Amount in the plan currency').optional(),
+  amount: positiveMoneyAmount('Amount in the plan currency', MAX_BUDGET_AMOUNT).optional(),
   period: z.enum(['weekly', 'monthly', 'yearly']).optional(),
   name: boundedText('Budget name', 'Budget name', 120).optional(),
   active: z.boolean().optional(),
   dryRun: z.boolean().optional().default(false),
 }
 type BudgetInput = z.infer<z.ZodObject<typeof fields>>
-function budgetSnapshot(row: BudgetRow) {
+function budgetSnapshot(
+  row: BudgetRow,
+  scope: NormalizedReportScope | string = storedBudgetScope(row)
+) {
   return {
     id: row.id,
     name: row.name,
@@ -78,7 +84,7 @@ function budgetSnapshot(row: BudgetRow) {
     period: row.period,
     categoryId: row.category_id,
     categoryName: row.category_name ?? null,
-    scope: storedBudgetScope(row),
+    scope,
     basis: row.basis,
     isActive: row.is_active === 1,
   }
@@ -143,75 +149,59 @@ function saveBudget(input: BudgetInput, mode: 'create' | 'upsert') {
         : mode === 'upsert'
           ? findBudget(input, category.id)
           : null
-    const scopeDefinition = resolveBudgetScope({
-      ...(existing && mode === 'upsert'
-        ? { storedScope: JSON.parse(existing.scope_json), storedCategoryId: existing.category_id }
-        : {}),
-      ...(input.scope !== undefined ? { scope: input.scope } : {}),
-      ...(input.categoryId !== undefined || input.categoryName !== undefined
-        ? { categoryId: category.id }
-        : {}),
-    })
-    const references = inspectReportScope(scopeDefinition.scope, {
-      accounts: query<{ id: string }>('SELECT id FROM accounts'),
-      categories: query<{ id: string }>('SELECT id FROM categories'),
-    })
-    if (references.issues.length)
-      throw new Error(references.issues.map((issue) => issue.message).join('; '))
-    const settings = getCurrencySettings()
-    if ((!existing || mode === 'create') && !input.currency && !settings.configured)
-      return mainCurrencySetupNeeded
-    if (!existing && input.amount === undefined)
-      return { success: false, message: 'amount is required when creating a budget.' }
-    if (
-      existing &&
-      mode === 'upsert' &&
-      input.currency &&
-      input.currency !== existing.currency &&
-      input.amount === undefined
-    ) {
+    let definition: BudgetDefinition
+    try {
+      definition = resolveBudgetDefinition({
+        ...(existing && mode === 'upsert' ? { stored: existing } : {}),
+        patch: {
+          ...input,
+          ...(input.amount !== undefined ? { amountCentavos: toCentavos(input.amount) } : {}),
+          ...(input.categoryId !== undefined || input.categoryName !== undefined
+            ? { categoryId: category.id }
+            : {}),
+          ...(input.active !== undefined ? { isActive: input.active } : {}),
+        },
+        mainCurrency:
+          query<{ value: string }>("SELECT value FROM settings WHERE key = 'main_currency'")[0]
+            ?.value ?? null,
+        references: {
+          accounts: query<{ id: string }>('SELECT id FROM accounts'),
+          categories: query<{ id: string }>('SELECT id FROM categories'),
+        },
+      })
+    } catch (error) {
+      if (!(error instanceof BudgetDefinitionError)) throw error
+      if (error.reason === 'main_currency_unconfigured') return mainCurrencySetupNeeded
+      if (error.reason === 'amount_required')
+        return { success: false, message: 'amount is required when creating a budget.' }
       return {
         success: false,
-        reason: 'amount_required_for_currency_change',
+        reason: error.reason,
         message:
           'Changing currency requires an explicit new amount; amounts are not converted automatically.',
       }
     }
     const after: BudgetRow = {
+      ...definition,
       id: existing?.id ?? input.budgetId ?? generateId(),
-      name:
-        input.name ??
-        (mode === 'upsert' ? existing?.name : undefined) ??
-        (category.name ? `${category.name} Budget` : 'Budget'),
-      amount: input.amount === undefined ? existing!.amount : toCentavos(input.amount),
-      currency:
-        input.currency ??
-        (mode === 'upsert' ? existing?.currency : undefined) ??
-        settings.mainCurrency!,
-      period: input.period ?? (mode === 'upsert' ? existing?.period : undefined) ?? 'monthly',
-      category_id: scopeDefinition.categoryId,
       category_name:
-        scopeDefinition.categoryId === existing?.category_id
+        definition.category_id === existing?.category_id
           ? (existing?.category_name ?? null)
           : category.name,
-      scope_json: JSON.stringify(scopeDefinition.scope),
-      basis: input.basis ?? (mode === 'upsert' ? existing?.basis : undefined) ?? 'gross_cashflow',
-      is_active:
-        input.active === undefined
-          ? mode === 'upsert'
-            ? (existing?.is_active ?? 1)
-            : 1
-          : input.active
-            ? 1
-            : 0,
     }
-    const equal =
+    let equal =
       existing !== null &&
-      existing !== undefined &&
       ['name', 'amount', 'currency', 'period', 'category_id', 'basis', 'is_active'].every(
         (key) => existing[key as keyof BudgetRow] === after[key as keyof BudgetRow]
-      ) &&
-      JSON.stringify(storedBudgetScope(existing)) === after.scope_json
+      )
+    if (equal && existing) {
+      try {
+        equal =
+          JSON.stringify(storedBudgetScope(existing)) === JSON.stringify(storedBudgetScope(after))
+      } catch {
+        equal = false
+      }
+    }
     if (mode === 'create' && existing && !equal)
       return {
         success: false,
@@ -219,6 +209,15 @@ function saveBudget(input: BudgetInput, mode: 'create' | 'upsert') {
         message: 'Budget ID exists with a different definition; use upsert-budget.',
       }
     const changed = !equal
+    let beforeScope: NormalizedReportScope | string | undefined
+    if (existing && mode === 'upsert' && input.scope !== undefined && (input.dryRun || changed)) {
+      try {
+        beforeScope = storedBudgetScope(existing)
+      } catch {
+        // Only an explicit upsert replacement may retain damaged before-evidence.
+        beforeScope = existing.scope_json
+      }
+    }
     const action = existing ? 'updated' : 'created'
     const matchedBy = input.budgetId
       ? 'budgetId'
@@ -238,7 +237,7 @@ function saveBudget(input: BudgetInput, mode: 'create' | 'upsert') {
         wouldUpdate: existing
           ? {
               budgetId: existing.id,
-              before: budgetSnapshot(existing),
+              before: budgetSnapshot(existing, beforeScope),
               after: budgetSnapshot(after),
             }
           : undefined,
@@ -281,7 +280,7 @@ function saveBudget(input: BudgetInput, mode: 'create' | 'upsert') {
         entity: 'budget',
         entityId: after.id,
         action: existing ? 'update' : 'create',
-        before: existing ? { budget: budgetSnapshot(existing) } : null,
+        before: existing ? { budget: budgetSnapshot(existing, beforeScope) } : null,
         after: { budget: budgetSnapshot(after) },
       })
     }
@@ -300,7 +299,7 @@ const createBudget: ToolDefinition = {
   description: 'Create a scoped budget; optional budgetId makes identical replays a no-op.',
   schema: z.object({
     ...fields,
-    amount: positiveMoneyAmount('Amount in the plan currency'),
+    amount: positiveMoneyAmount('Amount in the plan currency', MAX_BUDGET_AMOUNT),
     period: fields.period.default('monthly'),
   }),
   effects: { idempotent: false, writesTo: ['budgets', 'audit_log', 'app_data_state'] },

@@ -107,4 +107,66 @@ describe('scoped budget form', () => {
     await screen.findByRole('option', { name: 'Food' })
     expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
   })
+  it('pins the complete create payload without sparse omission', async () => {
+    const submit = vi.fn()
+    render(<BudgetForm onSubmit={submit} />)
+    await screen.findByRole('option', { name: 'Food' })
+    fireEvent.change(screen.getByLabelText('Budget Name'), { target: { value: ' New ' } })
+    fireEvent.change(screen.getByLabelText(/Amount.*MXN/), { target: { value: '12.34' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(submit).toHaveBeenCalled())
+    expect(submit.mock.calls[0][0]).toEqual({
+      name: 'New',
+      amount: 12.34,
+      period: 'monthly',
+      currency: 'MXN',
+      basis: 'gross_cashflow',
+      isActive: true,
+      expectedMainCurrency: 'MXN',
+      scope: {
+        accountIds: [],
+        excludeAccountIds: [],
+        categoryIds: [],
+        excludeCategoryIds: [],
+        tags: [],
+        excludeTags: [],
+      },
+    })
+  })
+  it('pins untouched edit fields including raw spaced name and scope', async () => {
+    const submit = vi.fn()
+    render(<BudgetForm budget={{ ...fixtureBudget(), name: ' Food ' }} onSubmit={submit} />)
+    await screen.findByRole('option', { name: 'Food' })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(submit).toHaveBeenCalled())
+    expect(submit.mock.calls[0][0]).toEqual({})
+  })
+  it('pins changed edit fields and explicit scope clearing', async () => {
+    const submit = vi.fn()
+    render(<BudgetForm budget={fixtureBudget()} onSubmit={submit} />)
+    await screen.findByRole('option', { name: 'Food' })
+    fireEvent.change(screen.getByLabelText('Budget Name'), { target: { value: ' Changed ' } })
+    fireEvent.change(screen.getByLabelText(/Amount.*MXN/), { target: { value: '25' } })
+    fireEvent.change(screen.getByLabelText('Category'), { target: { value: '__all' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(submit).toHaveBeenCalled())
+    expect(submit.mock.calls[0][0]).toEqual({
+      name: 'Changed',
+      amount: 25,
+      scope: {},
+    })
+  })
+  it.each(['{"categoryIds":"bad"}', 'bad'])(
+    'submits an explicit replacement after clearing damaged scope %j',
+    async (scopeJson) => {
+      const submit = vi.fn()
+      render(
+        <BudgetForm budget={{ ...fixtureBudget(), scope_json: scopeJson }} onSubmit={submit} />
+      )
+      await screen.findByRole('option', { name: 'Food' })
+      fireEvent.click(screen.getByRole('button', { name: 'Explicitly clear this scope' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(submit).toHaveBeenCalledWith({ scope: {} }))
+    }
+  )
 })

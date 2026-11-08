@@ -31,7 +31,7 @@ const budgetSchema = z.object({
   isActive: z.boolean(),
 })
 type Fields = z.infer<typeof budgetSchema>
-export type BudgetFormValues = Omit<BudgetFormData, 'amount'> & { amount?: number }
+export type BudgetFormValues = Partial<BudgetFormData>
 interface BudgetFormProps {
   budget?: BudgetWithStatus
   onSubmit: (data: BudgetFormValues) => void
@@ -57,10 +57,11 @@ export function BudgetForm({ budget, onSubmit, isLoading, onDirtyChange }: Budge
   const [scopeDirty, setScopeDirty] = useState(false)
   const {
     register,
+    getValues,
     handleSubmit,
     setValue,
     watch,
-    formState: { errors, isDirty, dirtyFields },
+    formState: { errors, isDirty },
   } = useForm<Fields>({
     resolver: zodResolver(budgetSchema),
     defaultValues: {
@@ -117,13 +118,40 @@ export function BudgetForm({ budget, onSubmit, isLoading, onDirtyChange }: Budge
       className="min-w-0 space-y-5"
       onSubmit={handleSubmit((data) => {
         if (!scope || !snapshot || mismatch) return
+        if (budget) {
+          const nextScope = normalizeReportScope(scope)
+          let scopeChanged = scopeDirty
+          if (scopeDirty) {
+            try {
+              scopeChanged =
+                JSON.stringify(nextScope) !==
+                JSON.stringify(normalizeReportScope(storedBudgetScope(budget)))
+            } catch {
+              // An explicitly replaced invalid original is necessarily changed.
+            }
+          }
+          onSubmit({
+            ...(getValues('name') !== budget.name ? { name: data.name } : {}),
+            ...(data.currency !== budget.currency ? { currency: data.currency } : {}),
+            ...(data.amount !== fromCentavos(budget.amount) || data.currency !== budget.currency
+              ? { amount: data.amount }
+              : {}),
+            ...(data.period !== budget.period ? { period: data.period } : {}),
+            ...(data.basis !== budget.basis ? { basis: data.basis } : {}),
+            ...(data.isActive !== (budget.is_active === 1) ? { isActive: data.isActive } : {}),
+            ...(scopeChanged
+              ? {
+                  scope: Object.values(nextScope).every((values) => values.length === 0)
+                    ? {}
+                    : nextScope,
+                }
+              : {}),
+          })
+          return
+        }
         onSubmit({
           ...data,
-          // Preserve the exact persisted cents when the amount was not edited.
-          amount:
-            budget && !dirtyFields.amount && data.currency === budget.currency
-              ? undefined
-              : data.amount,
+          amount: data.amount,
           scope: normalizeReportScope(scope),
           ...(!budget && !explicitCurrency && snapshot.mainCurrency
             ? { expectedMainCurrency: snapshot.mainCurrency }

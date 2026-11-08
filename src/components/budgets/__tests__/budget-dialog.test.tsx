@@ -44,10 +44,7 @@ describe('BudgetDialog protections with authoritative inactive inspection', () =
     await user.click(screen.getByLabelText('Active budget'))
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
-      expect(update).toHaveBeenCalledWith(
-        'budget',
-        expect.objectContaining({ currency: 'MXN', amount: undefined, isActive: true })
-      )
+      expect(update).toHaveBeenCalledWith('budget', { isActive: true, categoryId: undefined })
     )
     expect(useUIStore.getState().budgetDialogOpen).toBe(false)
   })

@@ -17,6 +17,7 @@ All notable changes to Shikin are documented in this file.
 - The statement-import dialog's session state and actions live in a feature hook (`use-statement-import-session.ts`). Reviewed-input binding, draft recovery, and commit-after-close refresh are unchanged.
 - Transaction full-edit, inline-review, delete, and metadata-only availability come from operation-specific selectors in `transaction-inspection-eligibility.ts` instead of inline page and dialog conditions. Availability and protection-message precedence are unchanged.
 - The dashboard `NetWorthPeriod` type lives in `overview-account-comparison-helpers.ts`, removing the only file-level import cycle in the app (type-only). No runtime change.
+- Frontend transaction evidence reads, capacity guards, and correction auditing live in `src/lib/transaction-evidence.ts`. Split and card-payment workflows keep their own read schedules.
 
 ## [1.2.1] - 2026-10-17
 

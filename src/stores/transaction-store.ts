@@ -17,12 +17,11 @@ import {
 import { useAccountStore } from './account-store'
 import {
   createSplits,
-  guardFrontendEvidence,
-  auditFrontendCorrection,
   getSplits as fetchSplits,
   getSplitCategoryMembership,
 } from '@/lib/split-service'
 import type { SplitInput } from '@/lib/split-service'
+import { guardFrontendEvidence, auditFrontendCorrection } from '@/lib/transaction-evidence'
 import type { Account, Transaction, TransactionSplitWithCategory } from '@/types/database'
 import type { TransactionType, CurrencyCode } from '@/types/common'
 

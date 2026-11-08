@@ -6,18 +6,15 @@ import {
   planStatementPaymentUnlink,
   planStatementTotalsEdit,
   resolvePaymentEvidence,
-  type ActivePaymentLink,
   type PaymentAccount,
-  type PaymentEvidence,
   type PaymentTransaction,
   type StatementPaymentLinkMode,
   type StatementPaymentState,
 } from '@shikin/finance-core/payments'
-import type { ConsumptionClassification, CorrectionSplit } from '@shikin/finance-core/corrections'
 import { importPlanToken } from '@shikin/finance-core/imports'
-import type { ClassificationTypeRevision } from '@shikin/finance-core'
 import { withTransaction, type TransactionClient } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
+import { readFrontendPaymentEvidenceSequential } from '@/lib/transaction-evidence'
 
 export type CardStatementStatus = 'open' | 'partial' | 'paid' | 'overdue'
 
@@ -494,24 +491,6 @@ async function linksForStatement(
   )
 }
 
-async function readEvidence(tx: TransactionClient): Promise<PaymentEvidence> {
-  const accounts = await tx.query<PaymentAccount>(
-    'SELECT id, type, currency, account_mode, is_archived FROM accounts'
-  )
-  const transactions = await tx.query<PaymentTransaction>('SELECT * FROM transactions')
-  const splits = await tx.query<CorrectionSplit>('SELECT * FROM transaction_splits')
-  const classifications = await tx.query<ConsumptionClassification>(
-    'SELECT * FROM transaction_consumption_classifications'
-  )
-  const typeRevisions = await tx.query<ClassificationTypeRevision>(
-    'SELECT * FROM classification_type_revisions'
-  )
-  const activeLinks = await tx.query<ActivePaymentLink>(
-    'SELECT id, transaction_id, amount FROM card_statement_payment_links WHERE voided_at IS NULL'
-  )
-  return { accounts, transactions, splits, classifications, typeRevisions, activeLinks }
-}
-
 async function applyStatementTransition(
   tx: TransactionClient,
   row: StatementRow,
@@ -584,7 +563,7 @@ export async function listEligibleCardPayments(
   cardAccountId: string
 ): Promise<EligibleCardPayment[]> {
   return withTransaction(async (tx) => {
-    const evidence = await readEvidence(tx)
+    const evidence = await readFrontendPaymentEvidenceSequential(tx)
     const displayRows = await tx.query<TransactionDisplayRow>('SELECT * FROM transactions')
     const display = new Map(displayRows.map((row) => [row.id, row]))
     const canonicalSeen = new Set<string>()
@@ -984,7 +963,7 @@ async function buildLink(
   await assertStatementOwnerWritable(tx, row)
   const links = await linksForStatement(tx, row.id)
   const before = statementPublic(row, links)
-  const evidence = await readEvidence(tx)
+  const evidence = await readFrontendPaymentEvidenceSequential(tx)
   const resolved = resolvePaymentEvidence({
     transactionId: input.transactionId,
     cardAccountId: row.account_id,
@@ -1416,7 +1395,7 @@ export async function recordCardPayment(
 
     let statement: CardStatement | null = null
     if (plan.row && plan.before && plan.transition) {
-      const evidence = await readEvidence(tx)
+      const evidence = await readFrontendPaymentEvidenceSequential(tx)
       const resolved = resolvePaymentEvidence({
         transactionId,
         cardAccountId: plan.card.id,

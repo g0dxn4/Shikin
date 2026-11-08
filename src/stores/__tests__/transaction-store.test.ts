@@ -22,6 +22,9 @@ vi.mock('@/lib/split-service', () => ({
   getSplitTransactionIds: vi.fn().mockResolvedValue(new Set()),
   getSplits: vi.fn().mockResolvedValue([]),
   createSplits: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('@/lib/transaction-evidence', () => ({
   guardFrontendEvidence: vi.fn().mockResolvedValue(undefined),
   auditFrontendCorrection: vi.fn().mockResolvedValue(undefined),
 }))

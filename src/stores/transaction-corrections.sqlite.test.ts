@@ -108,6 +108,25 @@ describe('frontend shared correction policy on real SQLite', () => {
     })
     expect(state.db!.prepare('SELECT COUNT(*) AS n FROM audit_log').get()).toEqual({ n: 4 })
   })
+  it('rolls split replacement and clearing back when their audit insertion fails', async () => {
+    state.db!.exec(
+      "INSERT INTO transaction_splits (id,transaction_id,category_id,amount) VALUES ('original','tx','food',1000); CREATE TRIGGER reject_split_audit BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'split-audit-failed'); END"
+    )
+    const snapshot = () => ({
+      transactions: state.db!.prepare('SELECT * FROM transactions ORDER BY id').all(),
+      splits: state.db!.prepare('SELECT * FROM transaction_splits ORDER BY id').all(),
+      accounts: state.db!.prepare('SELECT * FROM accounts ORDER BY id').all(),
+      audit: state.db!.prepare('SELECT * FROM audit_log ORDER BY id').all(),
+      revision: state.db!.prepare('SELECT * FROM app_data_state').all(),
+    })
+    const before = snapshot()
+    await expect(createSplits('tx', [{ categoryId: 'other', amount: 1000 }], 1000)).rejects.toThrow(
+      'split-audit-failed'
+    )
+    expect(snapshot()).toEqual(before)
+    await expect(deleteSplits('tx')).rejects.toThrow('split-audit-failed')
+    expect(snapshot()).toEqual(before)
+  })
   it('rejects blank and wrong-direction split categories before writes and supports parent clearing', async () => {
     const before = state.db!.prepare('SELECT * FROM transaction_splits').all()
     await expect(

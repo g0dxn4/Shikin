@@ -26,7 +26,7 @@ import {
   assertFrontendActivePaymentCapacity,
   auditFrontendCorrection,
   readFrontendConsumptionEvidence,
-} from '@/lib/split-service'
+} from '@/lib/transaction-evidence'
 import { generateId } from '@/lib/ulid'
 
 export interface ConsumptionAllocationView {

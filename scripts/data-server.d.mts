@@ -1,2 +1,2 @@
-// The data server is loaded for its foreground server side effect by cli/src/web-host.ts.
+// Direct executable adapter: importing this module starts the foreground server.
 export {}

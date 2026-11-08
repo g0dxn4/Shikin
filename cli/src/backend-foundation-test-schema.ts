@@ -3,6 +3,7 @@ import { runInNewContext } from 'node:vm'
 import type Database from 'better-sqlite3'
 import * as foundation from '@shikin/finance-core'
 import * as scopedBudgets from '@shikin/finance-core/scoped-budgets-migration'
+import { runMigrations } from '../../scripts/data-server-migrations.mjs'
 
 /** Use before inserting synthetic migration markers. No external SQL asset needed. */
 export function applyBackendFoundationTestSchema(
@@ -46,11 +47,17 @@ export function runHostedTestMigrations(
   db: Database.Database,
   through: 19 | 20 | 21 | 22 | 23 | 24 = 24
 ): void {
-  const source = readFileSync(new URL('../../scripts/data-server.mjs', import.meta.url), 'utf8')
-  let migrations = source.slice(
-    source.indexOf('function tableHasColumn('),
-    source.indexOf('\ntry {\n  databaseSession.initialize(')
+  if (through === 24) {
+    runMigrations(db)
+    return
+  }
+  const source = readFileSync(
+    new URL('../../scripts/data-server-migrations.mjs', import.meta.url),
+    'utf8'
   )
+  let migrations = source
+    .slice(source.indexOf('function tableHasColumn('))
+    .replace('export function runMigrations(', 'function runMigrations(')
   if (through === 19)
     migrations = migrations.replace(
       "  if (!applied.has('020_quote_recurrence_import_identity')) {",

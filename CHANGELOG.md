@@ -23,6 +23,7 @@ All notable changes to Shikin are documented in this file.
 - CLI audit snapshot codecs and generic undo replay live in dedicated modules (`cli/src/{transaction-audit,statement-audit,audit-read,transaction-values}.ts`, `cli/src/tools/undo.ts`). Persisted audit JSON and undo behavior are unchanged.
 - Removed three unused account-action exports (`AccountMaintenanceAction`, `CardStatementsAction`, `PaymentEvidenceIcon`); the controlled dialogs and account page are unchanged.
 - Removed the unreachable legacy live exchange-rate service (`src/lib/exchange-rate-service.ts`). Dated manual FX remains the only rate authority; stored historical rate data is untouched. Docs no longer claim automatic online rate refresh.
+- The local data bridge has an explicit startup entry (`scripts/data-server-runtime.mjs`) and a separate migrations module (`scripts/data-server-migrations.mjs`). Importing them no longer starts a server; `node scripts/data-server.mjs` and `shikin web` behave as before.
 
 ## [1.2.1] - 2026-10-17
 

@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { startDataServer } from '../../scripts/data-server-runtime.mjs'
 
 export const WEB_DEFAULT_PORT = 8480
 const WEB_MIN_PORT = 1024
@@ -28,6 +29,8 @@ export function getPackagedWebRoot(moduleUrl = import.meta.url): string {
   return resolve(dirname(fileURLToPath(moduleUrl)), '../web')
 }
 
+let pendingStartup: Parameters<typeof startDataServer>[0]
+
 export async function startWebHost(portOption: unknown = WEB_DEFAULT_PORT): Promise<void> {
   const port = validateWebPort(portOption)
   const staticRoot = getPackagedWebRoot()
@@ -41,7 +44,12 @@ export async function startWebHost(portOption: unknown = WEB_DEFAULT_PORT): Prom
   process.env.SHIKIN_WEB_HOSTED = '1'
   process.env.SHIKIN_WEB_STATIC_ROOT = staticRoot
 
-  // Keep the server in this process. tsup follows this local dynamic import and
-  // bundles the data server with its local helpers into the CLI distribution.
-  await import('../../scripts/data-server.mjs')
+  // Concurrent calls used the last validated configuration before module loading
+  // completed. Retain that ordering without using env as the startup transport.
+  pendingStartup = { port, hostedMode: true, staticRoot, storageEnvironment: process.env }
+
+  // Load only after CLI validation: loading the runtime also reads package metadata.
+  // tsup follows this local import and bundles the runtime and its helpers.
+  const { startDataServer } = await import('../../scripts/data-server-runtime.mjs')
+  startDataServer(pendingStartup)
 }

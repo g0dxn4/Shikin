@@ -70,6 +70,70 @@ describe('dated manual FX', () => {
       { fromCurrency: 'USD', toCurrency: 'MXN', rateDecimal: '18' },
     ])
   })
+  it('rounds each dated EUR parent exactly, including negative ties and decimal rates', () => {
+    const half: DatedExchangeRate = {
+      ...rate('eur-half', '2026-01-01', '0.5'),
+      fromCurrency: 'EUR',
+      toCurrency: 'USD',
+    }
+    expect(
+      convertDatedAmounts(
+        [
+          { id: 'a', currency: 'EUR', amountCentavos: 1, date: '2026-01-01' },
+          { id: 'b', currency: 'EUR', amountCentavos: 1, date: '2026-01-01' },
+        ],
+        'USD',
+        [half]
+      )
+    ).toMatchObject({
+      complete: true,
+      totalCentavos: 2,
+      knownTotalCentavos: 2,
+      unresolvedIds: [],
+      converted: [
+        { id: 'a', amountCentavos: 1, rateId: 'eur-half' },
+        { id: 'b', amountCentavos: 1, rateId: 'eur-half' },
+      ],
+    })
+    expect(
+      convertDatedAmounts(
+        [{ id: 'negative', currency: 'EUR', amountCentavos: -1, date: '2026-01-01' }],
+        'USD',
+        [half]
+      )
+    ).toMatchObject({ complete: true, totalCentavos: -1, knownTotalCentavos: -1 })
+    expect(
+      convertDatedAmounts(
+        [{ id: 'decimal', currency: 'EUR', amountCentavos: 50, date: '2026-01-01' }],
+        'USD',
+        [{ ...half, id: 'eur-decimal', rateDecimal: '0.29' }]
+      )
+    ).toMatchObject({ complete: true, totalCentavos: 15, knownTotalCentavos: 15 })
+  })
+  it('keeps future-only manual EUR evidence incomplete rather than converting it', () => {
+    expect(
+      convertDatedAmounts(
+        [{ id: 'a', currency: 'EUR', amountCentavos: 1, date: '2026-01-01' }],
+        'USD',
+        [
+          {
+            ...rate('eur-future', '2026-01-02', '2'),
+            fromCurrency: 'EUR',
+            toCurrency: 'USD',
+          },
+        ]
+      )
+    ).toMatchObject({
+      complete: false,
+      totalCentavos: null,
+      knownTotalCentavos: 0,
+      unresolvedIds: ['a'],
+      nativeTotals: [{ currency: 'EUR', amountCentavos: 1 }],
+      converted: [
+        { id: 'a', complete: false, amountCentavos: null, missingReason: 'missing_direct_rate' },
+      ],
+    })
+  })
   it('validates exact decimals, signed half-cent, tiny rates and safe boundaries', () => {
     const half = [rate('half', '2025-09-01', '0.5')]
     expect(convert(1, undefined, half).amountCentavos).toBe(1)

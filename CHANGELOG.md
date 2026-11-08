@@ -4,6 +4,10 @@ All notable changes to Shikin are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Removed the unused undated currency-conversion API (`convertCurrencyTotals` and its types) from `@shikin/finance-core`. Ledger conversions use only exact, dated manual exchange-rate evidence.
+
 ### Internal structure
 
 - Current database schema metadata (migration names, version, readiness columns) now has a single owner in finance-core, shared by the CLI, desktop/browser adapter, and data bridge. Historical migration vocabularies are pinned. No schema, migration output, or restore behavior changed.

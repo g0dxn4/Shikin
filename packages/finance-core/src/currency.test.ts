@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { aggregateCentavosByCurrency, convertCurrencyTotals } from './currency'
+import { aggregateCentavosByCurrency } from './currency'
+import * as currency from './currency'
 
-describe('currency aggregation and conversion', () => {
+describe('currency aggregation', () => {
   it('aggregates integer centavos independently by normalized currency', () => {
     expect(
       aggregateCentavosByCurrency([
@@ -15,30 +16,45 @@ describe('currency aggregation and conversion', () => {
     ])
   })
 
-  it('returns a complete centavo total only when every conversion is explicit', () => {
-    const totals = [
-      { currency: 'EUR', amountCentavos: 10_00 },
-      { currency: 'USD', amountCentavos: 20_00 },
-    ]
-
+  it('preserves empty totals, normalized ordering and arbitrary nonempty currencies', () => {
+    expect(aggregateCentavosByCurrency([])).toEqual([])
     expect(
-      convertCurrencyTotals(totals, 'USD', [{ fromCurrency: 'EUR', toCurrency: 'USD', rate: 1.1 }])
-    ).toMatchObject({ complete: true, totalCentavos: 3_100, missingCurrencies: [] })
+      aggregateCentavosByCurrency([
+        { currency: ' usd ', amountCentavos: -7 },
+        { currency: 'zzz', amountCentavos: 3 },
+        { currency: 'eur', amountCentavos: 0 },
+        { currency: 'USD', amountCentavos: 7 },
+      ])
+    ).toEqual([
+      { currency: 'EUR', amountCentavos: 0 },
+      { currency: 'USD', amountCentavos: 0 },
+      { currency: 'ZZZ', amountCentavos: 3 },
+    ])
+  })
 
-    expect(convertCurrencyTotals(totals, 'USD', [])).toEqual({
-      complete: false,
-      targetCurrency: 'USD',
-      totalCentavos: null,
-      missingCurrencies: ['EUR'],
-      converted: [
-        {
-          currency: 'USD',
-          amountCentavos: 2_000,
-          targetCurrency: 'USD',
-          rate: 1,
-          convertedAmountCentavos: 2_000,
-        },
-      ],
-    })
+  it.each([1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects unsafe centavos %s without rounding',
+    (amountCentavos) => {
+      expect(() => aggregateCentavosByCurrency([{ currency: 'USD', amountCentavos }])).toThrow(
+        new RangeError('amountCentavos must be a safe integer')
+      )
+    }
+  )
+
+  it('preserves currency validation precedence and intermediate-total overflow', () => {
+    expect(() => aggregateCentavosByCurrency([{ currency: ' ', amountCentavos: NaN }])).toThrow(
+      new TypeError('currency must not be empty')
+    )
+    expect(() =>
+      aggregateCentavosByCurrency([
+        { currency: 'USD', amountCentavos: Number.MAX_SAFE_INTEGER },
+        { currency: 'USD', amountCentavos: 1 },
+        { currency: 'USD', amountCentavos: -1 },
+      ])
+    ).toThrow(new RangeError('Centavo total for USD exceeds the safe integer range'))
+  })
+
+  it('exports only currency aggregation, not the retired undated converter', () => {
+    expect(Object.keys(currency).sort()).toEqual(['aggregateCentavosByCurrency'])
   })
 })

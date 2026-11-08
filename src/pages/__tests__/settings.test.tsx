@@ -72,10 +72,6 @@ vi.mock('@/stores/categorization-store', () => ({
   }),
 }))
 
-vi.mock('@/lib/exchange-rate-service', () => ({
-  COMMON_CURRENCIES: ['USD', 'EUR', 'GBP'],
-}))
-
 vi.mock('@/lib/database', () => ({
   query: vi.fn(),
   execute: vi.fn(),

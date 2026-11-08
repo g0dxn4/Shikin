@@ -35,7 +35,7 @@ _Screenshots show synthetic demo data._
 ### Investments and currency
 
 - Holdings with optional quotes from Alpha Vantage, CoinGecko, or Finnhub, plus manual prices
-- Exchange rates via frankfurter.app from cached rates, with an online refresh (including automatic network refresh when rates are stale)
+- Exchange rates as dated manual currency pairs you enter (no automatic online rate refresh)
 - Legacy holdings stay stored; they may need a verified price or valuation identity before converted totals appear
 
 ### Automation (optional)
@@ -92,7 +92,7 @@ Desktop builds check GitHub Releases and can install **signed updates** from Set
 
 Finance records are stored locally (SQLite under the platform app-data directory). There is no mandatory cloud account.
 
-Shikin is not an offline-only app. Exchange rates use a local cache and can refresh over the network from frankfurter.app — including an automatic refresh on startup when cached rates are stale. Optional market quotes contact Alpha Vantage, CoinGecko, or Finnhub. Optional CLI/MCP clients and external AI tools follow their own privacy practices. Do not assume requests or data never leave the device.
+Shikin is not an offline-only app. Optional market quotes contact Alpha Vantage, CoinGecko, or Finnhub. Optional CLI/MCP clients and external AI tools follow their own privacy practices. Do not assume requests or data never leave the device.
 
 `shikin web` serves the production app on **127.0.0.1** only. For private access from another machine on your tailnet:
 

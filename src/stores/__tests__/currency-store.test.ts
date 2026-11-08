@@ -1,6 +1,10 @@
+// @vitest-environment node
+import Database from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DatedExchangeRate } from '@shikin/finance-core/fx'
+import type * as FxService from '@/lib/fx-service'
 import type { Account } from '@/types/database'
+import { runHostedTestMigrations } from '../../../cli/src/backend-foundation-test-schema'
 
 const {
   mockStoreGet,
@@ -8,12 +12,16 @@ const {
   mockListExchangeRates,
   mockSetMainCurrency,
   mockSetExchangeRate,
+  mockQuery,
+  mockExecute,
 } = vi.hoisted(() => ({
   mockStoreGet: vi.fn(),
   mockGetCurrencySettings: vi.fn(),
   mockListExchangeRates: vi.fn(),
   mockSetMainCurrency: vi.fn(),
   mockSetExchangeRate: vi.fn(),
+  mockQuery: vi.fn(),
+  mockExecute: vi.fn(),
 }))
 
 vi.mock('@/lib/storage', () => ({
@@ -25,6 +33,12 @@ vi.mock('@/lib/fx-service', () => ({
   listExchangeRates: mockListExchangeRates,
   setMainCurrency: mockSetMainCurrency,
   setExchangeRate: mockSetExchangeRate,
+}))
+
+vi.mock('@/lib/database', () => ({
+  query: mockQuery,
+  execute: mockExecute,
+  withTransaction: vi.fn(),
 }))
 
 import { useCurrencyStore } from '../currency-store'
@@ -118,6 +132,80 @@ describe('currency-store dated FX adapter', () => {
       isLoading: false,
       error: null,
     })
+  })
+
+  it('keeps dated conversion incomplete with cache17 and no manual authority, without fetching or writing', async () => {
+    const db = new Database(':memory:')
+    const fetch = vi.fn().mockRejectedValue(new Error('Unexpected network access'))
+    vi.stubGlobal('fetch', fetch)
+    try {
+      runHostedTestMigrations(db)
+      db.exec(`
+        INSERT INTO settings (key, value) VALUES ('main_currency', 'MXN');
+        INSERT INTO exchange_rates (id, from_currency, to_currency, rate, date)
+          VALUES ('provider', 'USD', 'MXN', 17, '2025-09-20');
+        INSERT INTO accounts (id, name, type, balance, currency)
+          VALUES ('cash', 'Cash', 'checking', 100, 'USD');
+        INSERT INTO transactions (id, account_id, type, amount, currency, description, date)
+          VALUES ('expense', 'cash', 'expense', 50, 'USD', 'Protected money', '2025-09-20');
+      `)
+      const before = db.serialize()
+      mockQuery.mockImplementation(async (sql: string, params: unknown[] = []) =>
+        db.prepare(sql).all(...params)
+      )
+      mockExecute.mockImplementation(async (sql: string, params: unknown[] = []) =>
+        db.prepare(sql).run(...params)
+      )
+      const fx = await vi.importActual<typeof FxService>('@/lib/fx-service')
+      mockGetCurrencySettings.mockImplementation(fx.getCurrencySettings)
+      mockListExchangeRates.mockImplementation(fx.listExchangeRates)
+
+      await useCurrencyStore.getState().loadRates()
+
+      expect(fetch).not.toHaveBeenCalled()
+      expect(useCurrencyStore.getState()).toMatchObject({
+        mainCurrency: 'MXN',
+        preferredCurrency: 'MXN',
+        manualRates: [],
+        isLoading: false,
+        error: null,
+      })
+      expect(
+        useCurrencyStore.getState().convertHistoricalToPreferred(100, 'USD', '2025-09-20')
+      ).toEqual({
+        complete: false,
+        preferredCurrency: 'MXN',
+        missingCurrencies: ['USD'],
+        reason: 'missing_exchange_rates',
+        conversion: {
+          fromCurrency: 'USD',
+          toCurrency: 'MXN',
+          asOfDate: '2025-09-20',
+          rateId: null,
+          effectiveFrom: null,
+          rateDecimal: null,
+          direction: 'USD->MXN',
+          complete: false,
+          amountCentavos: null,
+          missingReason: 'missing_direct_rate',
+        },
+      })
+      expect(mockQuery.mock.calls).toEqual([
+        ["SELECT value FROM settings WHERE key = 'main_currency'"],
+        [
+          'SELECT id, from_currency AS fromCurrency, to_currency AS toCurrency, rate_decimal AS rateDecimal, effective_from AS effectiveFrom, supersedes_rate_id AS supersedesRateId, created_at AS createdAt, source_note AS sourceNote FROM manual_exchange_rates ORDER BY effective_from, created_at, id',
+        ],
+      ])
+      expect(mockExecute).not.toHaveBeenCalled()
+      expect(mockSetMainCurrency).not.toHaveBeenCalled()
+      expect(mockSetExchangeRate).not.toHaveBeenCalled()
+      expect(db.serialize()).toEqual(before)
+    } finally {
+      mockQuery.mockReset()
+      mockExecute.mockReset()
+      db.close()
+      vi.unstubAllGlobals()
+    }
   })
 
   it('uses a legacy JSON preference only as an unconfigured setup draft', async () => {

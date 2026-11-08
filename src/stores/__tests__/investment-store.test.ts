@@ -11,11 +11,6 @@ vi.mock('@/lib/price-service', async (importOriginal) => {
 vi.mock('@/lib/storage', () => ({
   load: vi.fn(async () => ({ get: vi.fn(), set: vi.fn(), save: vi.fn() })),
 }))
-vi.mock('@/lib/exchange-rate-service', () => ({
-  getCachedRates: vi.fn(async () => []),
-  getLastFetchDate: vi.fn(async () => null),
-  refreshRates: vi.fn(),
-}))
 
 import { execute, query } from '@/lib/database'
 import { useCurrencyStore } from '../currency-store'

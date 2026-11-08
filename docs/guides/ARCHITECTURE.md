@@ -92,7 +92,6 @@ Additional routed pages include net-worth, spending-insights, spending-heatmap, 
 | `split-service.ts`         | Transaction split management                          |
 | `statement-parser.ts`      | OFX/QFX/QIF bank statement parsing                    |
 | `statement-import.ts`      | Statement import with duplicate detection             |
-| `exchange-rate-service.ts` | frankfurter.app rate fetching                         |
 | `report-service.ts`        | Monthly/annual report aggregation                     |
 | `pdf-generator.ts`         | Dark-themed PDF generation via jsPDF                  |
 | `achievement-service.ts`   | 8 achievements + streak tracking                      |
@@ -114,7 +113,7 @@ Additional routed pages include net-worth, spending-insights, spending-heatmap, 
 3. Run schema migrations (`001_core_tables` through `010_transaction_splits`).
 4. Serve all queries through `query<T>()` and `execute()`.
 5. Persist to IndexedDB after write operations.
-6. On startup, materialize recurring transactions and auto-refresh exchange rates if stale.
+6. On startup, materialize recurring transactions.
 
 ---
 
@@ -142,7 +141,7 @@ The dashboard aggregates data from 7 stores and displays:
 - All financial records are stored locally in IndexedDB-backed SQLite snapshots.
 - Optional market-data API keys stay local in browser storage and are only used for direct provider requests.
 - No mandatory backend service is required for core product functionality.
-- Exchange rates are fetched from a free public API (frankfurter.app) — no user data is sent.
+- Exchange rates are dated manual pairs stored locally; there is no exchange-rate network fetch.
 
 ---
 

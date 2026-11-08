@@ -131,7 +131,7 @@ Practical map of the current React frontend for hardening and follow-up work.
   - DB-backed: account, transaction, category, budget, goal, investment, recurring, debt, net-worth, spending-insights.
   - Storage-backed: currency, anomaly, health.
 - **Service/background consumers:**
-  - DB: `forecast-service`, `anomaly-service`, `recap-service`, `auto-categorize`, `split-service`, `statement-import`, `exchange-rate-service`, `price-scheduler`, `portfolio-review`, `achievement-service`, `health-score-service`.
+  - DB: `forecast-service`, `anomaly-service`, `recap-service`, `auto-categorize`, `split-service`, `statement-import`, `price-scheduler`, `portfolio-review`, `achievement-service`, `health-score-service`.
   - Storage: `price-service`, `news-service`, `achievement-service`, `health-score-service`.
   - Virtual FS: `notebook`, `portfolio-review`.
 

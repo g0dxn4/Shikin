@@ -22,6 +22,7 @@ All notable changes to Shikin are documented in this file.
 - Native (desktop) database schema migration and readiness helpers live in `src/lib/tauri-database-schema.ts`, separate from the connection, queue, and restore lifecycle in `src/lib/database.ts`.
 - CLI audit snapshot codecs and generic undo replay live in dedicated modules (`cli/src/{transaction-audit,statement-audit,audit-read,transaction-values}.ts`, `cli/src/tools/undo.ts`). Persisted audit JSON and undo behavior are unchanged.
 - Removed three unused account-action exports (`AccountMaintenanceAction`, `CardStatementsAction`, `PaymentEvidenceIcon`); the controlled dialogs and account page are unchanged.
+- Removed the unreachable legacy live exchange-rate service (`src/lib/exchange-rate-service.ts`). Dated manual FX remains the only rate authority; stored historical rate data is untouched. Docs no longer claim automatic online rate refresh.
 
 ## [1.2.1] - 2026-10-17
 

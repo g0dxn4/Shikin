@@ -134,7 +134,7 @@ This is a practical backend map for the current repo layout. It is a documentati
 ## 8) Outbound integrations
 
 - **Updater manifest**: `src-tauri/tauri.conf.json` → `plugins.updater.endpoints` (`https://github.com/g0dxn4/Shikin/releases/latest/download/latest.json`).
-- **Exchange rates**: `src/lib/exchange-rate-service.ts` → `https://api.frankfurter.app`.
+- **Exchange rates**: none. Dated FX uses manual pairs stored in the ledger; the legacy `exchange-rate-service.ts` (frankfurter.app) was removed as unreachable.
 - **Prices**: `src/lib/price-service.ts` → Alpha Vantage + CoinGecko APIs.
 - **News**: `src/lib/news-service.ts` → Finnhub + NewsAPI for browser-side price/intelligence surfaces that request it.
 

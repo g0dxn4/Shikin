@@ -407,9 +407,7 @@ export function useStatementImportSession({
     const requestedFile = reviewedSelection.selectedFile!
     const requestedAccountId = reviewedSelection.accountId
     const requestedToken = preview.binding.token
-    const requestedDecisions = reviewedSelection.decisions.map((item) =>
-      reviewDecisionPayload(item, item.decision)
-    )
+    const requestedDecisions = decisions.map((item) => reviewDecisionPayload(item, item.decision))
     const requestedTreatment = reviewedSelection.treatment
     const requestedStagingBatchId = reviewedSelection.stagingBatchId
     const requestedAcknowledgePending = reviewedSelection.acknowledgePending
@@ -501,6 +499,7 @@ export function useStatementImportSession({
     preview.binding,
     preview.requiredDecisions.length,
     candidatesMissingDetails,
+    decisions,
     t,
     handleOpenChange,
   ])

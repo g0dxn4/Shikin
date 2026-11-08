@@ -1031,6 +1031,70 @@ describe('StatementImportDialog', () => {
     expect(mockInvalidate).toHaveBeenCalledWith('import')
   })
 
+  it('retries with the same token and cleared decisions after a non-stale decision-binding error', async () => {
+    const parsed = parsedTx({ description: 'Reviewed retry row' })
+    mockParseStatement.mockReturnValue([parsed])
+    mockPreviewStatementFile
+      .mockResolvedValueOnce(
+        previewResult({
+          success: false,
+          previewToken: null,
+          parsedTransactions: [parsed],
+          requiredDecisions: [requiredDecision()],
+          reviewCandidates: [reviewCandidate()],
+          imported: 0,
+        })
+      )
+      .mockResolvedValueOnce(
+        previewResult({ parsedTransactions: [parsed], previewToken: 'reviewed-retry-token' })
+      )
+    mockImportStatementFile
+      .mockResolvedValueOnce({
+        imported: 0,
+        skipped: 0,
+        errors: ['Decisions do not belong to this statement plan'],
+      })
+      .mockResolvedValueOnce({ imported: 1, skipped: 0, errors: [] })
+    const file = createStatementFile('binding-retry.ofx')
+    const { input, user, onOpenChange } = await renderDialog()
+    await chooseAccount(user)
+    await chooseFile(input, file)
+    await user.click(screen.getByRole('button', { name: 'import.preview' }))
+    await user.click(await screen.findByRole('button', { name: 'import.keepExisting' }))
+    await user.click(screen.getByRole('button', { name: 'import.reviewDecisions' }))
+    await user.click(await screen.findByRole('button', { name: 'import.confirm' }))
+
+    expect(mockImportStatementFile).toHaveBeenNthCalledWith(1, file, 'account-1', {
+      previewToken: 'reviewed-retry-token',
+      decisions: [
+        {
+          candidateIdentityKey: 'identity-1',
+          candidateContentFingerprint: 'content-1',
+          existingTransactionId: 'existing-1',
+          existingEvidenceFingerprint: 'evidence-1',
+          decision: 'keep_existing',
+        },
+      ],
+    })
+    expect(mockToastError).toHaveBeenCalledWith('import.error', {
+      description: 'Decisions do not belong to this statement plan',
+    })
+    expect(screen.getByText('Reviewed retry row')).toBeVisible()
+    expect(screen.getByText('binding-retry.ofx')).toBeVisible()
+    expect(screen.getByText('Checking')).toBeVisible()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'import.refreshPreview' })).not.toBeInTheDocument()
+    expect(onOpenChange).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'import.confirm' }))
+
+    expect(mockImportStatementFile).toHaveBeenNthCalledWith(2, file, 'account-1', {
+      previewToken: 'reviewed-retry-token',
+      decisions: [],
+    })
+    expect(mockPreviewStatementFile).toHaveBeenCalledTimes(2)
+    expect(mockToastSuccess).toHaveBeenCalledWith('import.successNoSkip imported=1')
+  })
+
   it('clears stale reviewed decisions so refresh can bind a fresh preview', async () => {
     const parsed = parsedTx({ description: 'Needs recovery' })
     const staleDecision = requiredDecision()

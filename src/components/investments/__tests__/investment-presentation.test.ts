@@ -23,6 +23,61 @@ const mxnIdentity = {
   quoteCurrency: 'MXN',
 }
 
+const malformedInstrumentKeys = [
+  '',
+  'v0|stock|manual|AAPL|XNAS|USD',
+  'v2|stock|manual|AAPL|XNAS|USD',
+  'V1|stock|manual|AAPL|XNAS|USD',
+  'stock|manual|AAPL|XNAS|USD',
+  'v1|stock|manual|AAPL|XNAS',
+  'v1|stock|manual|AAPL|XNAS|USD|extra',
+  'v1||manual|AAPL|XNAS|USD',
+  'v1|stock||AAPL|XNAS|USD',
+  'v1|stock|manual||XNAS|USD',
+  'v1|stock|manual|AAPL|XNAS|',
+  'v1|option|manual|AAPL|XNAS|USD',
+  'v1|Stock|manual|AAPL|XNAS|USD',
+  'v1|stock|yahoo|AAPL|XNAS|USD',
+  'v1|stock|Manual|AAPL|XNAS|USD',
+  'v1|stock|manual|%|XNAS|USD',
+  'v1|stock|manual|AAPL|%2|USD',
+  'v1|stock|manual|AAPL|XNAS|%GG',
+  'v1|stock|manual|%C3%28|XNAS|USD',
+  'v1|stock|manual|%ED%A0%80|XNAS|USD',
+  'v1|stock%7Cetf|manual|AAPL|XNAS|USD',
+  'v1|stock|manual%7Cfinnhub|AAPL|XNAS|USD',
+  'v1|stock|manual|A%7CB|XNAS|USD',
+  'v1|stock|manual|AAPL|X%7CY|USD',
+  'v1|stock|manual|AAPL|XNAS|U%7CD',
+  'v1|%73tock|manual|AAPL|XNAS|USD',
+  'v1|stock|%6Danual|AAPL|XNAS|USD',
+  'v1|stock|manual|%41APL|XNAS|USD',
+  'v1|stock|manual|AAPL|%58NAS|USD',
+  'v1|stock|manual|AAPL|XNAS|%55SD',
+  'v1|stock|manual|A%2fB|XNAS|USD',
+  'v1|stock|manual|A/B|XNAS|USD',
+  'v1|stock|manual|ACCIÓN|XNAS|USD',
+  'v1|stock|manual| AAPL|XNAS|USD',
+  'v1|stock|manual|AAPL%20|XNAS|USD',
+  'v1|stock|manual|%20|XNAS|USD',
+  'v1|stock|manual|AAPL|%20XNAS|USD',
+  'v1|stock|manual|AAPL|XNAS|usd',
+  'v1|stock|manual|AAPL|XNAS|%20USD',
+  'v1|stock|manual|AAPL|XNAS|%20',
+]
+
+const canonicalInstrumentKeys = [
+  ['v1|stock|manual|AAPL|XNAS|USD', 'USD'],
+  ['v1|stock|manual|AAPL||USD', 'USD'],
+  ['v1|stock|manual|A%2FB|XNAS|USD', 'USD'],
+  ['v1|stock|manual|A%25B|XNAS|USD', 'USD'],
+  ['v1|stock|manual|A%257CB|XNAS|USD', 'USD'],
+  ['v1|stock|manual|ACCI%C3%93N|XNAS|MXN', 'MXN'],
+  ['v1|stock|manual|AAPL|X%20NAS|USD', 'USD'],
+  ['v1|stock|manual|AAPL|XNAS|XYZ', 'XYZ'],
+  ['v1|stock|manual|AAPL|XNAS|U%2FS', 'U/S'],
+] as const
+
 function holding(
   identity: {
     assetType: 'stock' | 'etf' | 'crypto' | 'bond' | 'mutual_fund' | 'cetes' | 'other'
@@ -127,6 +182,30 @@ describe('quoteCurrencyEncodedInInstrumentKey', () => {
     expect(quoteCurrencyEncodedInInstrumentKey('v1|stock|manual|AAPL|XNAS')).toBeNull()
     expect(quoteCurrencyEncodedInInstrumentKey(`${key}|extra`)).toBeNull()
   })
+
+  it.each(malformedInstrumentKeys)('rejects malformed or noncanonical key %j', (key) => {
+    expect(quoteCurrencyEncodedInInstrumentKey(key)).toBeNull()
+  })
+
+  it.each(canonicalInstrumentKeys)('reads canonical key %s as %s', (key, currency) => {
+    expect(quoteCurrencyEncodedInInstrumentKey(key)).toBe(currency)
+  })
+
+  it.each(['stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'cetes', 'other'])(
+    'accepts the existing %s asset type',
+    (assetType) => {
+      expect(quoteCurrencyEncodedInInstrumentKey(`v1|${assetType}|manual|AAPL|XNAS|USD`)).toBe(
+        'USD'
+      )
+    }
+  )
+
+  it.each(['manual', 'alpha_vantage', 'finnhub', 'coingecko'])(
+    'accepts the existing %s provider',
+    (provider) => {
+      expect(quoteCurrencyEncodedInInstrumentKey(`v1|stock|${provider}|AAPL|XNAS|USD`)).toBe('USD')
+    }
+  )
 })
 
 describe('selectCurrentQuantityQuotePlot', () => {
@@ -154,6 +233,98 @@ describe('selectCurrentQuantityQuotePlot', () => {
       ],
     ])
   }
+
+  it.each(malformedInstrumentKeys)('withholds ownership for malformed key %j', (key) => {
+    expect(
+      selectCurrentQuantityQuotePlot({
+        holdings: [holding(usdIdentity, { instrumentKey: key })],
+        historyByKey: new Map([
+          [
+            key,
+            history([
+              ['2026-01-01', '10'],
+              ['2026-02-01', '12'],
+            ]),
+          ],
+        ]),
+        reportCurrency: 'USD',
+        totalsComplete: true,
+        rangeStart: null,
+      })
+    ).toEqual({
+      status: 'withheld',
+      reason: 'ownership-unproven',
+      rangeSelectable: false,
+    })
+  })
+
+  it('reports encoded quote currency before competing ownership failures', () => {
+    expect(
+      selectCurrentQuantityQuotePlot({
+        holdings: [
+          holding(usdIdentity, {
+            instrumentKey: 'v1|stock|manual|WALMEX|XNAS|MXN',
+            provider: null,
+            quantityDecimal: '',
+          }),
+        ],
+        historyByKey: provenMap(),
+        reportCurrency: 'USD',
+        totalsComplete: true,
+        rangeStart: null,
+      })
+    ).toEqual({
+      status: 'withheld',
+      reason: 'quote-currency-mismatch',
+      rangeSelectable: false,
+    })
+  })
+
+  it.each([
+    { assetType: 'option' },
+    { assetType: 'etf' },
+    { provider: 'yahoo' },
+    { provider: 'finnhub' },
+  ])('withholds mismatched holding identity %j', (overrides) => {
+    expect(
+      selectCurrentQuantityQuotePlot({
+        holdings: [holding(usdIdentity, overrides)],
+        historyByKey: provenMap(),
+        reportCurrency: 'USD',
+        totalsComplete: true,
+        rangeStart: null,
+      })
+    ).toEqual({
+      status: 'withheld',
+      reason: 'ownership-unproven',
+      rangeSelectable: false,
+    })
+  })
+
+  it('preserves encoder normalization when proving holding identity', () => {
+    expect(
+      selectCurrentQuantityQuotePlot({
+        holdings: [
+          holding(usdIdentity, {
+            instrumentId: ' AAPL ',
+            exchange: ' XNAS ',
+            currentPriceCurrency: ' usd ',
+          }),
+        ],
+        historyByKey: provenMap(),
+        reportCurrency: 'USD',
+        totalsComplete: true,
+        rangeStart: null,
+      })
+    ).toEqual({
+      status: 'plot',
+      currency: 'USD',
+      points: [
+        { date: '2026-01-01', valueCentavos: 2000 },
+        { date: '2026-02-01', valueCentavos: 2400 },
+      ],
+    })
+  })
 
   it('sums current quantities at shared recorded quotes in the report currency', () => {
     const plot = selectCurrentQuantityQuotePlot({

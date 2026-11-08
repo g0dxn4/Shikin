@@ -228,6 +228,31 @@ export function decimalFromCentavos(value: number): string {
   return `${negative ? '-' : ''}${integer}.${fraction}`
 }
 
+const ASSET_TYPES: Record<ValuationAssetType, true> = {
+  stock: true,
+  etf: true,
+  crypto: true,
+  bond: true,
+  mutual_fund: true,
+  cetes: true,
+  other: true,
+}
+
+const PROVIDERS: Record<PriceProvider, true> = {
+  manual: true,
+  alpha_vantage: true,
+  finnhub: true,
+  coingecko: true,
+}
+
+function isAssetType(value: string): value is ValuationAssetType {
+  return Object.prototype.hasOwnProperty.call(ASSET_TYPES, value)
+}
+
+function isProvider(value: string): value is PriceProvider {
+  return Object.prototype.hasOwnProperty.call(PROVIDERS, value)
+}
+
 export function instrumentIdentityKey(identity: InstrumentIdentity): string {
   const values = [
     identity.assetType,
@@ -237,6 +262,45 @@ export function instrumentIdentityKey(identity: InstrumentIdentity): string {
     normalizeCurrency(identity.quoteCurrency),
   ]
   return `v1|${values.map((value) => encodeURIComponent(value)).join('|')}`
+}
+
+/** Reject malformed or noncanonical keys unless their identity round-trips through the encoder. */
+export function decodeInstrumentIdentityKey(instrumentKey: string): InstrumentIdentity | null {
+  const parts = instrumentKey.split('|')
+  if (parts.length !== 6 || parts[0] !== 'v1') return null
+  let decoded: string[]
+  try {
+    decoded = parts.slice(1).map((part) => decodeURIComponent(part))
+  } catch {
+    return null
+  }
+  if (decoded.some((part) => part.includes('|'))) return null
+  const [assetType, provider, instrumentId, exchange, quoteCurrency] = decoded
+  if (
+    !assetType ||
+    !provider ||
+    !instrumentId ||
+    !isAssetType(assetType) ||
+    !isProvider(provider)
+  ) {
+    return null
+  }
+  const normalizedQuote = quoteCurrency?.trim().toUpperCase()
+  if (!normalizedQuote) return null
+  const identity: InstrumentIdentity = {
+    assetType,
+    provider,
+    instrumentId,
+    exchange: exchange!,
+    quoteCurrency: normalizedQuote,
+  }
+  let rebuilt: string
+  try {
+    rebuilt = instrumentIdentityKey(identity)
+  } catch {
+    return null
+  }
+  return rebuilt === instrumentKey ? identity : null
 }
 
 export function isVerifiedInstrumentPrice(price: VerifiedInstrumentPrice): boolean {

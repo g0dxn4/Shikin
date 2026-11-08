@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   calculateOwnershipValuation,
   decimalFromNumber,
+  decodeInstrumentIdentityKey,
   instrumentIdentityKey,
   multiplyDecimalsToCentavos,
   valueHolding,
@@ -37,6 +38,98 @@ function holding(overrides: Partial<HoldingValuationInput> = {}): HoldingValuati
     ...overrides,
   }
 }
+
+describe('decodeInstrumentIdentityKey', () => {
+  it.each([
+    '',
+    'v0|stock|manual|AAPL|XNAS|USD',
+    'v2|stock|manual|AAPL|XNAS|USD',
+    'V1|stock|manual|AAPL|XNAS|USD',
+    'stock|manual|AAPL|XNAS|USD',
+    'v1|stock|manual|AAPL|XNAS',
+    'v1|stock|manual|AAPL|XNAS|USD|extra',
+    'v1||manual|AAPL|XNAS|USD',
+    'v1|stock||AAPL|XNAS|USD',
+    'v1|stock|manual||XNAS|USD',
+    'v1|stock|manual|AAPL|XNAS|',
+    'v1|option|manual|AAPL|XNAS|USD',
+    'v1|Stock|manual|AAPL|XNAS|USD',
+    'v1|stock|yahoo|AAPL|XNAS|USD',
+    'v1|stock|Manual|AAPL|XNAS|USD',
+    'v1|stock|manual|%|XNAS|USD',
+    'v1|stock|manual|AAPL|%2|USD',
+    'v1|stock|manual|AAPL|XNAS|%GG',
+    'v1|stock|manual|%C3%28|XNAS|USD',
+    'v1|stock|manual|%ED%A0%80|XNAS|USD',
+    'v1|stock%7Cetf|manual|AAPL|XNAS|USD',
+    'v1|stock|manual%7Cfinnhub|AAPL|XNAS|USD',
+    'v1|stock|manual|A%7CB|XNAS|USD',
+    'v1|stock|manual|AAPL|X%7CY|USD',
+    'v1|stock|manual|AAPL|XNAS|U%7CD',
+    'v1|%73tock|manual|AAPL|XNAS|USD',
+    'v1|stock|%6Danual|AAPL|XNAS|USD',
+    'v1|stock|manual|%41APL|XNAS|USD',
+    'v1|stock|manual|AAPL|%58NAS|USD',
+    'v1|stock|manual|AAPL|XNAS|%55SD',
+    'v1|stock|manual|A%2fB|XNAS|USD',
+    'v1|stock|manual|A/B|XNAS|USD',
+    'v1|stock|manual|ACCIÓN|XNAS|USD',
+    'v1|stock|manual| AAPL|XNAS|USD',
+    'v1|stock|manual|AAPL%20|XNAS|USD',
+    'v1|stock|manual|%20|XNAS|USD',
+    'v1|stock|manual|AAPL|%20XNAS|USD',
+    'v1|stock|manual|AAPL|XNAS|usd',
+    'v1|stock|manual|AAPL|XNAS|%20USD',
+    'v1|stock|manual|AAPL|XNAS|%20',
+  ])('rejects the presentation-characterized malformed or noncanonical key %j', (key) => {
+    expect(decodeInstrumentIdentityKey(key)).toBeNull()
+  })
+
+  it.each([
+    ['v1|stock|manual|AAPL|XNAS|USD', 'AAPL', 'XNAS', 'USD'],
+    ['v1|stock|manual|AAPL||USD', 'AAPL', '', 'USD'],
+    ['v1|stock|manual|A%2FB|XNAS|USD', 'A/B', 'XNAS', 'USD'],
+    ['v1|stock|manual|A%25B|XNAS|USD', 'A%B', 'XNAS', 'USD'],
+    ['v1|stock|manual|A%257CB|XNAS|USD', 'A%7CB', 'XNAS', 'USD'],
+    ['v1|stock|manual|ACCI%C3%93N|XNAS|MXN', 'ACCIÓN', 'XNAS', 'MXN'],
+    ['v1|stock|manual|AAPL|X%20NAS|USD', 'AAPL', 'X NAS', 'USD'],
+    ['v1|stock|manual|AAPL|XNAS|XYZ', 'AAPL', 'XNAS', 'XYZ'],
+    ['v1|stock|manual|AAPL|XNAS|U%2FS', 'AAPL', 'XNAS', 'U/S'],
+  ])(
+    'decodes the complete identity of canonical key %s',
+    (key, instrumentId, exchange, quoteCurrency) => {
+      const decoded = decodeInstrumentIdentityKey(key)
+      expect(decoded).toEqual({
+        assetType: 'stock',
+        provider: 'manual',
+        instrumentId,
+        exchange,
+        quoteCurrency,
+      })
+      expect(instrumentIdentityKey(decoded!)).toBe(key)
+    }
+  )
+
+  it.each(['stock', 'etf', 'crypto', 'bond', 'mutual_fund', 'cetes', 'other'])(
+    'accepts the existing %s asset type',
+    (assetType) => {
+      expect(decodeInstrumentIdentityKey(`v1|${assetType}|manual|AAPL|XNAS|USD`)).toEqual({
+        ...identity,
+        assetType,
+      })
+    }
+  )
+
+  it.each(['manual', 'alpha_vantage', 'finnhub', 'coingecko'])(
+    'accepts the existing %s provider',
+    (provider) => {
+      expect(decodeInstrumentIdentityKey(`v1|stock|${provider}|AAPL|XNAS|USD`)).toEqual({
+        ...identity,
+        provider,
+      })
+    }
+  )
+})
 
 describe('precise valuation', () => {
   it('multiplies fractional quantities and sub-cent prices before rounding once', () => {

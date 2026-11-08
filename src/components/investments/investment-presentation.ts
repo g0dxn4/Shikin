@@ -1,24 +1,11 @@
 import {
+  decodeInstrumentIdentityKey,
   instrumentIdentityKey,
   multiplyDecimalsToCentavos,
-  type PriceProvider,
-  type ValuationAssetType,
 } from '@shikin/finance-core/valuation'
 
 /** Must match the page's `fetchPriceHistory(..., 365)` read. The read omits row currency. */
 export const QUOTE_HISTORY_FETCH_LIMIT = 365
-
-const ASSET_TYPES = new Set<ValuationAssetType>([
-  'stock',
-  'etf',
-  'crypto',
-  'bond',
-  'mutual_fund',
-  'cetes',
-  'other',
-])
-
-const PROVIDERS = new Set<PriceProvider>(['manual', 'alpha_vantage', 'finnhub', 'coingecko'])
 
 export const ALLOCATION_TYPE_ORDER = [
   'stock',
@@ -101,14 +88,6 @@ function normalizeCurrency(value: string | null | undefined): string | null {
   return normalized ? normalized : null
 }
 
-function isAssetType(value: string): value is ValuationAssetType {
-  return ASSET_TYPES.has(value as ValuationAssetType)
-}
-
-function isProvider(value: string): value is PriceProvider {
-  return PROVIDERS.has(value as PriceProvider)
-}
-
 function isIsoDate(value: string): boolean {
   const match = ISO_DATE.exec(value)
   if (!match) return false
@@ -121,45 +100,9 @@ function isIsoDate(value: string): boolean {
   )
 }
 
-/**
- * Quote currency lives in the instrument key (finance-core instrumentIdentityKey).
- * History rows are not trusted unless the key round-trips through that encoder.
- */
+/** Quote history omits row currency, so only a strictly decoded identity proves its currency. */
 export function quoteCurrencyEncodedInInstrumentKey(instrumentKey: string): string | null {
-  const parts = instrumentKey.split('|')
-  if (parts.length !== 6 || parts[0] !== 'v1') return null
-  let decoded: string[]
-  try {
-    decoded = parts.slice(1).map((part) => decodeURIComponent(part))
-  } catch {
-    return null
-  }
-  if (decoded.some((part) => part.includes('|'))) return null
-  const [assetType, provider, instrumentId, exchange, quoteCurrency] = decoded
-  if (
-    !assetType ||
-    !provider ||
-    !instrumentId ||
-    !isAssetType(assetType) ||
-    !isProvider(provider)
-  ) {
-    return null
-  }
-  const normalizedQuote = normalizeCurrency(quoteCurrency)
-  if (!normalizedQuote) return null
-  let rebuilt: string
-  try {
-    rebuilt = instrumentIdentityKey({
-      assetType,
-      provider,
-      instrumentId,
-      exchange,
-      quoteCurrency: normalizedQuote,
-    })
-  } catch {
-    return null
-  }
-  return rebuilt === instrumentKey ? normalizedQuote : null
+  return decodeInstrumentIdentityKey(instrumentKey)?.quoteCurrency ?? null
 }
 
 function exactWidthPercent(amountCentavos: number, totalCentavos: number): string | null {
@@ -247,29 +190,28 @@ function proveHolding(
   holding: QuoteHistoryHolding,
   reportCurrency: string
 ): { ok: true; holding: ProvenHolding } | { ok: false; reason: QuotePlotWithholdReason } {
-  const encoded = holding.instrumentKey
-    ? quoteCurrencyEncodedInInstrumentKey(holding.instrumentKey)
-    : null
-  if (encoded && encoded !== reportCurrency) {
+  const identity = holding.instrumentKey ? decodeInstrumentIdentityKey(holding.instrumentKey) : null
+  if (identity && identity.quoteCurrency !== reportCurrency) {
     return { ok: false, reason: 'quote-currency-mismatch' }
   }
   if (
+    !identity ||
     !holding.instrumentKey ||
     !holding.assetType ||
     !holding.provider ||
     !holding.instrumentId ||
     !holding.currentPriceCurrency ||
     !holding.quantityDecimal?.trim() ||
-    !isAssetType(holding.assetType) ||
-    !isProvider(holding.provider)
+    holding.assetType !== identity.assetType ||
+    holding.provider !== identity.provider
   ) {
     return { ok: false, reason: 'ownership-unproven' }
   }
   let rebuilt: string
   try {
     rebuilt = instrumentIdentityKey({
-      assetType: holding.assetType,
-      provider: holding.provider,
+      assetType: identity.assetType,
+      provider: identity.provider,
       instrumentId: holding.instrumentId,
       exchange: holding.exchange ?? '',
       quoteCurrency: holding.currentPriceCurrency,
@@ -278,7 +220,7 @@ function proveHolding(
     return { ok: false, reason: 'ownership-unproven' }
   }
   if (rebuilt !== holding.instrumentKey) return { ok: false, reason: 'ownership-unproven' }
-  const quote = quoteCurrencyEncodedInInstrumentKey(rebuilt)
+  const quote = identity.quoteCurrency
   const liveQuote = normalizeCurrency(holding.currentPriceCurrency)
   if (!quote || !liveQuote || quote !== liveQuote || quote !== reportCurrency) {
     return {

@@ -10,6 +10,7 @@ All notable changes to Shikin are documented in this file.
 - Bills calculates monthly equivalents with exact core arithmetic: a weekly 37.00 bill is now 160.77/month (was 160.76), and a few near-limit amounts move by one cent. Rules with an unknown frequency, an invalid amount, or an oversized amount show an unavailable estimate with a reason instead of an invented number. Their rows still appear.
 - Reports, forecasts, and spending insights are no longer discarded or reloaded when the same currency history is simply reloaded. A real change (main currency, or an added, removed, or reordered exchange-rate record) still invalidates them, and missing currency authority still shows as incomplete.
 - Recurring catch-up is all-or-nothing in the CLI, app, and browser bridge: if any due rule fails, no occurrences, balances, or next dates change. New occurrences keep the rule's subcategory, tags, and destination. Archived accounts, invalid anchor days, and unknown frequencies are refused consistently. If entries are saved but the screen fails to refresh, the app shows a warning instead of reporting a failed save.
+- Update controls in the app and in Settings ignore repeat clicks while a check, install, or restart is already running, so an update never installs twice. If the available version is already installed, Settings offers Restart instead of Install.
 
 ### Internal structure
 

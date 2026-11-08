@@ -487,6 +487,69 @@ describe('App startup orchestration', () => {
     })
   })
 
+  it('pins a startup retry while the original update check is still pending', async () => {
+    const user = userEvent.setup()
+    mockMaterializeTransactions.mockRejectedValue(new Error('Recurring down'))
+    const pending: (() => void)[] = []
+    mockGetAvailableUpdate.mockImplementation(
+      () => new Promise<null>((resolve) => pending.push(() => resolve(null)))
+    )
+    render(<App />)
+    expect(mockGetAvailableUpdate).not.toHaveBeenCalled()
+    await screen.findByRole('button', { name: 'Retry startup' })
+    expect(mockGetAvailableUpdate).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', { name: 'Retry startup' }))
+    expect(mockMaterializeTransactions).toHaveBeenCalledTimes(2)
+    expect(mockGetAvailableUpdate).toHaveBeenCalledTimes(1)
+    await act(async () => pending.forEach((resolve) => resolve()))
+    mockGetAvailableUpdate.mockReset().mockResolvedValue(null)
+    await user.click(screen.getByRole('button', { name: 'Retry startup' }))
+    expect(mockGetAvailableUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it('pins an already-started same-version check settling after install and failed restart', async () => {
+    const user = userEvent.setup()
+    const update = { available: true, version: '0.2.7', downloadAndInstall: vi.fn() }
+    let finishCheck!: () => void
+    mockMaterializeTransactions.mockRejectedValue(new Error('Recurring down'))
+    mockGetAvailableUpdate.mockResolvedValueOnce(update).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishCheck = () => resolve(update)
+        })
+    )
+    mockRelaunchToApplyUpdate.mockRejectedValueOnce(new Error('Restart failed'))
+    render(<App />)
+    await screen.findByRole('button', { name: 'Update & restart' })
+    await user.click(screen.getByRole('button', { name: 'Retry startup' }))
+    await user.click(screen.getByRole('button', { name: 'Update & restart' }))
+    expect(await screen.findByText('Version 0.2.7 is installed')).toBeInTheDocument()
+    await act(async () => finishCheck())
+    const card = observeUpdateCard.mock.lastCall![0] as UpdateCardProps
+    expect(card.readyToRestart).toBe(true)
+    expect(card.phase).toBe('error')
+    await act(async () => card.onUpdateAndRestart())
+    expect(mockInstallUpdate).toHaveBeenCalledTimes(1)
+    expect(mockRelaunchToApplyUpdate).toHaveBeenCalledTimes(2)
+  })
+
+  it('pins a retained action after its version is installed and restart fails', async () => {
+    mockGetAvailableUpdate.mockResolvedValueOnce({
+      available: true,
+      version: '0.2.7',
+      downloadAndInstall: vi.fn(),
+    })
+    mockRelaunchToApplyUpdate.mockRejectedValueOnce(new Error('Restart failed'))
+    render(<App />)
+    await screen.findByRole('button', { name: 'Update & restart' })
+    const install = (observeUpdateCard.mock.lastCall![0] as UpdateCardProps).onUpdateAndRestart
+    await act(async () => install())
+    expect(await screen.findByText('Version 0.2.7 is installed')).toBeInTheDocument()
+    await act(async () => install())
+    expect(mockInstallUpdate).toHaveBeenCalledTimes(1)
+    expect(mockRelaunchToApplyUpdate).toHaveBeenCalledTimes(2)
+  })
+
   it('preserves literal progress tuples, reset, and the immediate duplicate-install guard', async () => {
     const user = userEvent.setup()
     mockGetAvailableUpdate.mockResolvedValueOnce({

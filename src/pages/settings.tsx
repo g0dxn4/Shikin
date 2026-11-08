@@ -103,6 +103,10 @@ export function SettingsPage() {
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false)
   const [isInstallingUpdate, setIsInstallingUpdate] = useState(false)
   const [isRestartingForUpdate, setIsRestartingForUpdate] = useState(false)
+  const updateCheckInFlightRef = useRef(false)
+  const updateInstallInFlightRef = useRef(false)
+  const updateRestartInFlightRef = useRef(false)
+  const readyUpdateVersionRef = useRef<string | null>(null)
   const [updateCheckedAt, setUpdateCheckedAt] = useState<string | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
   const { downloadedBytes, downloadTotalBytes, resetDownloadProgress, onDownloadProgress } =
@@ -275,6 +279,8 @@ export function SettingsPage() {
   }
 
   const handleCheckForUpdates = async () => {
+    if (updateCheckInFlightRef.current) return
+    updateCheckInFlightRef.current = true
     setIsCheckingUpdates(true)
     setUpdateError(null)
     resetDownloadProgress()
@@ -282,11 +288,14 @@ export function SettingsPage() {
 
     try {
       const update = await getAvailableUpdate()
-      setAvailableUpdate(update)
+      const alreadyInstalled = update && update.version === readyUpdateVersionRef.current
+      setAvailableUpdate(alreadyInstalled ? null : update)
       setUpdateCheckedAt(new Date().toISOString())
       setLastCheckResult(update ? 'available' : 'none')
 
-      if (update) {
+      if (alreadyInstalled) {
+        toast.success(t('updates.installedToast', { version: update.version }))
+      } else if (update) {
         toast.success(t('updates.availableToast', { version: update.version }))
       } else {
         toast.success(t('updates.noneToast'))
@@ -297,12 +306,19 @@ export function SettingsPage() {
       setLastCheckResult(null)
       toast.error(message)
     } finally {
+      updateCheckInFlightRef.current = false
       setIsCheckingUpdates(false)
     }
   }
 
   const handleInstallUpdate = async () => {
-    if (!availableUpdate) return
+    if (
+      updateInstallInFlightRef.current ||
+      !availableUpdate ||
+      availableUpdate.version === readyUpdateVersionRef.current
+    )
+      return
+    updateInstallInFlightRef.current = true
 
     setIsInstallingUpdate(true)
     setUpdateError(null)
@@ -312,6 +328,7 @@ export function SettingsPage() {
     try {
       const version = availableUpdate.version
       await installUpdate(availableUpdate, onDownloadProgress)
+      readyUpdateVersionRef.current = version
       setAvailableUpdate(null)
       setReadyUpdateVersion(version)
       toast.success(t('updates.installedToast', { version }))
@@ -320,11 +337,14 @@ export function SettingsPage() {
       setUpdateError(message)
       toast.error(message)
     } finally {
+      updateInstallInFlightRef.current = false
       setIsInstallingUpdate(false)
     }
   }
 
   const handleRestartToApplyUpdate = async () => {
+    if (updateRestartInFlightRef.current) return
+    updateRestartInFlightRef.current = true
     setIsRestartingForUpdate(true)
     setUpdateError(null)
     setLastUpdateAction('restart')
@@ -336,6 +356,8 @@ export function SettingsPage() {
       setUpdateError(message)
       setIsRestartingForUpdate(false)
       toast.error(message)
+    } finally {
+      updateRestartInFlightRef.current = false
     }
   }
 

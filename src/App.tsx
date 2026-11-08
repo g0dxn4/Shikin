@@ -78,6 +78,7 @@ export default function App() {
     useUpdateDownloadProgress()
   const [readyUpdateVersion, setReadyUpdateVersion] = useState<string | null>(null)
   const startupInFlightRef = useRef(false)
+  const updateCheckInFlightRef = useRef(false)
   const updateInFlightRef = useRef(false)
   const readyUpdateVersionRef = useRef<string | null>(null)
   const materializeTransactions = useRecurringStore((s) => s.materializeTransactions)
@@ -107,11 +108,17 @@ export default function App() {
   }, [])
 
   const checkStartupUpdate = useCallback(async () => {
-    if (updateInFlightRef.current || readyUpdateVersionRef.current) return
+    if (
+      updateCheckInFlightRef.current ||
+      updateInFlightRef.current ||
+      readyUpdateVersionRef.current
+    )
+      return
+    updateCheckInFlightRef.current = true
 
     try {
       const update = await getAvailableUpdate()
-      if (!update) return
+      if (!update || update.version === readyUpdateVersionRef.current) return
 
       setStartupUpdate(update)
       readyUpdateVersionRef.current = null
@@ -122,6 +129,8 @@ export default function App() {
       setUpdatePromptDismissed(false)
     } catch (error) {
       console.error('Update check failed:', getErrorMessage(error))
+    } finally {
+      updateCheckInFlightRef.current = false
     }
   }, [resetDownloadProgress])
 
@@ -140,7 +149,7 @@ export default function App() {
   const installAndRestartStartupUpdate = useCallback(async () => {
     if (updateInFlightRef.current) return
 
-    if (readyUpdateVersion) {
+    if (readyUpdateVersionRef.current) {
       updateInFlightRef.current = true
       try {
         await restartForStartupUpdate()
@@ -170,13 +179,7 @@ export default function App() {
     } finally {
       updateInFlightRef.current = false
     }
-  }, [
-    onDownloadProgress,
-    readyUpdateVersion,
-    resetDownloadProgress,
-    restartForStartupUpdate,
-    startupUpdate,
-  ])
+  }, [onDownloadProgress, resetDownloadProgress, restartForStartupUpdate, startupUpdate])
 
   const runStartupTasks = useCallback(() => {
     if (startupInFlightRef.current) return

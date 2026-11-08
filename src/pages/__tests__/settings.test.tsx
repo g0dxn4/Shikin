@@ -142,6 +142,15 @@ function renderSettings(initialEntry = '/settings') {
 }
 
 describe('SettingsPage', () => {
+  const updateAction = (label: string) =>
+    observeButton.mock.calls
+      .map(([props]) => props as ButtonProps)
+      .reverse()
+      .find((props) => Array.isArray(props.children) && props.children.includes(label))!.onClick!
+
+  const clickAction = (action: NonNullable<ButtonProps['onClick']>) =>
+    action({} as Parameters<NonNullable<ButtonProps['onClick']>>[0])
+
   beforeEach(() => {
     vi.clearAllMocks()
     storageMocks.get.mockResolvedValue('')
@@ -649,25 +658,104 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('offers both install and restart after rechecking the installed version', async () => {
+  it('pins same-tick duplicate checks and permits checking again after a failure', async () => {
+    const pending: ((error: unknown) => void)[] = []
+    mockGetAvailableUpdate.mockImplementation(
+      () => new Promise((_resolve, reject) => pending.push(reject))
+    )
+    renderSettings('/settings?section=data')
+    await screen.findByText('0.1.0')
+    const check = updateAction('updates.check')
+    act(() => {
+      clickAction(check)
+      clickAction(check)
+    })
+    expect(mockGetAvailableUpdate).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: 'updates.checking' })).toBeDisabled()
+    await act(async () => pending.forEach((reject) => reject(new Error('Check failed'))))
+    expect(mockToastError.mock.calls).toEqual([['Check failed']])
+    expect(screen.getByText('Check failed')).toBeInTheDocument()
+    mockGetAvailableUpdate.mockReset().mockResolvedValue(null)
+    await userEvent.click(screen.getByRole('button', { name: 'updates.retry' }))
+    expect(mockGetAvailableUpdate).toHaveBeenCalledTimes(1)
+    expect(mockToastSuccess).toHaveBeenLastCalledWith('updates.noneToast')
+  })
+
+  it('pins same-tick duplicate restarts and retains restart-only retry', async () => {
+    const user = userEvent.setup()
+    mockGetAvailableUpdate.mockResolvedValueOnce({
+      available: true,
+      version: '0.2.0',
+      downloadAndInstall: vi.fn(),
+    })
+    const pending: ((error: unknown) => void)[] = []
+    mockRelaunchToApplyUpdate.mockImplementation(
+      () => new Promise<void>((_resolve, reject) => pending.push(reject))
+    )
+    renderSettings('/settings?section=data')
+    await user.click(screen.getByRole('button', { name: 'updates.check' }))
+    await user.click(await screen.findByRole('button', { name: 'updates.install' }))
+    const restart = updateAction('updates.restart')
+    act(() => {
+      clickAction(restart)
+      clickAction(restart)
+    })
+    expect(mockRelaunchToApplyUpdate).toHaveBeenCalledTimes(1)
+    await act(async () => pending.forEach((reject) => reject(new Error('Restart failed'))))
+    expect(mockToastError.mock.calls).toEqual([['Restart failed']])
+    mockRelaunchToApplyUpdate.mockReset().mockResolvedValue(undefined)
+    await user.click(screen.getByRole('button', { name: 'updates.retry' }))
+    expect(mockRelaunchToApplyUpdate).toHaveBeenCalledTimes(1)
+    expect(mockInstallUpdate).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['0.2.1', 'v0.2.0', '0.2.0 ', ' 0.2.0', '0.2.0+build', '0.2.0-rc'])(
+    'keeps a distinct rechecked version %j installable without parsing or normalization',
+    async (version) => {
+      const user = userEvent.setup()
+      const update = { available: true, version: '0.2.0', downloadAndInstall: vi.fn() }
+      const next = { ...update, version }
+      mockGetAvailableUpdate.mockResolvedValueOnce(update).mockResolvedValueOnce(next)
+      renderSettings('/settings?section=data')
+      await user.click(screen.getByRole('button', { name: 'updates.check' }))
+      await user.click(await screen.findByRole('button', { name: 'updates.install' }))
+      await user.click(screen.getByRole('button', { name: 'updates.check' }))
+      expect(screen.getByRole('button', { name: 'updates.install' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'updates.restart' })).toBeEnabled()
+      expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent(
+        'updates.availableToast'
+      )
+      await user.click(screen.getByRole('button', { name: 'updates.install' }))
+      expect(mockInstallUpdate).toHaveBeenCalledTimes(2)
+      expect(mockInstallUpdate.mock.calls[1][0]).toBe(next)
+      expect(mockRelaunchToApplyUpdate).not.toHaveBeenCalled()
+    }
+  )
+
+  it('offers only restart after rechecking the installed version, including retained handlers', async () => {
     const user = userEvent.setup()
     const update = { available: true, version: '0.2.0', downloadAndInstall: vi.fn() }
     mockGetAvailableUpdate.mockResolvedValueOnce(update).mockResolvedValueOnce(update)
     renderSettings('/settings?section=data')
     await user.click(screen.getByRole('button', { name: 'updates.check' }))
+    const install = updateAction('updates.install')
     await user.click(await screen.findByRole('button', { name: 'updates.install' }))
     expect(await screen.findByRole('button', { name: 'updates.restart' })).toBeEnabled()
     expect(mockRelaunchToApplyUpdate).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'updates.check' }))
-    expect(await screen.findByRole('button', { name: 'updates.install' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'updates.install' })).not.toBeInTheDocument()
+    expect(mockToastSuccess).toHaveBeenLastCalledWith('updates.installedToast')
+    expect(document.querySelector('[aria-live="polite"]')).not.toHaveTextContent(
+      'updates.availableToast'
+    )
     expect(screen.getByRole('button', { name: 'updates.restart' })).toBeEnabled()
-    await user.click(screen.getByRole('button', { name: 'updates.install' }))
-    expect(mockInstallUpdate).toHaveBeenCalledTimes(2)
+    await act(async () => clickAction(install))
+    expect(mockInstallUpdate).toHaveBeenCalledTimes(1)
     expect(mockRelaunchToApplyUpdate).not.toHaveBeenCalled()
   })
 
-  it('keeps the old same-render double-handler behavior without an immediate guard', async () => {
+  it('guards same-render duplicate installs immediately', async () => {
     const user = userEvent.setup()
     mockGetAvailableUpdate.mockResolvedValueOnce({
       available: true,
@@ -689,11 +777,10 @@ describe('SettingsPage', () => {
       installProps.onClick!({} as Parameters<NonNullable<ButtonProps['onClick']>>[0])
       installProps.onClick!({} as Parameters<NonNullable<ButtonProps['onClick']>>[0])
     })
-    expect(mockInstallUpdate).toHaveBeenCalledTimes(2)
+    expect(mockInstallUpdate).toHaveBeenCalledTimes(1)
     await act(async () => pending.forEach((resolve) => resolve()))
     expect(mockToastSuccess.mock.calls).toEqual([
       ['updates.availableToast'],
-      ['updates.installedToast'],
       ['updates.installedToast'],
     ])
     expect(mockRelaunchToApplyUpdate).not.toHaveBeenCalled()

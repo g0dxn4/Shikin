@@ -18,7 +18,7 @@ vi.mock('../ulid.js', () => ({
   generateId: () => `audit-${++holder.nextAuditId}`,
 }))
 
-vi.mock('./credit-cards.js', () => ({
+vi.mock('../statement-read.js', () => ({
   getCreditCardBillEntries: () => [],
 }))
 

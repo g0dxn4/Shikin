@@ -3313,6 +3313,435 @@ describe('CLI tool validation regressions', () => {
     })
   })
 
+  describe('statement display/read characterization', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date(2026, 4, 20, 12))
+    })
+
+    afterEach(() => vi.useRealTimers())
+
+    const card = {
+      id: 'cc-display',
+      name: 'Private Card',
+      type: 'credit_card',
+      currency: 'USD',
+      balance: -10000,
+      credit_limit: 50000,
+      statement_closing_day: 15,
+      payment_due_day: 25,
+      is_archived: 0,
+    }
+    const statement = {
+      id: 'stmt-display',
+      account_id: card.id,
+      account_name: card.name,
+      statement_start_date: '2026-04-16',
+      statement_end_date: '2026-05-15',
+      due_date: '2026-05-25',
+      statement_balance: 10000,
+      minimum_payment: 2000,
+      paid_amount: 0,
+      unattributed_paid_amount: 0,
+      currency: 'USD',
+      status: 'open',
+      source: 'private import',
+      note: 'private note',
+    }
+
+    function mockStatements(rows: Array<typeof statement>, cards = [card]) {
+      mockQuery.mockImplementation((sql: string) => {
+        if (sql.includes('sqlite_master')) return [{ count: 1 }]
+        if (sql.includes('PRAGMA table_info(credit_card_statements)')) {
+          return Object.keys(statement).map((name) => ({ name }))
+        }
+        if (sql.includes('FROM credit_card_statements s')) return rows
+        if (sql.includes("FROM accounts WHERE type = 'credit_card'")) return cards
+        return []
+      })
+    }
+
+    it.each([
+      {
+        name: 'future minimum is capped at the balance',
+        changes: { minimum_payment: 15000 },
+        paymentStatus: 'open',
+        amountToPay: 100,
+        minimumPaymentDue: 100,
+      },
+      {
+        name: 'persisted overdue overrides a future due date and positive payment',
+        changes: { status: 'overdue', paid_amount: 1000 },
+        paymentStatus: 'overdue',
+        amountToPay: 90,
+        minimumPaymentDue: 10,
+      },
+      {
+        name: 'persisted partial overrides zero payment on a future statement',
+        changes: { status: 'partial' },
+        paymentStatus: 'partial',
+        amountToPay: 100,
+        minimumPaymentDue: 20,
+      },
+      {
+        name: 'past due overrides persisted partial and clamps a satisfied minimum',
+        changes: { status: 'partial', due_date: '2026-05-19', paid_amount: 3000 },
+        paymentStatus: 'overdue',
+        amountToPay: 70,
+        minimumPaymentDue: 0,
+      },
+      {
+        name: 'past due overrides open without payment',
+        changes: { due_date: '2026-05-19' },
+        paymentStatus: 'overdue',
+        amountToPay: 100,
+        minimumPaymentDue: 20,
+      },
+      {
+        name: 'due today is not overdue',
+        changes: { due_date: '2026-05-20' },
+        paymentStatus: 'open',
+        amountToPay: 100,
+        minimumPaymentDue: 20,
+      },
+      {
+        name: 'due today with payment is partial',
+        changes: { due_date: '2026-05-20', paid_amount: 1000 },
+        paymentStatus: 'partial',
+        amountToPay: 90,
+        minimumPaymentDue: 10,
+      },
+      {
+        name: 'zero balance overrides persisted overdue and a past due date',
+        changes: { statement_balance: 0, status: 'overdue', due_date: '2026-05-19' },
+        paymentStatus: 'paid',
+        amountToPay: 0,
+        minimumPaymentDue: 0,
+      },
+      {
+        name: 'full payment overrides persisted overdue',
+        changes: { paid_amount: 10000, status: 'overdue', due_date: '2026-05-19' },
+        paymentStatus: 'paid',
+        amountToPay: 0,
+        minimumPaymentDue: 0,
+      },
+      {
+        name: 'overpayment overrides persisted partial and clamps both dues',
+        changes: { paid_amount: 12000, status: 'partial', due_date: '2026-05-19' },
+        paymentStatus: 'paid',
+        amountToPay: 0,
+        minimumPaymentDue: 0,
+      },
+      {
+        name: 'persisted paid does not hide an unpaid future statement',
+        changes: { status: 'paid' },
+        paymentStatus: 'open',
+        amountToPay: 100,
+        minimumPaymentDue: 20,
+      },
+    ])(
+      'pairs card, context, and bills displays: $name',
+      async ({ changes, paymentStatus, amountToPay, minimumPaymentDue }) => {
+        const row = { ...statement, ...changes }
+        row.unattributed_paid_amount = row.paid_amount
+        mockStatements([row])
+
+        const listed = await listCreditCardStatements.execute(
+          listCreditCardStatements.schema.parse({})
+        )
+        const context = await automationContext.execute(
+          automationContext.schema.parse({ redacted: true })
+        )
+        const upcoming = await getUpcomingBills.execute(getUpcomingBills.schema.parse({}))
+        const display = {
+          id: row.id,
+          status: row.status,
+          paymentStatus,
+          amountToPay,
+          amountToPayCentavos: amountToPay * 100,
+          minimumPaymentDue,
+          minimumPaymentDueCentavos: minimumPaymentDue * 100,
+          legacyOverpaid: row.paid_amount > row.statement_balance,
+        }
+
+        expect(listed).toMatchObject({ success: true, count: 1, statements: [display] })
+        expect(context.creditCards.statements).toMatchObject([display])
+        expect(listed.statements[0]).toMatchObject({
+          accountName: 'Private Card',
+          source: 'private import',
+          note: 'private note',
+        })
+        expect(context.creditCards.statements[0]).toMatchObject({
+          accountName: '[REDACTED]',
+          source: '[REDACTED]',
+          note: '[REDACTED]',
+        })
+        expect(context.creditCards.dues.map((due: { id: string }) => due.id)).toEqual(
+          amountToPay > 0 ? [row.id] : []
+        )
+        expect(upcoming.bills).toEqual(
+          amountToPay > 0
+            ? [
+                {
+                  name: 'Private Card payment',
+                  amount: amountToPay,
+                  currency: 'USD',
+                  dueDate: row.due_date,
+                  source: 'credit_card',
+                  daysUntilDue: dayjs(row.due_date).diff(dayjs(), 'day'),
+                  accountId: card.id,
+                  statementId: row.id,
+                  statementBalance: row.statement_balance / 100,
+                  minimumPayment: row.minimum_payment / 100,
+                  minimumPaymentDue,
+                  paidAmount: row.paid_amount / 100,
+                  paymentStatus,
+                },
+              ]
+            : []
+        )
+        expect(mockExecute).not.toHaveBeenCalled()
+      }
+    )
+
+    it('preserves public statement key order and effective-status limits and ordering', async () => {
+      mockStatements([
+        { ...statement, id: 'paid', paid_amount: 10000, unattributed_paid_amount: 10000 },
+        { ...statement, id: 'first', status: 'partial' },
+        { ...statement, id: 'second', status: 'partial' },
+        { ...statement, id: 'third', status: 'partial' },
+      ])
+      const listed = await listCreditCardStatements.execute(
+        listCreditCardStatements.schema.parse({ status: 'partial', limit: 2 })
+      )
+      expect(listed.statements.map((row: { id: string }) => row.id)).toEqual(['first', 'second'])
+      expect(mockQuery.mock.calls[0]?.[0]).toContain(
+        'ORDER BY s.statement_end_date DESC, s.due_date DESC, s.id DESC'
+      )
+      expect(mockQuery.mock.calls[0]?.[0]).toContain('COALESCE(a.is_archived, 0) = 0')
+      expect(mockQuery.mock.calls[0]?.[1]).toEqual([1000])
+      expect(Object.keys(listed.statements[0])).toEqual([
+        'id',
+        'accountId',
+        'accountName',
+        'statementPeriod',
+        'statementStartDate',
+        'statementEndDate',
+        'closingDate',
+        'dueDate',
+        'statementBalance',
+        'statementBalanceCentavos',
+        'minimumPayment',
+        'minimumPaymentCentavos',
+        'paidAmount',
+        'paidAmountCentavos',
+        'unattributedPaidAmount',
+        'unattributedPaidAmountCentavos',
+        'linkedPaidAmount',
+        'linkedPaidAmountCentavos',
+        'legacyOverpaid',
+        'amountToPayCentavos',
+        'amountToPay',
+        'minimumPaymentDueCentavos',
+        'minimumPaymentDue',
+        'currency',
+        'status',
+        'paymentStatus',
+        'source',
+        'note',
+        'createdAt',
+        'updatedAt',
+      ])
+
+      const context = await automationContext.execute(automationContext.schema.parse({}))
+      expect(context.creditCards.statements.map((row: { id: string }) => row.id)).toEqual([
+        'paid',
+        'first',
+        'second',
+        'third',
+      ])
+      expect(context.creditCards.dues.map((row: { id: string }) => row.id)).toEqual([
+        'first',
+        'second',
+        'third',
+      ])
+      const [contextSql] = mockQuery.mock.calls.find(
+        ([sql]) => sql.includes('FROM credit_card_statements s') && sql.includes('LIMIT 50')
+      )!
+      expect(contextSql).toContain("a.type = 'credit_card'")
+      expect(contextSql).toContain('a.is_archived = 0')
+      expect(contextSql).toContain(
+        'ORDER BY CASE WHEN s.statement_balance > s.paid_amount THEN 0 ELSE 1 END ASC,'
+      )
+      expect(contextSql).toContain('s.due_date ASC, s.statement_end_date DESC, s.id ASC')
+    })
+
+    it('keeps estimated fallback for cards without any selected statement and stable bill ties', async () => {
+      const fallback = { ...card, id: 'cc-estimated', name: 'Estimated Card', balance: -12345 }
+      const zero = { ...card, id: 'cc-zero', name: 'Zero Card', balance: 0 }
+      mockStatements(
+        [
+          { ...statement, id: 'overdue', due_date: '2026-05-19', status: 'partial' },
+          { ...statement, id: 'same-day' },
+          {
+            ...statement,
+            id: 'settled',
+            account_id: 'cc-settled',
+            paid_amount: 10000,
+            unattributed_paid_amount: 10000,
+          },
+        ],
+        [card, { ...card, id: 'cc-settled' }, fallback, zero]
+      )
+      const result = await getUpcomingBills.execute(getUpcomingBills.schema.parse({ daysAhead: 5 }))
+      expect(result.bills).toEqual([
+        expect.objectContaining({
+          statementId: 'overdue',
+          paymentStatus: 'overdue',
+          daysUntilDue: -1,
+        }),
+        expect.objectContaining({
+          statementId: 'same-day',
+          paymentStatus: 'open',
+          daysUntilDue: 4,
+        }),
+        {
+          name: 'Estimated Card payment',
+          amount: 123.45,
+          currency: 'USD',
+          dueDate: '2026-05-25',
+          source: 'credit_card',
+          daysUntilDue: 5,
+          accountId: 'cc-estimated',
+          statementId: null,
+          statementBalance: null,
+          minimumPayment: null,
+          minimumPaymentDue: null,
+          paidAmount: null,
+          paymentStatus: 'estimated',
+        },
+        expect.objectContaining({
+          accountId: 'cc-zero',
+          amount: 0,
+          statementId: null,
+          paymentStatus: 'estimated',
+        }),
+      ])
+      expect(result.summary).toEqual({
+        count: 4,
+        totalAmount: 323.45,
+        totalsByCurrency: [{ currency: 'USD', totalAmount: 323.45 }],
+        daysAhead: 5,
+        bySource: { creditCard: 4, subscription: 0, recurring: 0 },
+      })
+      const [billSql, billParams] = mockQuery.mock.calls.find(([sql]) =>
+        sql.includes('AND s.due_date <= $1')
+      )!
+      expect(billSql).toContain("a.type = 'credit_card'")
+      expect(billSql).toContain('a.is_archived = 0')
+      expect(billSql).toContain('ORDER BY s.due_date ASC, s.statement_end_date DESC')
+      expect(billParams).toEqual(['2026-05-25'])
+      expect(
+        mockQuery.mock.calls.some(([sql]) => sql.includes('payment_due_day IS NOT NULL'))
+      ).toBe(true)
+    })
+
+    it('keeps per-call default dates separate from explicit cycle as-of dates', async () => {
+      const row = { ...statement, due_date: '2026-05-20' }
+      mockStatements([row])
+      const before = await listCreditCardStatements.execute(
+        listCreditCardStatements.schema.parse({})
+      )
+      const contextBefore = await automationContext.execute(automationContext.schema.parse({}))
+      vi.setSystemTime(new Date(2026, 4, 21, 12))
+      const after = await listCreditCardStatements.execute(
+        listCreditCardStatements.schema.parse({})
+      )
+      const contextAfter = await automationContext.execute(automationContext.schema.parse({}))
+      expect(before.statements[0].paymentStatus).toBe('open')
+      expect(contextBefore.creditCards.statements[0].paymentStatus).toBe('open')
+      expect(after.statements[0].paymentStatus).toBe('overdue')
+      expect(contextAfter.creditCards.statements[0].paymentStatus).toBe('overdue')
+
+      mockQuery.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT * FROM accounts WHERE id = $1 LIMIT 1')) return [card]
+        if (sql.includes('FROM credit_card_statements s')) return [row]
+        return []
+      })
+      const explicit = await creditCardCycleExplain.execute(
+        creditCardCycleExplain.schema.parse({ accountId: card.id, asOf: '2026-05-20' })
+      )
+      expect(explicit).toMatchObject({
+        success: true,
+        asOf: '2026-05-20',
+        latestStatementPaymentStatus: 'open',
+        latestStatementDuePassed: false,
+      })
+    })
+
+    it('does not reuse the bill-query date for later effective display evaluation', async () => {
+      mockQuery.mockImplementation((sql: string) => {
+        if (sql.includes('FROM credit_card_statements s')) {
+          vi.setSystemTime(new Date(2026, 4, 21, 12))
+          return [{ ...statement, due_date: '2026-05-20' }]
+        }
+        return []
+      })
+      const result = await getUpcomingBills.execute(getUpcomingBills.schema.parse({ daysAhead: 5 }))
+      expect(result.bills).toEqual([
+        expect.objectContaining({ daysUntilDue: 0, paymentStatus: 'overdue' }),
+      ])
+      expect(mockQuery.mock.calls[0]?.[1]).toEqual(['2026-05-25'])
+    })
+
+    it('preserves B-02 mixed-currency scalar card summary totals', async () => {
+      const usd = { ...card, id: 'cc-usd', name: 'USD Card' }
+      const mxn = {
+        ...card,
+        id: 'cc-mxn',
+        name: 'MXN Card',
+        currency: 'MXN',
+        balance: -20000,
+        credit_limit: 100000,
+      }
+      mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
+        if (sql.includes("FROM accounts WHERE type = 'credit_card'")) return [mxn, usd]
+        if (sql.includes('FROM credit_card_statements s')) {
+          const selected = params?.[0] === mxn.id ? mxn : usd
+          return [
+            {
+              ...statement,
+              account_id: selected.id,
+              currency: selected.currency,
+              statement_balance: selected.id === mxn.id ? 20000 : 10000,
+              minimum_payment: selected.id === mxn.id ? 3000 : 2000,
+              paid_amount: selected.id === mxn.id ? 1000 : 0,
+              unattributed_paid_amount: selected.id === mxn.id ? 1000 : 0,
+            },
+          ]
+        }
+        if (sql.includes('COALESCE(SUM(t.amount), 0)')) return [{ total: 0 }]
+        return []
+      })
+      const result = await getCreditCardStatus.execute(getCreditCardStatus.schema.parse({}))
+      expect(result.cards.map((row: { id: string }) => row.id)).toEqual(['cc-mxn', 'cc-usd'])
+      expect(result.summary).toEqual({
+        totalCards: 2,
+        totalBalance: 300,
+        totalLimit: 1500,
+        totalAvailable: 1200,
+        overallUtilization: 20,
+        totalStatementBalance: 300,
+        totalAmountToPay: 290,
+        totalMinimumDue: 40,
+        paymentStatusCounts: { open: 1, partial: 1, paid: 0, overdue: 0 },
+      })
+      expect(result.message).toBe(
+        '2 credit card(s). Total balance: $300.00, utilization: 20%. Statements due: $290.00 total, $40.00 minimum.'
+      )
+    })
+  })
+
   it('uses canonical eligibility for current-period card spending', async () => {
     mockQuery.mockImplementation((sql: string) => {
       if (sql.includes("FROM accounts WHERE type = 'credit_card'")) {

@@ -21,6 +21,7 @@ import {
 import { setupStatusTools } from './setup-status.js'
 import { recurringTools } from './recurring.js'
 import { findTransactionDuplicate, transactionDuplicateReason } from '../duplicate-detection.js'
+import { paymentAmounts, effectiveStatementStatus } from '../statement-read.js'
 
 /*
 Automation context source inventory (kept here so future maintainers can audit each section):
@@ -437,31 +438,6 @@ function monthlySubscriptionCentavos(
     default:
       return amountCentavos
   }
-}
-
-function paymentAmounts(statement: CreditCardStatementContextRow) {
-  const amountToPayCentavos = Math.max(statement.statement_balance - statement.paid_amount, 0)
-  const minimumPaymentDueCentavos = Math.max(
-    Math.min(statement.minimum_payment, statement.statement_balance) - statement.paid_amount,
-    0
-  )
-
-  return {
-    amountToPayCentavos,
-    amountToPay: fromCentavos(amountToPayCentavos),
-    minimumPaymentDueCentavos,
-    minimumPaymentDue: fromCentavos(minimumPaymentDueCentavos),
-  }
-}
-
-function effectiveStatementStatus(statement: CreditCardStatementContextRow) {
-  const payment = paymentAmounts(statement)
-  if (payment.amountToPayCentavos <= 0) return 'paid'
-  if (statement.status === 'overdue' || dayjs(statement.due_date).isBefore(dayjs(), 'day')) {
-    return 'overdue'
-  }
-  if (statement.status === 'partial' || statement.paid_amount > 0) return 'partial'
-  return 'open'
 }
 
 function getAccountsContext(redacted: boolean) {

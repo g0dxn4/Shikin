@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertCircle, ArrowRight, Link2 } from 'lucide-react'
+import { AlertCircle, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -559,8 +559,4 @@ export function RecordCardPaymentDialog({
       </DialogContent>
     </Dialog>
   )
-}
-
-export function PaymentEvidenceIcon() {
-  return <Link2 aria-hidden="true" />
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { History, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -41,26 +41,6 @@ function localDate(): string {
 
 function signedAmount(type: string, amount: number): number {
   return type === 'income' ? amount : -amount
-}
-
-export function AccountMaintenanceAction({ account }: { account: Account }) {
-  const { t } = useTranslation('accountHistory')
-  const [open, setOpen] = useState(false)
-  if (account.account_mode === 'snapshot_only') return null
-  return (
-    <>
-      <Button
-        variant="outline"
-        size="sm"
-        className="min-h-11 sm:min-h-9"
-        onClick={() => setOpen(true)}
-      >
-        <History aria-hidden="true" />
-        {t('action')}
-      </Button>
-      <AccountMaintenanceDialog account={account} open={open} onOpenChange={setOpen} />
-    </>
-  )
 }
 
 export function AccountMaintenanceDialog({

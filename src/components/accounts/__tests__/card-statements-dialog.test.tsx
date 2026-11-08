@@ -100,6 +100,7 @@ describe('CardStatementsDialog', () => {
 
   it('requires reviewed confirmation before recording a real atomic transfer', async () => {
     const user = userEvent.setup()
+    const onChanged = vi.fn().mockResolvedValue(undefined)
     service.previewRecordCardPayment.mockResolvedValue({
       revision: 7,
       token: 'payment-token',
@@ -114,7 +115,9 @@ describe('CardStatementsDialog', () => {
     })
     service.recordCardPayment.mockResolvedValue({ transactionId: 'new-payment', statement })
 
-    render(<CardStatementsDialog open onOpenChange={vi.fn()} account={account} />)
+    render(
+      <CardStatementsDialog open onOpenChange={vi.fn()} account={account} onChanged={onChanged} />
+    )
     await user.click(await screen.findByRole('button', { name: /payment.action/ }))
     expect(await screen.findByLabelText('payment.from')).toHaveValue('bank')
 
@@ -127,6 +130,7 @@ describe('CardStatementsDialog', () => {
     expect(within(paymentDialog).getByText('review.resultingSource')).toBeInTheDocument()
     expect(within(paymentDialog).getByText('review.resultingCard')).toBeInTheDocument()
     expect(service.recordCardPayment).not.toHaveBeenCalled()
+    expect(onChanged).not.toHaveBeenCalled()
     await user.click(within(paymentDialog).getByRole('button', { name: 'actions.confirm' }))
 
     await waitFor(() => {
@@ -141,6 +145,8 @@ describe('CardStatementsDialog', () => {
         'payment-token'
       )
       expect(invalidateTransactionPage).toHaveBeenCalledWith('add')
+      expect(onChanged).toHaveBeenCalledTimes(1)
+      expect(service.listCardStatements).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -208,7 +214,7 @@ describe('CardStatementsDialog', () => {
     expect(within(paymentDialog).queryByRole('button', { name: 'actions.confirm' })).toBeNull()
     expect(within(paymentDialog).getByRole('button', { name: 'actions.close' })).toBeInTheDocument()
     expect(invalidateTransactionPage).toHaveBeenCalledWith('add')
-    expect(onChanged).toHaveBeenCalled()
+    expect(onChanged).toHaveBeenCalledTimes(1)
   })
 
   it('still refreshes and invalidates a committed transfer after the dialog unmounts', async () => {
@@ -240,7 +246,7 @@ describe('CardStatementsDialog', () => {
 
     await waitFor(() => {
       expect(invalidateTransactionPage).toHaveBeenCalledWith('add')
-      expect(onChanged).toHaveBeenCalled()
+      expect(onChanged).toHaveBeenCalledTimes(1)
     })
   })
 

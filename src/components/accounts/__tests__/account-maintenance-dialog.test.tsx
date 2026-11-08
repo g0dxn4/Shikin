@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { AccountMaintenanceAction, AccountMaintenanceDialog } from '../account-maintenance-dialog'
+import { AccountMaintenanceDialog } from '../account-maintenance-dialog'
 import type { Account } from '@/types/database'
 
 const mocks = vi.hoisted(() => ({
@@ -98,7 +98,7 @@ const history = {
   corrections: [],
 }
 
-describe('AccountMaintenanceAction', () => {
+describe('AccountMaintenanceDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.read.mockResolvedValue(history)
@@ -127,36 +127,56 @@ describe('AccountMaintenanceAction', () => {
     mocks.supersede.mockResolvedValue({ correctionId: 'correction', refreshIncomplete: false })
   })
 
-  it('is hidden for snapshot-only accounts', () => {
-    const { container } = render(
-      <AccountMaintenanceAction account={{ ...account, account_mode: 'snapshot_only' }} />
-    )
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it('supports keyboard opening, reviewed preview, and separate confirmation', async () => {
+  it('requires a reviewed preview and separate confirmation with the exact finalization payload', async () => {
     const user = userEvent.setup()
-    render(<AccountMaintenanceAction account={account} />)
-    await user.tab()
-    expect(screen.getByRole('button', { name: 'action' })).toHaveFocus()
-    await user.keyboard('{Enter}')
+    render(<AccountMaintenanceDialog account={account} open onOpenChange={vi.fn()} />)
     expect(await screen.findByText('title')).toBeInTheDocument()
     await waitFor(() => expect(mocks.read).toHaveBeenCalledWith('a'))
 
     const checkboxes = screen.getAllByRole('checkbox')
     await user.click(checkboxes[1]!) // exact coverage evidence
     await user.click(checkboxes[2]!) // exact staged row
+    await user.clear(screen.getByLabelText('coverage.start'))
+    await user.type(screen.getByLabelText('coverage.start'), '2025-01-01')
+    await user.clear(screen.getByLabelText('coverage.end'))
+    await user.type(screen.getByLabelText('coverage.end'), '2025-01-31')
     await user.type(screen.getByLabelText('finalize.balance'), '0')
     await user.click(screen.getByRole('button', { name: 'finalize.preview' }))
 
     await waitFor(() => expect(mocks.previewFinalization).toHaveBeenCalledTimes(1))
+    expect(mocks.previewFinalization.mock.calls).toStrictEqual([
+      [
+        {
+          accountId: 'a',
+          transactionIds: ['staged'],
+          coverageIds: ['coverage'],
+          acknowledgeProvisional: false,
+          provisionalProvenance: undefined,
+          statementStartDate: '2025-01-01',
+          statementEndDate: '2025-01-31',
+          actualBalanceCentavos: 0,
+        },
+      ],
+    ])
     expect(mocks.finalize).not.toHaveBeenCalled()
     expect(screen.getByRole('status')).toHaveTextContent('finalize.bridge')
     await user.click(screen.getByRole('button', { name: 'finalize.confirm' }))
     await waitFor(() =>
-      expect(mocks.finalize).toHaveBeenCalledWith(
-        expect.objectContaining({ previewToken: 'reviewed-token', transactionIds: ['staged'] })
-      )
+      expect(mocks.finalize.mock.calls).toStrictEqual([
+        [
+          {
+            accountId: 'a',
+            transactionIds: ['staged'],
+            coverageIds: ['coverage'],
+            acknowledgeProvisional: false,
+            provisionalProvenance: undefined,
+            statementStartDate: '2025-01-01',
+            statementEndDate: '2025-01-31',
+            actualBalanceCentavos: 0,
+            previewToken: 'reviewed-token',
+          },
+        ],
+      ])
     )
   })
 
@@ -192,8 +212,7 @@ describe('AccountMaintenanceAction', () => {
       ],
     })
     const user = userEvent.setup()
-    render(<AccountMaintenanceAction account={account} />)
-    await user.click(screen.getByRole('button', { name: 'action' }))
+    render(<AccountMaintenanceDialog account={account} open onOpenChange={vi.fn()} />)
     await screen.findByText('title')
     const checkboxes = screen.getAllByRole('checkbox')
     await user.click(checkboxes[1]!)
@@ -217,8 +236,7 @@ describe('AccountMaintenanceAction', () => {
   it('shows an honest error and does not expose confirmation when preview fails', async () => {
     mocks.previewFinalization.mockRejectedValueOnce(new Error('Coverage is incomplete'))
     const user = userEvent.setup()
-    render(<AccountMaintenanceAction account={account} />)
-    await user.click(screen.getByRole('button', { name: 'action' }))
+    render(<AccountMaintenanceDialog account={account} open onOpenChange={vi.fn()} />)
     await screen.findByText('title')
     const checkboxes = screen.getAllByRole('checkbox')
     await user.click(checkboxes[1]!)
@@ -234,9 +252,7 @@ describe('AccountMaintenanceAction', () => {
       ...history,
       transactions: [{ ...staged, import_source: null }],
     })
-    const user = userEvent.setup()
-    render(<AccountMaintenanceAction account={account} />)
-    await user.click(screen.getByRole('button', { name: 'action' }))
+    render(<AccountMaintenanceDialog account={account} open onOpenChange={vi.fn()} />)
     expect(await screen.findByRole('button', { name: 'identity-action-staged' })).toBeVisible()
   })
 
@@ -249,8 +265,7 @@ describe('AccountMaintenanceAction', () => {
         })
     )
     const user = userEvent.setup()
-    render(<AccountMaintenanceAction account={account} />)
-    await user.click(screen.getByRole('button', { name: 'action' }))
+    render(<AccountMaintenanceDialog account={account} open onOpenChange={vi.fn()} />)
     await screen.findByText('title')
     const checkboxes = screen.getAllByRole('checkbox')
     await user.click(checkboxes[1]!)
@@ -278,8 +293,7 @@ describe('AccountMaintenanceAction', () => {
   it('clears confirmation after a rejected apply and requires a fresh review', async () => {
     mocks.finalize.mockRejectedValueOnce(new Error('stale reviewed preview token'))
     const user = userEvent.setup()
-    render(<AccountMaintenanceAction account={account} />)
-    await user.click(screen.getByRole('button', { name: 'action' }))
+    render(<AccountMaintenanceDialog account={account} open onOpenChange={vi.fn()} />)
     await screen.findByText('title')
     const checkboxes = screen.getAllByRole('checkbox')
     await user.click(checkboxes[1]!)
@@ -298,8 +312,7 @@ describe('AccountMaintenanceAction', () => {
       refreshIncomplete: true,
     })
     const user = userEvent.setup()
-    render(<AccountMaintenanceAction account={account} />)
-    await user.click(screen.getByRole('button', { name: 'action' }))
+    render(<AccountMaintenanceDialog account={account} open onOpenChange={vi.fn()} />)
     await screen.findByText('title')
     const checkboxes = screen.getAllByRole('checkbox')
     await user.click(checkboxes[1]!)

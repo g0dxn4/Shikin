@@ -24,7 +24,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { formatMoney, fromCentavos, toCentavos } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
-import { useAccountStore } from '@/stores/account-store'
 import {
   createCardStatement,
   deleteCardStatement,
@@ -83,32 +82,6 @@ function ErrorNotice({ message }: { message: string | null }) {
       <span>{message}</span>
     </div>
   ) : null
-}
-
-export function CardStatementsAction({ account }: { account: Account }) {
-  const { t } = useTranslation('cardPayments')
-  const refreshAccounts = useAccountStore((state) => state.fetch)
-  const [open, setOpen] = useState(false)
-  if (account.type !== 'credit_card') return null
-  return (
-    <>
-      <Button
-        variant="outline"
-        size="sm"
-        className="min-h-11 sm:min-h-9"
-        onClick={() => setOpen(true)}
-      >
-        <ReceiptText />
-        {t('action')}
-      </Button>
-      <CardStatementsDialog
-        open={open}
-        onOpenChange={setOpen}
-        account={account}
-        onChanged={() => refreshAccounts()}
-      />
-    </>
-  )
 }
 
 export function StatementEditorDialog({

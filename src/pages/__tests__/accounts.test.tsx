@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router'
 import { Accounts } from '../accounts'
 import { useCurrencyStore } from '@/stores/currency-store'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 
 function CurrentLocation() {
   const location = useLocation()
@@ -118,13 +119,18 @@ vi.mock('@/components/accounts/account-maintenance-dialog', () => ({
     account: { name: string }
     open: boolean
     onOpenChange: (open: boolean) => void
-  }) =>
-    open ? (
-      <div role="dialog" aria-label={`Maintain ${account.name}`}>
-        <span role="status">errors.savedRefreshFailed</span>
-        <button onClick={() => onOpenChange(false)}>Close maintenance</button>
-      </div>
-    ) : null,
+  }) => (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {open && (
+        <DialogContent>
+          <DialogTitle>{`Maintain ${account.name}`}</DialogTitle>
+          <DialogDescription>Maintenance actions</DialogDescription>
+          <span role="status">errors.savedRefreshFailed</span>
+          <button onClick={() => onOpenChange(false)}>Close maintenance</button>
+        </DialogContent>
+      )}
+    </Dialog>
+  ),
 }))
 vi.mock('@/components/accounts/card-statements-dialog', async () => {
   const { Dialog, DialogContent, DialogDescription, DialogTitle } =
@@ -845,6 +851,72 @@ describe('Accounts', () => {
     await user.click(screen.getByRole('button', { name: 'Close maintenance' }))
     expect(screen.queryByRole('dialog', { name: 'Maintain Savings' })).not.toBeInTheDocument()
   })
+
+  it('opens maintenance by keyboard and restores focus to the account disclosure after closing', async () => {
+    const user = userEvent.setup()
+    mockAccounts = [
+      {
+        id: 'acc-keyboard',
+        name: 'Keyboard Checking',
+        type: 'checking',
+        currency: 'USD',
+        balance: 0,
+        account_mode: 'transactional',
+      },
+    ]
+    renderAccounts()
+    const more = screen.getByRole('button', { name: 'actions.more — Keyboard Checking' })
+    more.focus()
+    await user.keyboard('{Enter}')
+    expect(more).toHaveAttribute('aria-expanded', 'true')
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'viewTransactions' })).toHaveFocus()
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'history.show' })).toHaveFocus()
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'actions.edit' })).toHaveFocus()
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'action' })).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('dialog', { name: 'Maintain Keyboard Checking' })).toBeVisible()
+    expect(more).toHaveAttribute('aria-expanded', 'false')
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(more).toHaveFocus())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['checking', 'transactional', true, false],
+    ['credit_card', 'transactional', true, true],
+    ['checking', 'snapshot_only', false, false],
+    ['credit_card', 'snapshot_only', false, true],
+  ])(
+    'pins maintenance/statements visibility for %s %s accounts',
+    async (type, accountMode, maintenanceVisible, statementsVisible) => {
+      const user = userEvent.setup()
+      mockAccounts = [
+        {
+          id: 'visibility',
+          name: 'Visibility Account',
+          type,
+          currency: 'USD',
+          balance: 0,
+          account_mode: accountMode,
+        },
+      ]
+      renderAccounts()
+      const card = screen.getByRole('article', { name: 'Visibility Account' })
+      await user.click(
+        within(card).getByRole('button', { name: 'actions.more — Visibility Account' })
+      )
+      expect(within(card).queryByRole('button', { name: 'action' }) !== null).toBe(
+        maintenanceVisible
+      )
+      expect(within(card).queryByRole('button', { name: 'statements.action' }) !== null).toBe(
+        statementsVisible
+      )
+    }
+  )
 
   it('renders archived accounts behind a toggle', async () => {
     const user = userEvent.setup()

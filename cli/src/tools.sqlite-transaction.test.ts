@@ -718,6 +718,43 @@ describe('CLI tools SQLite transaction rollback', () => {
     expect(readTransactionDetails(dbPath)).toEqual([])
   }, 10_000)
 
+  it.each([
+    ['padded pending', "status = ' Pending '", 10_000],
+    ['self transfer', "type = 'transfer', transfer_to_account_id = 'acct-1'", 9_000],
+  ])('preserves legacy %s deletion through SQLite', async (_name, assignment, balance) => {
+    const tempHome = createTempHome()
+    const dbPath = seedDatabase({
+      tempHome,
+      accountBalance: 9_000,
+      transaction: {
+        id: 'tx-1',
+        type: 'expense',
+        amount: 1_000,
+        description: 'Legacy coffee',
+        date: '2026-04-14',
+        status: 'posted',
+      },
+    })
+    const { tools } = await loadToolsWithRealDatabase(tempHome)
+    const fixture = new Database(dbPath)
+    const statusTrigger = fixture
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_transactions_status_update_valid'"
+      )
+      .get() as { sql: string }
+    // Bypass only the fixture's input gate to represent an already-stored legacy row.
+    fixture.exec('DROP TRIGGER trg_transactions_status_update_valid')
+    fixture.exec(`UPDATE transactions SET ${assignment} WHERE id = 'tx-1'`)
+    fixture.exec(statusTrigger.sql)
+    fixture.close()
+    const deleteTransaction = tools.find((tool) => tool.name === 'delete-transaction')!
+    await expect(
+      deleteTransaction.execute(deleteTransaction.schema.parse({ transactionId: 'tx-1' }))
+    ).resolves.toMatchObject({ success: true })
+    expect(readAccountBalances(dbPath)).toEqual([{ id: 'acct-1', balance }])
+    expect(readTransactionDetails(dbPath)).toEqual([])
+  })
+
   it('rolls back add-transaction when the later balance write fails', async () => {
     const tempHome = createTempHome()
     const dbPath = seedDatabase({ tempHome, accountBalance: 10_000 })

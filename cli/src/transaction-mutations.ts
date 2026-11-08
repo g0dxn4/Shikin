@@ -3,6 +3,7 @@ import {
   TRANSACTION_FX_EVIDENCE_INSERT,
   assertTransactionFxAcceptanceGuard,
   buildTransactionFxEvidenceSnapshot,
+  calculateLegacyLedgerLegs,
   resolveTransactionFxPreview,
   transactionFxEvidenceBindings,
   type DatedExchangeRate,
@@ -34,8 +35,6 @@ import {
   type TransactionDuplicateCheck,
 } from './duplicate-detection.js'
 import {
-  normalizeTransactionStatus,
-  normalizeLedgerTreatment,
   publicFxEvidence,
   type TransactionRow,
   type TransactionStatus,
@@ -101,10 +100,6 @@ export const transactionFxAcceptanceGuardSchema = z.object({
   rateDecimal: z.string(),
   direction: z.string(),
 })
-
-function isBalanceAffectingStatus(status: TransactionRow['status']): boolean {
-  return normalizeTransactionStatus(status) !== 'pending'
-}
 
 export function resolveCliFxAcceptance(input: {
   inputAmountCentavos: number
@@ -176,29 +171,26 @@ export function getBalanceImpact(
     | 'is_archived'
   >
 ): BalanceImpactResult {
-  const impacts = new Map<string, number>()
-  if (
-    !isBalanceAffectingStatus(tx.status) ||
-    normalizeLedgerTreatment(tx.ledger_treatment) !== 'normal' ||
-    tx.is_archived === 1
-  ) {
-    return { success: true, impacts }
-  }
-
-  if (tx.type === 'transfer') {
-    if (!tx.transfer_to_account_id) {
-      return {
-        success: false,
-        message: `Transfer transaction ${tx.id} has no destination account. Repair or recreate it before editing it.`,
-      }
+  const result = calculateLegacyLedgerLegs(
+    {
+      type: tx.type,
+      amountCentavos: tx.amount,
+      accountId: tx.account_id,
+      transferToAccountId: tx.transfer_to_account_id,
+      status: tx.status,
+      ledgerTreatment: tx.ledger_treatment,
+      isArchived: tx.is_archived,
+    },
+    'cli-mutation'
+  )
+  if (result.status === 'missing_transfer_destination') {
+    return {
+      success: false,
+      message: `Transfer transaction ${tx.id} has no destination account. Repair or recreate it before editing it.`,
     }
-
-    addImpact(impacts, tx.account_id, -tx.amount)
-    addImpact(impacts, tx.transfer_to_account_id, tx.amount)
-    return { success: true, impacts }
   }
-
-  addImpact(impacts, tx.account_id, tx.type === 'income' ? tx.amount : -tx.amount)
+  const impacts = new Map<string, number>()
+  for (const leg of result.legs) addImpact(impacts, leg.accountId, leg.deltaCentavos)
   return { success: true, impacts }
 }
 

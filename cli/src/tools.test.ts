@@ -54,6 +54,84 @@ vi.mock('./notebook.js', () => ({
 
 const { tools } = await import('./tools.js')
 
+import { getBalanceImpact } from './transaction-mutations.js'
+import { transactionBalanceImpacts, transactionSnapshotFromAudit } from './transaction-audit.js'
+
+describe('legacy ledger adapter parent outputs', () => {
+  it.each([
+    ['padded pending', { status: ' Pending ' }, [['a', -1]]],
+    ['Unicode pending', { status: '\u00a0PENDING\uFEFF' }, [['a', -1]]],
+    ['unknown status', { status: 'bogus' }, [['a', -1]]],
+    ['unknown treatment', { ledger_treatment: 'normal ' }, [['a', -1]]],
+    ['staged', { ledger_treatment: 'staged_no_balance_impact' }, []],
+    ['numeric archive', { is_archived: 1 }, []],
+    ['boolean archive', { is_archived: true }, [['a', -1]]],
+    ['unknown archive', { is_archived: 2 }, [['a', -1]]],
+    ['same account', { type: 'transfer', transfer_to_account_id: 'a' }, [['a', 0]]],
+    ['zero', { amount: 0 }, [['a', 0]]],
+    ['negative', { amount: -1 }, [['a', 1]]],
+    ['fractional', { amount: 0.5 }, [['a', -0.5]]],
+    ['unknown type', { type: 'refund' }, [['a', -1]]],
+    ['empty account', { account_id: '' }, [['', -1]]],
+    ['pending missing transfer', { type: 'transfer', status: 'pending' }, []],
+  ])('%s retains its CLI Map', (_name, patch, expected) => {
+    const input = {
+      id: 't',
+      type: 'expense',
+      amount: 1,
+      account_id: 'a',
+      transfer_to_account_id: null,
+      status: 'posted',
+      ...(patch as object),
+    } as Parameters<typeof getBalanceImpact>[0]
+    expect(getBalanceImpact(input)).toEqual({
+      success: true,
+      impacts: new Map(expected as [string, number][]),
+    })
+  })
+
+  it('keeps the exact missing destination failure', () => {
+    expect(
+      getBalanceImpact({
+        id: 't',
+        type: 'transfer',
+        amount: 1,
+        account_id: 'a',
+        transfer_to_account_id: null,
+        status: 'posted',
+      })
+    ).toEqual({
+      success: false,
+      message:
+        'Transfer transaction t has no destination account. Repair or recreate it before editing it.',
+    })
+  })
+
+  it.each([
+    ['padded pending', { status: ' Pending ' }, [['a', -1]]],
+    ['staged snapshot calculation', { ledgerTreatment: 'staged_no_balance_impact' }, [['a', -1]]],
+    ['numeric archive calculation', { isArchived: 1 }, [['a', -1]]],
+    ['same account', { type: 'transfer', transferToAccountId: 'a' }, [['a', 0]]],
+    ['missing destination', { type: 'transfer' }, []],
+    ['zero', { amountCentavos: 0 }, [['a', 0]]],
+  ])('%s retains its decoded undo Map', (_name, patch, expected) => {
+    const decoded = transactionSnapshotFromAudit({
+      transaction: {
+        id: 't',
+        type: 'expense',
+        amountCentavos: 1,
+        accountId: 'a',
+        status: 'posted',
+        description: 'x',
+        date: '2026-01-01',
+        ...(patch as object),
+      },
+    })
+    expect(decoded).not.toBeNull()
+    expect(transactionBalanceImpacts(decoded!)).toEqual(new Map(expected as [string, number][]))
+  })
+})
+
 const addTransaction = tools.find((tool) => tool.name === 'add-transaction')!
 const updateTransaction = tools.find((tool) => tool.name === 'update-transaction')!
 const deleteTransaction = tools.find((tool) => tool.name === 'delete-transaction')!
@@ -1327,6 +1405,40 @@ describe('CLI tool validation regressions', () => {
     })
     expect(mockExecute).not.toHaveBeenCalled()
   })
+
+  it.each([
+    [
+      ' usd ',
+      'transactional',
+      'Cannot transfer from USD to  usd . Cross-currency transfers are not supported because no FX conversion is applied.',
+    ],
+    [
+      'EUR',
+      'snapshot_only',
+      'Cannot transfer from USD to EUR. Cross-currency transfers are not supported because no FX conversion is applied.',
+    ],
+  ])(
+    'retains raw currency comparison before %s/%s mode rejection',
+    async (currency, accountMode, message) => {
+      mockQuery
+        .mockReturnValueOnce([{ id: 'acct-usd', currency: 'USD', is_archived: 0 }])
+        .mockReturnValueOnce([
+          { id: 'acct-other', currency, account_mode: accountMode, is_archived: 0 },
+        ])
+      expect(
+        await addTransaction.execute(
+          addTransaction.schema.parse({
+            amount: 25,
+            type: 'transfer',
+            description: 'Move cash',
+            accountId: 'acct-usd',
+            transferToAccountId: 'acct-other',
+          })
+        )
+      ).toEqual({ success: false, message })
+      expect(mockExecute).not.toHaveBeenCalled()
+    }
+  )
 
   it('rejects archived transfer destination accounts', async () => {
     mockQuery

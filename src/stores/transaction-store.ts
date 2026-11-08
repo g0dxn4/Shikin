@@ -1,3 +1,4 @@
+import { calculateLegacyLedgerLegs } from '@shikin/finance-core'
 import { applyMetadataCorrection, type MetadataCorrection } from '@shikin/finance-core/corrections'
 import { create } from 'zustand'
 import { query, withTransaction } from '@/lib/database'
@@ -76,10 +77,6 @@ type WritableAccountRef = {
 function formatAccountReference(accountId: string, accountName: string | null | undefined) {
   const name = accountName?.trim()
   return name ? `"${name}" (${accountId})` : accountId
-}
-
-function isBalanceAffectingStatus(status: Transaction['status'] | null | undefined): boolean {
-  return (status ?? 'posted') !== 'pending'
 }
 
 function normalizeCurrency(value: string | null | undefined) {
@@ -224,66 +221,43 @@ async function resolveTransactionWriteAccounts(tx: TransactionClient, data: Tran
   return { sourceAccount, transferDestination, currency: sourceAccount.currency }
 }
 
+function frontendLedgerLegs(input: BalanceImpactInput) {
+  return calculateLegacyLedgerLegs(
+    {
+      type: input.type,
+      amountCentavos: input.amount,
+      accountId: input.accountId,
+      transferToAccountId: input.transferToAccountId,
+      status: input.status,
+      ledgerTreatment: input.ledgerTreatment,
+      isArchived: input.isArchived,
+      sourceAccountMode: input.sourceAccountMode,
+      transferAccountMode: input.transferAccountMode,
+    },
+    'frontend-mutation'
+  ).legs
+}
+
 async function applyBalanceImpact(
   tx: TransactionClient,
   input: BalanceImpactInput,
   now: string,
   direction: 1 | -1
 ) {
-  if (
-    !isBalanceAffectingStatus(input.status) ||
-    (input.ledgerTreatment ?? 'normal') !== 'normal' ||
-    input.isArchived === 1
-  )
-    return
-
-  if (input.type === 'transfer' && input.transferToAccountId) {
-    if ((input.sourceAccountMode ?? 'transactional') === 'transactional') {
-      await tx.execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-        -input.amount * direction,
-        now,
-        input.accountId,
-      ])
-    }
-    if ((input.transferAccountMode ?? 'transactional') === 'transactional') {
-      await tx.execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-        input.amount * direction,
-        now,
-        input.transferToAccountId,
-      ])
-    }
-    return
+  // Do not use the overwrite Map: a legacy self-transfer still makes two ordered writes.
+  for (const leg of frontendLedgerLegs(input)) {
+    await tx.execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
+      leg.deltaCentavos * direction,
+      now,
+      leg.accountId,
+    ])
   }
-
-  if ((input.sourceAccountMode ?? 'transactional') !== 'transactional') return
-
-  const delta = (input.type === 'income' ? input.amount : -input.amount) * direction
-  await tx.execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
-    delta,
-    now,
-    input.accountId,
-  ])
 }
 
 function balanceImpactMap(input: BalanceImpactInput): Map<string, number> {
   const impacts = new Map<string, number>()
-  if (
-    !isBalanceAffectingStatus(input.status) ||
-    (input.ledgerTreatment ?? 'normal') !== 'normal' ||
-    input.isArchived === 1
-  )
-    return impacts
-  if (input.type === 'transfer' && input.transferToAccountId) {
-    if ((input.sourceAccountMode ?? 'transactional') === 'transactional') {
-      impacts.set(input.accountId, -input.amount)
-    }
-    if ((input.transferAccountMode ?? 'transactional') === 'transactional') {
-      impacts.set(input.transferToAccountId, input.amount)
-    }
-    return impacts
-  }
-  if ((input.sourceAccountMode ?? 'transactional') === 'transactional') {
-    impacts.set(input.accountId, input.type === 'income' ? input.amount : -input.amount)
+  for (const leg of frontendLedgerLegs(input)) {
+    impacts.set(leg.accountId, leg.deltaCentavos)
   }
   return impacts
 }

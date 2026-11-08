@@ -1,3 +1,4 @@
+import { calculateLegacyLedgerLegs } from '@shikin/finance-core'
 import type { CorrectionTransaction } from '@shikin/finance-core/corrections'
 import { guardTransactionEvidence } from './transaction-corrections.js'
 import { query, execute, fromCentavos } from './tools/shared.js'
@@ -204,21 +205,19 @@ export function transactionSnapshotPublic(tx: UndoTransactionSnapshot) {
 
 export function transactionBalanceImpacts(tx: UndoTransactionSnapshot): Map<string, number> {
   const impacts = new Map<string, number>()
-  if (tx.status === 'pending') return impacts
-  if (tx.type === 'transfer') {
-    if (!tx.transferToAccountId) return impacts
-    impacts.set(tx.accountId, (impacts.get(tx.accountId) ?? 0) - tx.amountCentavos)
-    impacts.set(
-      tx.transferToAccountId,
-      (impacts.get(tx.transferToAccountId) ?? 0) + tx.amountCentavos
-    )
-    return impacts
-  }
-  impacts.set(
-    tx.accountId,
-    (impacts.get(tx.accountId) ?? 0) +
-      (tx.type === 'income' ? tx.amountCentavos : -tx.amountCentavos)
+  const result = calculateLegacyLedgerLegs(
+    {
+      type: tx.type,
+      amountCentavos: tx.amountCentavos,
+      accountId: tx.accountId,
+      transferToAccountId: tx.transferToAccountId,
+      status: tx.status,
+    },
+    'generic-undo'
   )
+  for (const leg of result.legs) {
+    impacts.set(leg.accountId, (impacts.get(leg.accountId) ?? 0) + leg.deltaCentavos)
+  }
   return impacts
 }
 

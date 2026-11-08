@@ -922,6 +922,36 @@ describe('transaction-store', () => {
   })
 
   describe('remove', () => {
+    it.each([
+      ['padded pending', { status: ' Pending ' }, [2500]],
+      ['Unicode pending', { status: '\u00a0PENDING\uFEFF' }, [2500]],
+      [
+        'same-account transfer',
+        { type: 'transfer', transfer_to_account_id: '01ACC001' },
+        [2500, -2500],
+      ],
+      ['missing transfer destination', { type: 'transfer' }, [2500]],
+      ['zero', { amount: 0 }, [0]],
+    ])('preserves ordered inverse writes for %s', async (_name, patch, deltas) => {
+      mockQuery
+        .mockResolvedValueOnce([reviewTransaction(patch as Record<string, unknown>)])
+        .mockResolvedValue([])
+      mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 })
+      await useTransactionStore.getState().remove('01TX001')
+      const calls = mockExecute.mock.calls
+      expect(calls).toHaveLength((deltas as number[]).length + 1)
+      for (const [index, delta] of (deltas as number[]).entries()) {
+        expect(calls[index]).toEqual([
+          'UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?',
+          [delta, expect.any(String), '01ACC001'],
+        ])
+      }
+      expect(calls[calls.length - 1]).toEqual([
+        'DELETE FROM transactions WHERE id = ?',
+        ['01TX001'],
+      ])
+    })
+
     it('reverses balance impact and deletes transaction', async () => {
       useTransactionStore.setState({
         transactions: [

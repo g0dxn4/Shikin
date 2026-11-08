@@ -24,6 +24,7 @@ All notable changes to Shikin are documented in this file.
 - Removed three unused account-action exports (`AccountMaintenanceAction`, `CardStatementsAction`, `PaymentEvidenceIcon`); the controlled dialogs and account page are unchanged.
 - Removed the unreachable legacy live exchange-rate service (`src/lib/exchange-rate-service.ts`). Dated manual FX remains the only rate authority; stored historical rate data is untouched. Docs no longer claim automatic online rate refresh.
 - The local data bridge has an explicit startup entry (`scripts/data-server-runtime.mjs`) and a separate migrations module (`scripts/data-server-migrations.mjs`). Importing them no longer starts a server; `node scripts/data-server.mjs` and `shikin web` behave as before.
+- Ledger posting legs (signs, transfer legs, pending/staged/archive eligibility) are built by one finance-core function with closed per-caller compatibility profiles for the CLI, app store, undo, and strict core. Every caller's results are unchanged.
 
 ## [1.2.1] - 2026-10-17
 

@@ -1,7 +1,7 @@
 -- Shikin Migration 018: Placeholder Transactions
 -- Adds schema for unknown/placeholder charges resolved by CLI/MCP workflows.
 -- Runtime startup applies the live migration with column-existence checks in
--- src/lib/database.ts because SQLite does not provide portable ADD COLUMN IF NOT
+-- src/lib/tauri-database-schema.ts because SQLite does not provide portable ADD COLUMN IF NOT
 -- EXISTS syntax. Engines that execute this schema-history file must do so once
 -- under _migrations metadata; the changes themselves are additive.
 

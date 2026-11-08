@@ -166,7 +166,7 @@ Practical map of the current React frontend for hardening and follow-up work.
   - Page tests: dashboard, settings, accounts, transactions, budgets, investments.
   - Component tests: dialogs/forms (`account-*`, `transaction-*`, `confirm-dialog`), shell/sidebar, error boundary.
   - Store tests: broad coverage across major stores (`__tests__/*-store.test.ts`).
-  - Lib tests: money, ULID, theme, exchange rates, forecasting, anomaly logic, splits, bridge headers, storage failure paths.
+  - Lib tests: money, ULID, theme, forecasting, anomaly logic, splits, bridge headers, storage failure paths.
 - **E2E (Playwright, `e2e/*.spec.ts`):**
   - navigation/layout/dashboard/settings/accounts/transactions/budgets/i18n/responsive.
 - **Notably thinner coverage (current):**

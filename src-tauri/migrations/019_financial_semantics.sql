@@ -2,7 +2,7 @@
 -- Separates posting status from ledger/reporting treatment, records
 -- reconciliation provenance, supports snapshot-only accounts, and adds
 -- first-class receivables. Runtime startup mirrors this migration with
--- column-existence guards in src/lib/database.ts and scripts/data-server.mjs.
+-- column-existence guards in src/lib/tauri-database-schema.ts and scripts/data-server-migrations.mjs.
 
 ALTER TABLE accounts ADD COLUMN account_mode TEXT NOT NULL DEFAULT 'transactional'
   CHECK (account_mode IN ('transactional', 'snapshot_only'));

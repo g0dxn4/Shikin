@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { instrumentIdentityKey } from '@shikin/finance-core/valuation'
+import type { DatedExchangeRate } from '@shikin/finance-core/fx'
 import type * as PriceService from '@/lib/price-service'
+import type { InvestmentValuationRow } from '@/lib/valuation-read'
 
 vi.mock('@/lib/database', () => ({ query: vi.fn(), execute: vi.fn() }))
 vi.mock('@/lib/ulid', () => ({ generateId: vi.fn(() => 'inv-test-id') }))
@@ -29,7 +31,7 @@ const identity = {
 }
 const key = instrumentIdentityKey(identity)
 
-function row(overrides: Record<string, unknown> = {}) {
+function row(overrides: Record<string, unknown> = {}): InvestmentValuationRow {
   return {
     id: 'inv-1',
     account_id: null,
@@ -354,5 +356,188 @@ describe('precise investment store', () => {
       String(call[0]).includes('INSERT INTO investments')
     )
     expect(insertCall?.[1]?.[12]).toBeNull()
+  })
+})
+
+function authorityRate(id: string): DatedExchangeRate {
+  return {
+    id,
+    fromCurrency: 'MXN',
+    toCurrency: 'USD',
+    rateDecimal: '0.05',
+    effectiveFrom: '2000-01-01',
+    supersedesRateId: null,
+    createdAt: '2000-01-01T00:00:00Z',
+    sourceNote: null,
+  }
+}
+
+async function freshAuthorityStores() {
+  vi.resetModules()
+  // Fresh imports exercise module-time subscription registration and its initial sentinel.
+  const { useCurrencyStore: currency } = await import('../currency-store')
+  const { useInvestmentStore: investments } = await import('../investment-store')
+  return { currency, investments }
+}
+
+describe('investment currency authority subscription', () => {
+  it('keeps its empty-string sentinel and exact ordered key across equivalent notifications', async () => {
+    const { currency, investments } = await freshAuthorityStores()
+    const callbacks: string[] = []
+    investments.setState({
+      investments: [row()] as never,
+      fetch: vi.fn(async () => {
+        const state = currency.getState()
+        callbacks.push(
+          `${state.mainCurrency ?? 'null'}:${state.manualRates.map((rate) => rate.id).join(',')}`
+        )
+      }),
+    })
+
+    currency.setState({ preferredCurrency: 'MXN' })
+    currency.setState({ isLoading: true })
+    currency.setState({ manualRates: [] })
+    currency.setState({ mainCurrency: 'USD' })
+    currency.setState({ manualRates: [authorityRate('r1'), authorityRate('r2')] })
+    currency.setState({ manualRates: [authorityRate('r1'), authorityRate('r2')] })
+    currency.setState({ isLoading: false, preferredCurrency: 'EUR' })
+    currency.setState({ manualRates: [authorityRate('r2'), authorityRate('r1')] })
+    currency.setState({ mainCurrency: ' USD ', manualRates: [authorityRate(' r2 ')] })
+
+    expect(callbacks).toEqual(['null:', 'USD:', 'USD:r1,r2', 'USD:r2,r1', ' USD : r2 '])
+  })
+
+  it('does not activate empty holdings even while loading and swallows populated refresh failures', async () => {
+    const { currency, investments } = await freshAuthorityStores()
+    const callbacks: string[] = []
+    investments.setState({
+      isLoading: true,
+      fetch: vi.fn(async () => {
+        callbacks.push('refresh rejected')
+        throw new Error('valuation unavailable')
+      }),
+    })
+    currency.setState({ mainCurrency: 'USD', manualRates: [authorityRate('r1')] })
+    currency.setState({ mainCurrency: 'MXN' })
+    expect(callbacks).toEqual([])
+
+    investments.setState({ investments: [row()] as never })
+    currency.setState({ isLoading: true })
+    currency.setState({ manualRates: [authorityRate('r1')] })
+    expect(callbacks).toEqual([])
+
+    currency.setState({ manualRates: [authorityRate('r1'), authorityRate('r2')] })
+    await Promise.resolve()
+    expect(callbacks).toEqual(['refresh rejected'])
+    expect(investments.getState().isLoading).toBe(true)
+    expect(investments.getState().fetchError).toBeNull()
+  })
+
+  it('keeps read-before-authority order, publication order, and selected price history on authority failure', async () => {
+    const { currency, investments } = await freshAuthorityStores()
+    const trace: unknown[] = []
+    const priceHistory = new Map([
+      ['selected-instrument', [{ date: '2026-04-18', unitPriceDecimal: '1' }]],
+    ])
+    currency.setState({
+      mainCurrency: 'USD',
+      loadRates: vi.fn(async () => {
+        trace.push('load authority')
+        throw new Error('authority unavailable')
+      }),
+    })
+    investments.setState({ priceHistory })
+    mockQuery.mockReset()
+    mockQuery.mockImplementation(async () => {
+      trace.push('read holdings')
+      return [row()]
+    })
+    const unsubscribe = investments.subscribe((state) => {
+      trace.push({
+        loading: state.isLoading,
+        ids: state.investments.map((holding) => holding.id),
+        total: state.portfolioSummary.totalMarketValue,
+        fetchError: state.fetchError,
+      })
+    })
+
+    try {
+      await investments.getState().fetch()
+      expect(trace).toEqual([
+        { loading: true, ids: [], total: 0, fetchError: null },
+        'read holdings',
+        'load authority',
+        { loading: true, ids: ['inv-1'], total: 0, fetchError: null },
+        { loading: true, ids: ['inv-1'], total: 2, fetchError: null },
+        { loading: false, ids: ['inv-1'], total: 2, fetchError: null },
+      ])
+      expect(investments.getState().priceHistory).toBe(priceHistory)
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it('publishes only the latest overlapping holdings read and retains failed-read error timing', async () => {
+    const { currency, investments } = await freshAuthorityStores()
+    const trace: unknown[] = []
+    let finishOld!: (rows: InvestmentValuationRow[]) => void
+    let finishNew!: (rows: InvestmentValuationRow[]) => void
+    // The project's ES2020 library target does not expose Promise.withResolvers.
+    const oldRows = new Promise<InvestmentValuationRow[]>((resolve) => {
+      finishOld = resolve
+    })
+    const newRows = new Promise<InvestmentValuationRow[]>((resolve) => {
+      finishNew = resolve
+    })
+    currency.setState({
+      mainCurrency: 'USD',
+      loadRates: vi.fn(async () => {
+        trace.push('load authority')
+      }),
+    })
+    mockQuery.mockReset()
+    mockQuery
+      .mockImplementationOnce(() => {
+        trace.push('read old')
+        return oldRows
+      })
+      .mockImplementationOnce(() => {
+        trace.push('read new')
+        return newRows
+      })
+    const unsubscribe = investments.subscribe((state) => {
+      trace.push([
+        state.isLoading,
+        state.investments.map((holding) => holding.id),
+        state.fetchError,
+      ])
+    })
+
+    try {
+      const oldRead = investments.getState().fetch()
+      const newRead = investments.getState().fetch()
+      finishNew([row({ id: 'new' })])
+      await newRead
+      finishOld([row({ id: 'old' })])
+      await oldRead
+      mockQuery.mockRejectedValueOnce(new Error('holdings unavailable'))
+      await expect(investments.getState().fetch()).rejects.toThrow('holdings unavailable')
+      expect(trace).toEqual([
+        [true, [], null],
+        'read old',
+        [true, [], null],
+        'read new',
+        'load authority',
+        [true, ['new'], null],
+        [true, ['new'], null],
+        [false, ['new'], null],
+        'load authority',
+        [true, ['new'], null],
+        [true, ['new'], 'holdings unavailable'],
+        [false, ['new'], 'holdings unavailable'],
+      ])
+    } finally {
+      unsubscribe()
+    }
   })
 })

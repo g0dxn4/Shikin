@@ -14,6 +14,7 @@ import {
 import { readInvestmentValuationRows, rowToHoldingInput } from '@/lib/valuation-read'
 import { fetchVerifiedPrice, type PriceIdentitySelection } from '@/lib/price-service'
 import { useCurrencyStore } from './currency-store'
+import { currencyAuthorityKey } from './currency-authority'
 import type { Investment } from '@/types/database'
 import type { InvestmentType, CurrencyCode } from '@/types/common'
 
@@ -579,7 +580,7 @@ export const useInvestmentStore = create<InvestmentState>((set, get) => ({
 
 let investmentAuthorityKey = ''
 useCurrencyStore.subscribe((state) => {
-  const key = `${state.mainCurrency ?? ''}|${state.manualRates.map((rate) => rate.id).join(',')}`
+  const key = currencyAuthorityKey(state)
   if (key === investmentAuthorityKey) return
   investmentAuthorityKey = key
   if (useInvestmentStore.getState().investments.length > 0) {

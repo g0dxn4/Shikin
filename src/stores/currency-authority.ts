@@ -21,6 +21,11 @@ type CurrencyAuthorityState = Pick<
   'mainCurrency' | 'preferredCurrency' | 'manualRates'
 >
 
+/**
+ * Exact main-currency and ordered immutable history-ID identity; no normalization.
+ * Consumers retain their own subscription/request guards. Reporting freshness
+ * separately compares the history array by reference, not this key.
+ */
 export function currencyAuthorityKey(
   state: Pick<CurrencyState, 'mainCurrency' | 'manualRates'>
 ): string {

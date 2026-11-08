@@ -1,9 +1,6 @@
 import { query } from '@/lib/database'
-import {
-  fetchAllCurrentPrices,
-  savePricesToDB,
-  type PriceIdentitySelection,
-} from '@/lib/price-service'
+import { fetchAllCurrentPrices, type PriceIdentitySelection } from '@/lib/price-service'
+import { publishInvestmentPriceRefresh } from '@/lib/investment-price-publication'
 import { useInvestmentStore } from '@/stores/investment-store'
 import type { Investment } from '@/types/database'
 
@@ -87,15 +84,11 @@ function selectionsFor(investments: ScheduledInvestment[]) {
 
 async function refresh(investments: ScheduledInvestment[]) {
   const result = await fetchAllCurrentPrices(investments, selectionsFor(investments))
-  useInvestmentStore
-    .getState()
-    .setRefreshFailures(
-      Object.fromEntries(result.failures.map((failure) => [failure.investmentId, failure.reason]))
-    )
-  if (result.quotes.size === 0) return
-  await savePricesToDB(result.quotes)
-  useInvestmentStore.getState().setLastPriceFetch(new Date().toISOString())
-  await useInvestmentStore.getState().fetch()
+  await publishInvestmentPriceRefresh(
+    result,
+    (failures) => useInvestmentStore.getState().setRefreshFailures(failures),
+    () => useInvestmentStore.getState().fetch()
+  )
 }
 
 async function fetchStalePrices(): Promise<void> {

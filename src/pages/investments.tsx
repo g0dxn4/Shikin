@@ -28,11 +28,8 @@ import { useInvestmentStore, type InvestmentWithPrice } from '@/stores/investmen
 import { useAccountStore } from '@/stores/account-store'
 import { formatMoney, fromCentavos } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
-import {
-  fetchAllCurrentPrices,
-  savePricesToDB,
-  type PriceIdentitySelection,
-} from '@/lib/price-service'
+import { fetchAllCurrentPrices, type PriceIdentitySelection } from '@/lib/price-service'
+import { publishInvestmentPriceRefresh } from '@/lib/investment-price-publication'
 import { isInvestmentPriceStale } from '@/lib/price-scheduler'
 import { CHART_AXIS_COLOR, CHART_TOOLTIP_STYLE } from '@/lib/constants'
 import {
@@ -243,13 +240,7 @@ export function Investments() {
         }
       }
       const result = await fetchAllCurrentPrices(investments, selections)
-      setRefreshFailures(
-        Object.fromEntries(result.failures.map((failure) => [failure.investmentId, failure.reason]))
-      )
-      if (result.quotes.size > 0) {
-        await savePricesToDB(result.quotes)
-        useInvestmentStore.getState().setLastPriceFetch(new Date().toISOString())
-        await fetchInvestments()
+      if (await publishInvestmentPriceRefresh(result, setRefreshFailures, fetchInvestments)) {
         toast.success(t('toast.pricesUpdated'))
       } else {
         toast.info(t('toast.noPrices'))

@@ -1,11 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { Investments } from '../investments'
+import { fetchAllCurrentPrices, savePricesToDB, type PriceQuote } from '@/lib/price-service'
+import { toast } from 'sonner'
 
 const mockFetch = vi.fn().mockResolvedValue(undefined)
+const mockFetchAccounts = vi.fn().mockResolvedValue(undefined)
 const mockRemove = vi.fn()
+const mockSetRefreshFailures = vi.fn()
+const mockSetLastPriceFetch = vi.fn()
+const mockFetchPriceHistory = vi.fn().mockResolvedValue([])
+let mockLiveFetch = mockFetch
 let mockInvestments: Array<Record<string, unknown>> = []
 let mockPriceHistory = new Map<string, Array<{ date: string; unitPriceDecimal: string }>>()
 let mockFetchError: string | null = null
@@ -41,31 +48,41 @@ vi.mock('@/stores/ui-store', () => ({
 }))
 
 vi.mock('@/stores/investment-store', () => ({
-  useInvestmentStore: () => ({
-    investments: mockInvestments,
-    isLoading: mockIsLoading,
-    fetchError: mockFetchError,
-    error: mockError,
-    fetch: mockFetch,
-    remove: mockRemove,
-    priceHistory: mockPriceHistory,
-    portfolioSummary: mockPortfolioSummary,
-    lastPriceFetch: null,
-    fetchPriceHistory: vi.fn().mockResolvedValue([]),
-    setLastPriceFetch: vi.fn(),
-  }),
+  useInvestmentStore: Object.assign(
+    () => ({
+      investments: mockInvestments,
+      isLoading: mockIsLoading,
+      fetchError: mockFetchError,
+      error: mockError,
+      fetch: mockFetch,
+      remove: mockRemove,
+      priceHistory: mockPriceHistory,
+      portfolioSummary: mockPortfolioSummary,
+      lastPriceFetch: null,
+      fetchPriceHistory: mockFetchPriceHistory,
+      setRefreshFailures: mockSetRefreshFailures,
+      setLastPriceFetch: mockSetLastPriceFetch,
+    }),
+    {
+      getState: () => ({
+        fetch: mockLiveFetch,
+        setRefreshFailures: mockSetRefreshFailures,
+        setLastPriceFetch: mockSetLastPriceFetch,
+      }),
+    }
+  ),
 }))
 
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
     accounts: [],
     fetchError: null,
-    fetch: vi.fn().mockResolvedValue(undefined),
+    fetch: mockFetchAccounts,
   }),
 }))
 
 vi.mock('@/lib/price-service', () => ({
-  fetchAllCurrentPrices: vi.fn().mockResolvedValue(new Map()),
+  fetchAllCurrentPrices: vi.fn().mockResolvedValue({ quotes: new Map(), failures: [] }),
   savePricesToDB: vi.fn(),
 }))
 
@@ -113,10 +130,60 @@ vi.mock('recharts', () => ({
 
 vi.mock('dayjs/plugin/relativeTime', () => ({ default: () => {} }))
 
+function refreshHolding(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'i',
+    account_id: null,
+    symbol: 'S',
+    name: 'Publication fixture',
+    type: 'stock',
+    shares: 1,
+    quantityDecimal: '1',
+    avg_cost_basis: 100,
+    currency: 'USD',
+    notes: null,
+    created_at: '2024-01-01',
+    updated_at: '2024-01-01',
+    instrument_key: 'owned',
+    priceProvider: 'finnhub',
+    priceInstrumentId: 'S',
+    priceExchange: null,
+    currentPriceCurrency: 'USD',
+    marketValue: 100,
+    gainLoss: 0,
+    gainLossPercent: 0,
+    lastPriceDate: '2024-01-01',
+    ...overrides,
+  }
+}
+
+const publicationQuote: PriceQuote = {
+  instrumentKey: 'owned',
+  assetType: 'stock',
+  provider: 'finnhub',
+  instrumentId: 'S',
+  exchange: '',
+  quoteCurrency: 'USD',
+  unitPriceDecimal: '1',
+  quoteDate: '2026-11-06',
+}
+
 describe('Investments', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockRemove.mockReset()
+    mockFetch.mockReset().mockResolvedValue(undefined)
+    mockLiveFetch = mockFetch
+    mockSetRefreshFailures.mockReset()
+    mockSetLastPriceFetch.mockReset()
+    mockFetchPriceHistory.mockReset().mockResolvedValue([])
+    vi.mocked(toast.success).mockReset()
+    vi.mocked(toast.info).mockReset()
+    vi.mocked(toast.error).mockReset()
+    vi.mocked(fetchAllCurrentPrices)
+      .mockReset()
+      .mockResolvedValue({ quotes: new Map(), failures: [] })
+    vi.mocked(savePricesToDB).mockReset().mockResolvedValue(undefined)
     mockInvestments = []
     mockPriceHistory = new Map()
     mockFetchError = null
@@ -133,6 +200,10 @@ describe('Investments', () => {
       isMixedCurrency: false,
       totalsComplete: true,
     }
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('renders add action without a promotional page title', () => {
@@ -486,6 +557,171 @@ describe('Investments', () => {
       expect(toast.error).toHaveBeenCalledWith('Price refresh DB error')
     })
     expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  describe('manual quote publication', () => {
+    it.each(['success', 'zero', 'save-error', 'fetch-error', 'replace-fetch'])(
+      'preserves the literal publication trace for %s',
+      async (scenario) => {
+        vi.useFakeTimers({ toFake: ['Date'] })
+        vi.setSystemTime(new Date('2026-11-08T12:00:00.000Z'))
+        const trace: unknown[] = []
+        mockInvestments = [refreshHolding()]
+        const quotes = new Map(scenario === 'zero' ? [] : [['i', publicationQuote]])
+        vi.mocked(fetchAllCurrentPrices).mockImplementation(async () => {
+          trace.push('prices')
+          return {
+            quotes,
+            failures: [{ investmentId: 'failed', symbol: 'F', reason: 'missing' }],
+          }
+        })
+        mockSetRefreshFailures.mockImplementation((failures) => {
+          trace.push(['failures', failures])
+        })
+        mockSetLastPriceFetch.mockImplementation((timestamp) => {
+          trace.push(['timestamp', timestamp])
+        })
+        vi.mocked(savePricesToDB).mockImplementation(async (saved) => {
+          trace.push(['save', [...saved.keys()]])
+          if (scenario === 'save-error') throw new Error('save-failed')
+          if (scenario === 'replace-fetch') {
+            mockLiveFetch = vi.fn(async () => {
+              trace.push('fetch:replacement')
+            })
+          }
+        })
+        render(<Investments />)
+        mockFetch.mockImplementation(async () => {
+          trace.push('fetch:captured')
+          if (scenario === 'fetch-error') throw new Error('refresh-failed')
+        })
+        vi.mocked(toast.success).mockImplementation(() => {
+          trace.push('toast:success')
+          return 'toast'
+        })
+        vi.mocked(toast.info).mockImplementation(() => {
+          trace.push('toast:info')
+          return 'toast'
+        })
+        vi.mocked(toast.error).mockImplementation((message) => {
+          trace.push(['toast:error', message])
+          return 'toast'
+        })
+
+        fireEvent.click(screen.getByRole('button', { name: /summary.refresh/i }))
+
+        await waitFor(() => {
+          expect(screen.getByRole('button', { name: /summary.refresh/i })).toBeEnabled()
+        })
+        const common: unknown[] = ['prices', ['failures', { failed: 'missing' }]]
+        if (scenario !== 'zero') common.push(['save', ['i']])
+        if (scenario !== 'zero' && scenario !== 'save-error') {
+          common.push(['timestamp', '2026-11-08T12:00:00.000Z'], 'fetch:captured')
+        }
+        expect(trace).toEqual([
+          ...common,
+          scenario === 'zero'
+            ? 'toast:info'
+            : scenario === 'save-error'
+              ? ['toast:error', 'save-failed']
+              : scenario === 'fetch-error'
+                ? ['toast:error', 'refresh-failed']
+                : 'toast:success',
+        ])
+        expect(fetchAllCurrentPrices).toHaveBeenCalledTimes(1)
+        expect(fetchAllCurrentPrices).toHaveBeenCalledWith(
+          mockInvestments,
+          new Map([
+            ['i', { provider: 'finnhub', instrumentId: 'S', exchange: '', quoteCurrency: 'USD' }],
+          ])
+        )
+        if (scenario === 'zero') {
+          expect(savePricesToDB).not.toHaveBeenCalled()
+          expect(toast.info).toHaveBeenCalledWith('toast.noPrices')
+        } else {
+          expect(savePricesToDB).toHaveBeenCalledWith(quotes)
+        }
+        if (scenario === 'success' || scenario === 'replace-fetch') {
+          expect(toast.success).toHaveBeenCalledWith('toast.pricesUpdated')
+        }
+      }
+    )
+
+    it('keeps partial quotes in provider order and uses camelCase selections and last failure', async () => {
+      mockInvestments = [
+        refreshHolding({ id: 'second', priceExchange: 'XNAS', price_provider: 'manual' }),
+        refreshHolding({ id: 'first' }),
+        refreshHolding({ id: 'manual', priceProvider: 'manual' }),
+        refreshHolding({ id: 'missing-id', priceInstrumentId: null }),
+        refreshHolding({ id: 'missing-currency', currentPriceCurrency: null }),
+      ]
+      const quotes = new Map([
+        ['second', publicationQuote],
+        ['first', publicationQuote],
+      ])
+      vi.mocked(fetchAllCurrentPrices).mockResolvedValue({
+        quotes,
+        failures: [
+          { investmentId: 'failed', symbol: 'F', reason: 'first reason' },
+          { investmentId: 'other', symbol: 'O', reason: 'other reason' },
+          { investmentId: 'failed', symbol: 'F', reason: 'last reason' },
+        ],
+      })
+      render(<Investments />)
+
+      fireEvent.click(screen.getByRole('button', { name: /summary.refresh/i }))
+
+      await waitFor(() => expect(savePricesToDB).toHaveBeenCalledWith(quotes))
+      expect([...vi.mocked(savePricesToDB).mock.calls[0][0].keys()]).toEqual(['second', 'first'])
+      expect(fetchAllCurrentPrices).toHaveBeenCalledExactlyOnceWith(
+        mockInvestments,
+        new Map([
+          [
+            'second',
+            { provider: 'finnhub', instrumentId: 'S', exchange: 'XNAS', quoteCurrency: 'USD' },
+          ],
+          ['first', { provider: 'finnhub', instrumentId: 'S', exchange: '', quoteCurrency: 'USD' }],
+        ])
+      )
+      expect(mockSetRefreshFailures).toHaveBeenCalledExactlyOnceWith({
+        failed: 'last reason',
+        other: 'other reason',
+      })
+    })
+
+    it('keeps refresh busy until the captured holdings read finishes', async () => {
+      mockInvestments = [refreshHolding()]
+      vi.mocked(fetchAllCurrentPrices).mockResolvedValue({
+        quotes: new Map([['i', publicationQuote]]),
+        failures: [],
+      })
+      render(<Investments />)
+      // The project's ES2023 library does not expose Promise.withResolvers.
+      let finish!: () => void
+      const promise = new Promise<void>((resolve) => {
+        finish = resolve
+      })
+      mockFetch.mockReturnValue(promise)
+      fireEvent.click(screen.getByRole('button', { name: /summary.refresh/i }))
+
+      await waitFor(() => expect(mockSetLastPriceFetch).toHaveBeenCalledTimes(1))
+      expect(screen.getByRole('button', { name: /summary.refresh/i })).toBeDisabled()
+      finish()
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /summary.refresh/i })).toBeEnabled()
+      })
+    })
+
+    it('retains B-04: replacing a quote identity at the same holdings count does not reload history', () => {
+      mockInvestments = [refreshHolding({ instrument_key: 'before' })]
+      const { rerender } = render(<Investments />)
+      expect(mockFetchPriceHistory).toHaveBeenCalledExactlyOnceWith('before', 365)
+
+      mockInvestments = [refreshHolding({ instrument_key: 'after' })]
+      rerender(<Investments />)
+
+      expect(mockFetchPriceHistory).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('filters holdings by asset type', async () => {

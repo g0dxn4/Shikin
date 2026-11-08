@@ -313,6 +313,30 @@ describe('ConsumptionBulkDialog', () => {
     expect(screen.queryByText(/real-split-a/, { selector: 'p' })).not.toBeInTheDocument()
   })
 
+  it('retries a failed context read without collapsing the row or selecting allocations', async () => {
+    mockRead.mockRejectedValueOnce(new Error('Context temporarily unavailable.'))
+    const user = userEvent.setup()
+    render(<ConsumptionBulkDialog open candidates={[candidates[0]]} onOpenChange={vi.fn()} />)
+
+    const candidateButton = screen.getByRole('button', { name: /Split income record/ })
+    await user.click(candidateButton)
+    expect(await screen.findByText('Context temporarily unavailable.')).toBeVisible()
+    expect(candidateButton).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'bulk.actions.retry' }))
+    const allocations = await screen.findAllByRole('checkbox')
+    expect(candidateButton).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.queryByText('Context temporarily unavailable.')).not.toBeInTheDocument()
+    expect(allocations).toHaveLength(2)
+    expect(allocations[0]).not.toBeChecked()
+    expect(allocations[1]).not.toBeChecked()
+    expect(mockRead).toHaveBeenNthCalledWith(1, 'split-income')
+    expect(mockRead).toHaveBeenNthCalledWith(2, 'split-income')
+    expect(mockRead).toHaveBeenCalledTimes(2)
+    expect(mockPreview).not.toHaveBeenCalled()
+  })
+
   it('uses fresh context facts and normalizes padded native currency for loaded allocations', async () => {
     const staleCandidate: ConsumptionBulkCandidate = {
       id: 'changed-owner',
@@ -511,6 +535,52 @@ describe('ConsumptionBulkDialog', () => {
     expect(await screen.findByText('actual-assignment-id')).toBeVisible()
     expect(onChanged).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('button', { name: 'bulk.actions.apply' })).not.toBeInTheDocument()
+  })
+
+  it('copies the reviewed targets independently of the preview service input', async () => {
+    const user = userEvent.setup()
+    render(<ConsumptionBulkDialog open candidates={[candidates[0]]} onOpenChange={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: /Split income record/ }))
+    await user.click((await screen.findAllByRole('checkbox'))[0])
+    await user.selectOptions(
+      screen.getByLabelText('bulk.treatment.override'),
+      'custom:custom-loan:revision-7'
+    )
+    await user.click(screen.getByRole('button', { name: 'bulk.actions.preview' }))
+    expect(await screen.findByText('bulk.preview.title')).toBeVisible()
+    expect(mockPreview).toHaveBeenCalledWith([
+      {
+        transactionId: 'split-income',
+        splitId: 'real-split-a',
+        referencedPurchaseId: null,
+        customTypeId: 'custom-loan',
+        expectedRevisionId: 'revision-7',
+      },
+    ])
+
+    Object.assign(mockPreview.mock.calls[0][0][0], {
+      transactionId: 'changed-owner',
+      splitId: 'changed-split',
+      customTypeId: 'changed-type',
+      expectedRevisionId: 'changed-revision',
+    })
+
+    await user.click(screen.getByLabelText('bulk.preview.confirm'))
+    await user.click(screen.getByRole('button', { name: 'bulk.actions.apply' }))
+    expect(await screen.findByText('actual-assignment-id')).toBeVisible()
+    expect(mockApply).toHaveBeenCalledTimes(1)
+    expect(mockApply).toHaveBeenCalledWith({
+      targets: [
+        {
+          transactionId: 'split-income',
+          splitId: 'real-split-a',
+          referencedPurchaseId: null,
+          customTypeId: 'custom-loan',
+          expectedRevisionId: 'revision-7',
+        },
+      ],
+      previewToken: 'review-token',
+    })
   })
 
   it('freezes and cannot dismiss a pending apply, then restores focus from Done', async () => {

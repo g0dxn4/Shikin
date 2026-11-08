@@ -13,6 +13,7 @@ All notable changes to Shikin are documented in this file.
 - The local data bridge's database connection, request gate, transaction leases, restore, and shutdown state now have one owner module (`scripts/data-server-session.mjs`). Ordering, lease, restore, and shutdown behavior is unchanged.
 - CLI CSV import and `add-transaction` share a typed internal transaction-preparation module (`cli/src/transaction-mutations.ts`) instead of the importer calling the public tool. Tool schemas, previews, and import results are unchanged.
 - CLI credit-card statement display amounts, effective status, and bill-entry reads come from one module (`cli/src/statement-read.ts`), used by card tools, automation context, and upcoming bills. Displayed statuses and amounts are unchanged.
+- The bulk consumption-classification dialog's session logic (context, preview, apply, receipt) lives in a feature hook (`use-consumption-bulk-session.ts`), separate from allocation rendering. Reviewed payloads and apply protections are unchanged.
 
 ## [1.2.1] - 2026-10-17
 

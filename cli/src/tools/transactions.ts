@@ -46,10 +46,6 @@ import {
   addTransactionInputSchema,
   executeAddTransaction,
   transactionFxAcceptanceGuardSchema,
-  normalizeTransactionStatus,
-  normalizeLedgerTreatment,
-  normalizeReportingTreatment,
-  publicFxEvidence,
   resolveCliFxAcceptance,
   appendCliFxEvidence,
   getBalanceImpact,
@@ -62,14 +58,19 @@ import {
   applyBalanceDeltas,
   buildBalanceAuditChanges,
   formatBalanceImpactPreview,
-  transactionAuditSnapshot,
-  normalizeTransactionTagKey,
-  transactionTagFromUnknown,
-  parseStoredTransactionTags,
   buildTransactionBalanceAuditPreview,
   writeTransactionBalanceAudit,
   resolveTransferDestination,
   resolveRecurringRuleId,
+} from '../transaction-mutations.js'
+import {
+  normalizeTransactionStatus,
+  normalizeLedgerTreatment,
+  normalizeReportingTreatment,
+  publicFxEvidence,
+  normalizeTransactionTagKey,
+  transactionTagFromUnknown,
+  parseStoredTransactionTags,
   type TransactionStatus,
   type LedgerTreatment,
   type ReportingTreatment,
@@ -77,7 +78,8 @@ import {
   type TransactionRow,
   type TransactionTag,
   type TransactionFxEvidenceRow,
-} from '../transaction-mutations.js'
+} from '../transaction-values.js'
+import { transactionAuditSnapshot } from '../transaction-audit.js'
 
 const placeholderStatusSchema = z.enum(['unresolved', 'resolved', 'split', 'cancelled'])
 

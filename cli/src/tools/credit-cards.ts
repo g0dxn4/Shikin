@@ -41,6 +41,12 @@ import {
   effectiveStatementStatus,
   type StatementStatus,
 } from '../statement-read.js'
+import {
+  type CreditCardStatementRow,
+  statementSnapshot,
+  statementAuditSnapshot,
+  paymentLinkStatementAuditSnapshot,
+} from '../statement-audit.js'
 
 type CreditCardAccountRow = {
   id: string
@@ -53,28 +59,6 @@ type CreditCardAccountRow = {
   payment_due_day: number | null
   is_archived: number
   account_mode?: 'transactional' | 'snapshot_only' | null
-}
-
-type CreditCardStatementRow = {
-  id: string
-  account_id: string
-  statement_start_date: string | null
-  statement_end_date: string
-  due_date: string
-  statement_balance: number
-  minimum_payment: number
-  paid_amount: number
-  unattributed_paid_amount: number
-  currency: string
-  status: StatementStatus
-  source: string | null
-  note: string | null
-  created_at?: string | null
-  updated_at?: string | null
-  account_name?: string | null
-  account_currency?: string | null
-  account_type?: string | null
-  account_is_archived?: number | null
 }
 
 type StatementAccountFilterRow = {
@@ -373,72 +357,6 @@ function buildStatementPaymentImpact(input: {
       paymentStatus: effectiveStatementStatus(updatedStatement),
       dueDate: input.statement.due_date,
     },
-  }
-}
-
-function statementSnapshot(statement: CreditCardStatementRow) {
-  const payment = paymentAmounts(statement)
-  const paymentStatus = effectiveStatementStatus(statement)
-
-  return {
-    id: statement.id,
-    accountId: statement.account_id,
-    accountName: statement.account_name ?? null,
-    statementPeriod: {
-      startDate: statement.statement_start_date,
-      endDate: statement.statement_end_date,
-      closingDate: statement.statement_end_date,
-    },
-    statementStartDate: statement.statement_start_date,
-    statementEndDate: statement.statement_end_date,
-    closingDate: statement.statement_end_date,
-    dueDate: statement.due_date,
-    statementBalance: fromCentavos(statement.statement_balance),
-    statementBalanceCentavos: statement.statement_balance,
-    minimumPayment: fromCentavos(statement.minimum_payment),
-    minimumPaymentCentavos: statement.minimum_payment,
-    paidAmount: fromCentavos(statement.paid_amount),
-    paidAmountCentavos: statement.paid_amount,
-    unattributedPaidAmount: fromCentavos(
-      statement.unattributed_paid_amount ?? statement.paid_amount
-    ),
-    unattributedPaidAmountCentavos: statement.unattributed_paid_amount ?? statement.paid_amount,
-    linkedPaidAmount: fromCentavos(
-      statement.paid_amount - (statement.unattributed_paid_amount ?? statement.paid_amount)
-    ),
-    linkedPaidAmountCentavos:
-      statement.paid_amount - (statement.unattributed_paid_amount ?? statement.paid_amount),
-    legacyOverpaid: statement.paid_amount > statement.statement_balance,
-    ...payment,
-    currency: statement.currency,
-    status: statement.status,
-    paymentStatus,
-    source: statement.source,
-    note: statement.note,
-    createdAt: statement.created_at ?? null,
-    updatedAt: statement.updated_at ?? null,
-  }
-}
-
-function statementAuditSnapshot(statement: CreditCardStatementRow) {
-  return statementSnapshot(statement)
-}
-
-function paymentLinkStatementAuditSnapshot(statement: CreditCardStatementRow) {
-  const baseline = statement.unattributed_paid_amount ?? statement.paid_amount
-  return {
-    id: statement.id,
-    accountId: statement.account_id,
-    statementBalanceCentavos: statement.statement_balance,
-    statementBalance: fromCentavos(statement.statement_balance),
-    paidAmountCentavos: statement.paid_amount,
-    paidAmount: fromCentavos(statement.paid_amount),
-    unattributedPaidAmountCentavos: baseline,
-    unattributedPaidAmount: fromCentavos(baseline),
-    linkedAmountCentavos: statement.paid_amount - baseline,
-    linkedAmount: fromCentavos(statement.paid_amount - baseline),
-    currency: statement.currency,
-    status: statement.status,
   }
 }
 

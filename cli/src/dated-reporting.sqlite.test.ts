@@ -20,6 +20,7 @@ import { analyticsTools } from './tools/analytics.js'
 import { budgetsandnetworthTools } from './tools/budgets-and-net-worth.js'
 import { transactionsTools } from './tools/transactions.js'
 import { auditAndContextTools } from './tools/audit-and-context.js'
+import { undo } from './tools/undo.js'
 import { flatDatedConversions } from './scoped-report-read.js'
 import { goalsTools } from './tools/goals.js'
 
@@ -28,6 +29,7 @@ const tools = [
   ...budgetsandnetworthTools,
   ...goalsTools,
   ...transactionsTools,
+  undo,
   ...auditAndContextTools,
 ]
 const run = (name: string, input: Record<string, unknown> = {}) => {

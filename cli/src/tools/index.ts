@@ -10,6 +10,7 @@ import { planningandhealthTools } from './planning-and-health.js'
 import { dataOpsTools } from './data-ops.js'
 import { cashflowBucketTools } from './cashflow-buckets.js'
 import { auditAndContextTools } from './audit-and-context.js'
+import { undo } from './undo.js'
 import { pluginTools } from './plugins.js'
 import { receivablesTools } from './receivables.js'
 import { runtimeDiagnosticsTools } from './runtime-diagnostics.js'
@@ -26,6 +27,7 @@ export const builtInTools: ToolDefinition[] = [
   ...notebookandmarketTools,
   ...automationTools,
   ...dataOpsTools,
+  undo,
   ...auditAndContextTools,
   ...cashflowBucketTools,
   ...planningandhealthTools,

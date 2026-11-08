@@ -20,6 +20,7 @@ All notable changes to Shikin are documented in this file.
 - Frontend transaction evidence reads, capacity guards, and correction auditing live in `src/lib/transaction-evidence.ts`. Split and card-payment workflows keep their own read schedules.
 - Overview chart tick budgets and locale handling come from one policy module (`overview-chart-policy.ts`) shared by the three overview charts. Chart output is unchanged.
 - Native (desktop) database schema migration and readiness helpers live in `src/lib/tauri-database-schema.ts`, separate from the connection, queue, and restore lifecycle in `src/lib/database.ts`.
+- CLI audit snapshot codecs and generic undo replay live in dedicated modules (`cli/src/{transaction-audit,statement-audit,audit-read,transaction-values}.ts`, `cli/src/tools/undo.ts`). Persisted audit JSON and undo behavior are unchanged.
 
 ## [1.2.1] - 2026-10-17
 

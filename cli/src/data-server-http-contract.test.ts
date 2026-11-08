@@ -110,13 +110,15 @@ async function withObservedServer(
     command: (command: string) => Promise<void>
     process: ChildProcessWithoutNullStreams
     exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>
-  }) => Promise<void>
+  }) => Promise<void>,
+  preload = ''
 ): Promise<void> {
   const root = mkdtempSync(join(tmpdir(), 'shikin-session-boundary-'))
   const preloadPath = join(root, 'observe.mjs')
   writeFileSync(
     preloadPath,
-    `import { createRequire } from 'node:module'
+    `${preload}
+import { createRequire } from 'node:module'
 import { Server } from 'node:http'
 const require = createRequire(process.env.SHIKIN_TEST_REQUIRE_FROM)
 const Database = require('better-sqlite3')
@@ -1475,36 +1477,58 @@ describe('database session ownership boundaries', () => {
     })
   })
 
-  it('renews the lease for owner queries beyond the initial expiry', async () => {
-    const headers = {
-      Origin: ORIGIN,
-      'X-Shikin-Bridge': TOKEN,
-      'Content-Type': 'application/json',
-    }
-    const started = Date.now()
-    const begin = await fetch(`${SERVER_URL}/api/db/transaction`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ action: 'begin' }),
-    })
-    expect(begin.status).toBe(200)
-    const { transactionId } = await begin.json()
-    do {
-      const query = await fetch(`${SERVER_URL}/api/db/query`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ sql: 'SELECT 1 AS ok', transactionId }),
-      })
-      expect(query.status).toBe(200)
-      expect(await query.json()).toEqual([{ ok: 1 }])
-    } while (Date.now() - started <= 600)
-    const commit = await fetch(`${SERVER_URL}/api/db/transaction`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ action: 'commit', transactionId }),
-    })
-    expect(commit.status).toBe(200)
-    expect(await commit.json()).toEqual({ ok: true, status: 'committed' })
+  it('renews the lease deadline after one owner query', async () => {
+    await withObservedServer(
+      async (server) => {
+        const begin = await server.request('begin', 'db/transaction', { action: 'begin' })
+        expect(begin.status).toBe(200)
+        const { transactionId } = await begin.json()
+
+        await server.command('advance:150')
+        const query = await server.request('renew', 'db/query', {
+          sql: 'SELECT 1 AS ok',
+          transactionId,
+        })
+        expect(query.status).toBe(200)
+        expect(await query.json()).toEqual([{ ok: 1 }])
+
+        // Export observes ownership without renewing it: the initial 300 ms
+        // deadline is cancelled, and the replacement lease lasts until 450 ms.
+        for (const time of [300, 449]) {
+          await server.command(`advance:${time}`)
+          const blocked = await server.request(`export:${time}`, 'db/export')
+          expect(blocked.status).toBe(409)
+          expect(await blocked.json()).toEqual({
+            error: 'Cannot export the database while server-side transactions are active.',
+          })
+        }
+
+        await server.command('advance:450')
+        const expired = await server.request('expired', 'db/transaction', {
+          action: 'commit',
+          transactionId,
+        })
+        expect(expired.status).toBe(200)
+        expect(await expired.json()).toEqual({ ok: true, status: 'expired_rolled_back' })
+        const released = await server.request('released', 'db/query', {
+          sql: 'SELECT 1 AS ok',
+        })
+        expect(released.status).toBe(200)
+        expect(await released.json()).toEqual([{ ok: 1 }])
+      },
+      // Only this child uses a controlled timer clock; HTTP/IPC and SQLite
+      // remain real. A delayed test runner cannot expire the lease.
+      `import { mock } from 'node:test'
+mock.timers.enable({ apis: ['setTimeout'] })
+let elapsed = 0
+process.on('message', command => {
+  if (!command.startsWith('advance:')) return
+  const target = Number(command.slice('advance:'.length))
+  mock.timers.tick(target - elapsed)
+  elapsed = target
+})
+`
+    )
   })
 
   it.each(['committed', 'rolled_back', 'rollback_failed'] as const)(

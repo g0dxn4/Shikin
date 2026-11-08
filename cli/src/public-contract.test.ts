@@ -19,12 +19,12 @@ const { APPLICATION_VERSION } = await import('./version.js')
 const { COMMAND_CATALOG_VERSION } = await import('./contracts.js')
 const { builtInTools } = await import('./tools.js')
 const { createProgram, COMMAND_CATALOG_VERSION: EXPOSED_CATALOG_VERSION } = await import('./cli.js')
-const { createMcpServer, createMcpToolHandler, registerMcpResources } =
+const { createMcpServer, createMcpToolHandler, registerMcpResources, registerMcpTools } =
   await import('./mcp-server.js')
 
 const inventory = JSON.parse(
   readFileSync(resolve(process.cwd(), 'cli/src/fixtures/public-automation-inventory.json'), 'utf8')
-) as { tools: string[]; commands: string[] }
+) as { tools: string[]; commands: string[]; toolOrder: string[]; commandOrder: string[] }
 const { version: cliPackageVersion } = JSON.parse(
   readFileSync(resolve(process.cwd(), 'cli/package.json'), 'utf8')
 ) as { version: string }
@@ -41,6 +41,11 @@ describe('public automation contract', () => {
     expect(program.commands).toHaveLength(123)
     expect(builtInTools.map((tool) => tool.name).sort()).toEqual(inventory.tools)
     expect(program.commands.map((command) => command.name()).sort()).toEqual(inventory.commands)
+    expect(builtInTools.map((tool) => tool.name)).toEqual(inventory.toolOrder)
+    expect(program.commands.map((command) => command.name())).toEqual(inventory.commandOrder)
+    const mcpTool = vi.fn()
+    registerMcpTools({ tool: mcpTool } as never, builtInTools)
+    expect(mcpTool.mock.calls.map(([name]) => name)).toEqual(inventory.toolOrder)
     expect(program.version()).toBe(cliPackageVersion)
     expect(APPLICATION_VERSION).toBe(cliPackageVersion)
     expect(COMMAND_CATALOG_VERSION).toBe('2026-09-19.backend-remediation')
@@ -60,6 +65,7 @@ describe('public automation contract', () => {
     })
 
     const commands = catalog.commands as Array<{ name: string; effects?: unknown }>
+    expect(commands.map((command) => command.name)).toEqual(inventory.commandOrder)
     expect(commands.find((command) => command.name === 'get-spending-recap')?.effects).toEqual({
       readOnly: true,
       writesTo: [],
@@ -131,6 +137,10 @@ describe('public automation contract', () => {
     )
     expect(builtInTools.map((tool) => tool.name).sort()).toEqual(builtInNamesBefore)
     expect(builtInNamesBefore).toEqual(inventory.tools)
+    expect(program.commands.map((command) => command.name())).toEqual([
+      ...inventory.commandOrder,
+      pluginLikeTool.name,
+    ])
   })
 
   it('uses application semver in MCP metadata rather than the catalog contract version', () => {

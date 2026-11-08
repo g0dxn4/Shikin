@@ -25,20 +25,9 @@ vi.mock('./notebook.js', () => ({
 }))
 vi.mock('./notebook-path.js', () => ({ isSafeNotebookPathInput: () => true }))
 
-import { transactionsTools } from './tools/transactions.js'
-import { analyticsTools } from './tools/analytics.js'
-import { budgetsandnetworthTools } from './tools/budgets-and-net-worth.js'
-import { auditAndContextTools } from './tools/audit-and-context.js'
-import { financialInsightsTools } from './tools/financial-insights.js'
+import { builtInTools as tools } from './tools/index.js'
 import { reportingReadFailure } from './reporting-read.js'
 
-const tools = [
-  ...transactionsTools,
-  ...analyticsTools,
-  ...budgetsandnetworthTools,
-  ...auditAndContextTools,
-  ...financialInsightsTools,
-]
 function run(name: string, input: Record<string, unknown> = {}) {
   const tool = tools.find((tool) => tool.name === name)!
   return tool.execute(tool.schema.parse(input))

@@ -19,11 +19,7 @@ vi.mock('./notebook.js', () => ({
   noteExists: vi.fn(),
   listNotes: vi.fn(),
 }))
-import { undo } from './tools/undo.js'
-import { transactionsTools } from './tools/transactions.js'
-import { financialInsightsTools } from './tools/financial-insights.js'
-import { currencyAndSplitTools } from './tools/currency-and-splits.js'
-const tools = [...transactionsTools, ...financialInsightsTools, undo, ...currencyAndSplitTools]
+import { builtInTools as tools } from './tools/index.js'
 const run = (name: string, input: Record<string, unknown>) => {
   const tool = tools.find((item) => item.name === name)!
   return tool.execute(tool.schema.parse(input))

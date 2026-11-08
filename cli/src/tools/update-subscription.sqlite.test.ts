@@ -33,11 +33,10 @@ vi.mock('../valuation-read.js', () => ({
   rowToHoldingInput: () => ({}),
 }))
 
-import { investmentsandsubscriptionsTools } from './investments-and-subscriptions.js'
+import { updateSubscription } from './subscriptions.js'
 
 const call = (input: Record<string, unknown>) => {
-  const tool = investmentsandsubscriptionsTools.find((item) => item.name === 'update-subscription')!
-  return tool.execute(tool.schema.parse(input))
+  return updateSubscription.execute(updateSubscription.schema.parse(input))
 }
 
 const row = () =>

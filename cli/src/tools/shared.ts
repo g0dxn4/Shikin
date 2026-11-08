@@ -47,6 +47,11 @@ export interface ToolDefinition {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+export function assertSingleRowUpdated(result: { rowsAffected: number }, message: string) {
+  if (result.rowsAffected !== 1) {
+    throw new Error(message)
+  }
+}
 
 export function nextDateForDay(day: number): dayjs.Dayjs {
   const today = dayjs()

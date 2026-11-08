@@ -13,9 +13,7 @@ vi.mock('./database.js', () => ({
 
 vi.mock('./ulid.js', () => ({ generateId: () => 'test-id' }))
 
-import { dataOpsTools } from './tools/data-ops'
-
-const exportData = dataOpsTools.find((tool) => tool.name === 'export-data')!
+import { exportData } from './tools/export-data'
 
 describe('export-data import provenance redaction', () => {
   beforeEach(() => mockQuery.mockReset())

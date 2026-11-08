@@ -35,12 +35,10 @@ vi.mock('@/lib/database', () => {
   }
 })
 import type { ScopedReportResult } from '@shikin/finance-core'
-import { budgetsandnetworthTools } from './tools/budgets-and-net-worth.js'
-import { transactionsTools } from './tools/transactions.js'
+import { builtInTools as tools } from './tools/index.js'
 // @ts-expect-error CLI tsconfig has no '@' alias; Vitest root config resolves this import.
 import { projectBudget, readScopedReport, readScopedSnapshot } from '@/lib/scoped-report-read'
 
-const tools = [...transactionsTools, ...budgetsandnetworthTools]
 const run = (name: string, input: Record<string, unknown> = {}) => {
   const tool = tools.find((item) => item.name === name)!
   return tool.execute(tool.schema.parse(input))

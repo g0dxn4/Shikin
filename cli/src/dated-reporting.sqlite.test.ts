@@ -16,22 +16,8 @@ import { readConvertedCashFlow, readBudgetSpending } from './reporting-read.js'
 import { readNetConsumption } from './consumption-read.js'
 import { readMainOwnershipValuation, readValuationRates } from './valuation-read.js'
 import { setMainCurrency, setExchangeRate } from './fx-service.js'
-import { analyticsTools } from './tools/analytics.js'
-import { budgetsandnetworthTools } from './tools/budgets-and-net-worth.js'
-import { transactionsTools } from './tools/transactions.js'
-import { auditAndContextTools } from './tools/audit-and-context.js'
-import { undo } from './tools/undo.js'
+import { builtInTools as tools } from './tools/index.js'
 import { flatDatedConversions } from './scoped-report-read.js'
-import { goalsTools } from './tools/goals.js'
-
-const tools = [
-  ...analyticsTools,
-  ...budgetsandnetworthTools,
-  ...goalsTools,
-  ...transactionsTools,
-  undo,
-  ...auditAndContextTools,
-]
 const run = (name: string, input: Record<string, unknown> = {}) => {
   const tool = tools.find((item) => item.name === name)!
   return tool.execute(tool.schema.parse(input))

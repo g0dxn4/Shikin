@@ -17,9 +17,8 @@ vi.mock('./database.js', () => ({
   transaction: (fn: () => unknown) => state.db.transaction(fn).immediate(),
 }))
 
-import { dataOpsTools } from './tools/data-ops.js'
+import { importTransactions } from './tools/csv-import.js'
 
-const importTransactions = dataOpsTools.find((tool) => tool.name === 'import-transactions')!
 let dir: string
 let file: string
 

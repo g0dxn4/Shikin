@@ -18,7 +18,8 @@ vi.mock('./database.js', () => ({
 import type { ImportReviewDecision } from '@shikin/finance-core/imports'
 import { datedFxStatements } from '@shikin/finance-core'
 import { executeAtomicImport, type AtomicImportRequest } from './import-transactions'
-import { transactionsTools } from './tools/transactions'
+import { queryTransactions } from './tools/transaction-queries'
+import { bindTransactionImportIdentity } from './tools/transactions'
 
 let db: Database.Database
 
@@ -209,7 +210,7 @@ describe('atomic CLI import', () => {
       "INSERT INTO transaction_splits (id,transaction_id,category_id,amount,notes) VALUES ('split-1','tx-124','food',100,'complete split')"
     ).run()
     db.prepare('UPDATE app_data_state SET data_revision = 10 WHERE id = 1').run()
-    const tool = transactionsTools.find((candidate) => candidate.name === 'query-transactions')!
+    const tool = queryTransactions
 
     const first = await tool.execute(tool.schema.parse({ limit: 100 }))
     expect(first, JSON.stringify(first)).toMatchObject({
@@ -561,9 +562,7 @@ describe('atomic CLI import', () => {
          reporting_treatment, transaction_kind, is_archived, date
        ) VALUES ('legacy-1','account-1','expense',500,'USD','Edited legacy row','posted','normal','normal','standard',0,'2026-01-01')`
     ).run()
-    const tool = transactionsTools.find(
-      (candidate) => candidate.name === 'bind-transaction-import-identity'
-    )!
+    const tool = bindTransactionImportIdentity
     const input = {
       transactionId: 'legacy-1',
       sourceNamespace: 'Bank Scope',

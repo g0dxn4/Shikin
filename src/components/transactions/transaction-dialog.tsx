@@ -21,7 +21,10 @@ import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { ConsumptionClassificationDialog } from './consumption-classification-dialog'
 import { TransactionInspection } from './transaction-inspection'
-import { transactionProtection } from './transaction-inspection-eligibility'
+import {
+  isTransactionMetadataOnly,
+  transactionProtection,
+} from './transaction-inspection-eligibility'
 
 type EditLoadState = 'idle' | 'loading' | 'ready' | 'not-found' | 'error'
 
@@ -190,12 +193,7 @@ export function TransactionDialog() {
         }))
         const splitsChanged =
           splits !== undefined && JSON.stringify(splits) !== JSON.stringify(loadedSplits)
-        if (
-          splitsChanged ||
-          loadedTransaction?.has_splits ||
-          loadedTransaction?.is_finalized_statement ||
-          loadedTransaction?.finalization_id
-        ) {
+        if (splitsChanged || (loadedTransaction && isTransactionMetadataOnly(loadedTransaction))) {
           if (
             !loadedTransaction ||
             toCentavos(data.amount) !== loadedTransaction.amount ||
@@ -362,12 +360,7 @@ export function TransactionDialog() {
               transaction={isEditing ? (loadedTransaction ?? undefined) : undefined}
               initialSplits={isEditing ? loadedSplits : undefined}
               metadataOnly={
-                isEditing &&
-                !!(
-                  loadedTransaction?.has_splits ||
-                  loadedTransaction?.is_finalized_statement ||
-                  loadedTransaction?.finalization_id
-                )
+                isEditing && !!loadedTransaction && isTransactionMetadataOnly(loadedTransaction)
               }
               onSubmit={handleSubmit}
               isLoading={isLoading}

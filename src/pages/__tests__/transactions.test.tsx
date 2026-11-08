@@ -558,6 +558,215 @@ describe('Transactions', () => {
     expect(mockInvalidate).toHaveBeenCalledWith('review')
   })
 
+  it.each<{
+    name: string
+    patch: Partial<TransactionPageRow>
+    edit: boolean
+    remove: boolean
+    review: string | null
+  }>([
+    { name: 'ordinary', patch: {}, edit: true, remove: true, review: null },
+    {
+      name: 'archived',
+      patch: { is_archived: 1 },
+      edit: false,
+      remove: false,
+      review: null,
+    },
+    {
+      name: 'matched',
+      patch: { matched_transaction_id: 'linked' },
+      edit: false,
+      remove: false,
+      review: 'review.protected.linked',
+    },
+    {
+      name: 'receivable',
+      patch: { is_receivable_payment: 1 },
+      edit: false,
+      remove: false,
+      review: 'review.protected.receivable',
+    },
+    {
+      name: 'reconciliation',
+      patch: { is_reconciliation_adjustment: 1 },
+      edit: false,
+      remove: false,
+      review: 'review.protected.reconciliation',
+    },
+    {
+      name: 'workflow',
+      patch: { transaction_kind: 'reconciliation_bridge' },
+      edit: false,
+      remove: false,
+      review: 'review.protected.workflow',
+    },
+    {
+      name: 'unresolved placeholder',
+      patch: { is_placeholder: 1, placeholder_status: null },
+      edit: true,
+      remove: true,
+      review: null,
+    },
+    {
+      name: 'resolved placeholder',
+      patch: { is_placeholder: 1, placeholder_status: 'resolved' },
+      edit: false,
+      remove: false,
+      review: 'review.protected.placeholderLifecycle',
+    },
+    {
+      name: 'finalized projection',
+      patch: { is_finalized_statement: 1 },
+      edit: true,
+      remove: false,
+      review: 'review.protected.finalized',
+    },
+    {
+      name: 'finalization ID without projection',
+      patch: { finalization_id: 'final' },
+      edit: true,
+      remove: false,
+      review: null,
+    },
+    {
+      name: 'split',
+      patch: { has_splits: 1 },
+      edit: true,
+      remove: true,
+      review: 'review.protected.split',
+    },
+    {
+      name: 'transfer',
+      patch: { type: 'transfer', transfer_to_account_id: 'other' },
+      edit: true,
+      remove: true,
+      review: 'review.protected.transfer',
+    },
+    {
+      name: 'split before every other review restriction',
+      patch: {
+        is_archived: 1,
+        has_splits: 1,
+        is_receivable_payment: 1,
+        is_reconciliation_adjustment: 1,
+        is_finalized_statement: 1,
+        finalization_id: 'final',
+        matched_transaction_id: 'linked',
+        transaction_kind: 'archived_transfer_mirror',
+        is_placeholder: 1,
+        placeholder_status: 'cancelled',
+        type: 'transfer',
+      },
+      edit: false,
+      remove: false,
+      review: 'review.protected.split',
+    },
+    {
+      name: 'receivable before reconciliation and finalization',
+      patch: {
+        is_receivable_payment: 1,
+        is_reconciliation_adjustment: 1,
+        is_finalized_statement: 1,
+        matched_transaction_id: 'linked',
+      },
+      edit: false,
+      remove: false,
+      review: 'review.protected.receivable',
+    },
+    {
+      name: 'reconciliation before finalization and match',
+      patch: {
+        is_reconciliation_adjustment: 1,
+        is_finalized_statement: 1,
+        matched_transaction_id: 'linked',
+      },
+      edit: false,
+      remove: false,
+      review: 'review.protected.reconciliation',
+    },
+    {
+      name: 'finalization before match',
+      patch: { is_finalized_statement: 1, matched_transaction_id: 'linked' },
+      edit: false,
+      remove: false,
+      review: 'review.protected.finalized',
+    },
+    {
+      name: 'match before workflow',
+      patch: { matched_transaction_id: 'linked', transaction_kind: 'reconciliation_bridge' },
+      edit: false,
+      remove: false,
+      review: 'review.protected.linked',
+    },
+    {
+      name: 'workflow before placeholder lifecycle',
+      patch: {
+        transaction_kind: 'reconciliation_bridge',
+        is_placeholder: 1,
+        placeholder_status: 'split',
+      },
+      edit: false,
+      remove: false,
+      review: 'review.protected.workflow',
+    },
+    {
+      name: 'placeholder lifecycle before transfer',
+      patch: { is_placeholder: 1, placeholder_status: 'cancelled', type: 'transfer' },
+      edit: false,
+      remove: false,
+      review: 'review.protected.placeholderLifecycle',
+    },
+    {
+      name: 'split before finalized transfer',
+      patch: { has_splits: 1, is_finalized_statement: 1, type: 'transfer' },
+      edit: true,
+      remove: false,
+      review: 'review.protected.split',
+    },
+  ])(
+    'preserves operation-specific page actions for $name',
+    async ({ patch, edit, remove, review }) => {
+      window.history.replaceState(null, '', '/transactions?view=ledger')
+      accounts = [{ id: 'account-1', name: 'Checking', currency: 'USD', is_archived: 0 }]
+      categories = [{ id: 'food', name: 'Food', type: 'expense' }]
+      setRows([makeRow(patch)])
+      const user = userEvent.setup()
+      render(<Transactions />)
+
+      expect(screen.queryAllByRole('button', { name: 'Edit Coffee' }).length > 0).toBe(edit)
+      expect(screen.queryAllByRole('button', { name: 'Delete Coffee' }).length > 0).toBe(remove)
+      await user.click(screen.getByRole('tab', { name: 'views.review' }))
+
+      if (review) {
+        expect(screen.getByText(review)).toBeVisible()
+        expect(screen.queryByRole('combobox', { name: 'review.category' })).not.toBeInTheDocument()
+        expect(screen.queryByRole('combobox', { name: 'review.account' })).not.toBeInTheDocument()
+        await user.click(
+          screen.getByRole('button', {
+            name: patch.has_splits ? 'review.reviewSplit' : 'editTransaction',
+          })
+        )
+        expect(mockOpenTransactionDialog).toHaveBeenCalledExactlyOnceWith('tx-1')
+        expect(mockUpdateReviewFields).not.toHaveBeenCalled()
+      } else {
+        expect(screen.getByRole('combobox', { name: 'review.category' })).toBeEnabled()
+        expect(screen.getByRole('combobox', { name: 'review.account' })).toBeEnabled()
+        await user.selectOptions(screen.getByRole('combobox', { name: 'review.category' }), 'food')
+        await waitFor(() =>
+          expect(mockUpdateReviewFields).toHaveBeenCalledExactlyOnceWith('tx-1', {
+            categoryId: 'food',
+          })
+        )
+        expect(mockInvalidate).toHaveBeenCalledExactlyOnceWith('review')
+        expect(mockUpdateReviewFields.mock.invocationCallOrder[0]).toBeLessThan(
+          mockInvalidate.mock.invocationCallOrder[0]
+        )
+      }
+      expect(mockRemove).not.toHaveBeenCalled()
+    }
+  )
+
   it('preserves J/K review keyboard navigation outside controls', async () => {
     setRows([
       makeRow({ id: 'first', description: 'First' }),

@@ -237,6 +237,213 @@ describe('TransactionDialog', () => {
     expect(screen.queryByRole('button', { name: 'actions.classify' })).not.toBeInTheDocument()
   })
 
+  it.each<{
+    name: string
+    patch: Partial<TransactionPageRow>
+    reason: string
+  }>([
+    {
+      name: 'archive before every other protection',
+      patch: {
+        is_archived: 1,
+        has_splits: 1,
+        is_receivable_payment: 1,
+        is_reconciliation_adjustment: 1,
+        is_finalized_statement: 1,
+        matched_transaction_id: 'linked',
+        transaction_kind: 'reconciliation_bridge',
+        is_placeholder: 1,
+        placeholder_status: 'resolved',
+        type: 'transfer',
+      },
+      reason: 'dialog.archived',
+    },
+    {
+      name: 'receivable before reconciliation, finalization and match',
+      patch: {
+        is_receivable_payment: 1,
+        is_reconciliation_adjustment: 1,
+        is_finalized_statement: 1,
+        matched_transaction_id: 'linked',
+      },
+      reason: 'review.protected.receivable',
+    },
+    {
+      name: 'reconciliation before finalization and match',
+      patch: {
+        is_reconciliation_adjustment: 1,
+        is_finalized_statement: 1,
+        matched_transaction_id: 'linked',
+      },
+      reason: 'review.protected.reconciliation',
+    },
+    {
+      name: 'match despite finalization and workflow',
+      patch: {
+        is_finalized_statement: 1,
+        matched_transaction_id: 'linked',
+        transaction_kind: 'reconciliation_bridge',
+      },
+      reason: 'review.protected.linked',
+    },
+    {
+      name: 'workflow before completed placeholder',
+      patch: {
+        transaction_kind: 'reconciliation_bridge',
+        is_placeholder: 1,
+        placeholder_status: 'split',
+      },
+      reason: 'review.protected.workflow',
+    },
+    {
+      name: 'placeholder despite split, finalization and transfer',
+      patch: {
+        has_splits: 1,
+        is_finalized_statement: 1,
+        finalization_id: 'final',
+        is_placeholder: 1,
+        placeholder_status: 'cancelled',
+        type: 'transfer',
+      },
+      reason: 'review.protected.placeholderLifecycle',
+    },
+  ])('keeps full-edit reason precedence: $name', async ({ patch, reason }) => {
+    mockEditingTransactionId = 'tx-edit'
+    mockGetTransactionById.mockResolvedValueOnce({ ...mockTransaction, ...patch })
+    render(<TransactionDialog />)
+
+    expect(await screen.findByText(reason)).toBeVisible()
+    expect(screen.getByRole('heading', { name: 'detail.readOnlyTitle' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: 'actions.save' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'deleteTransaction' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'actions.classify' })).not.toBeInTheDocument()
+    expect(mockCorrectMetadata).not.toHaveBeenCalled()
+    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockRemove).not.toHaveBeenCalled()
+  })
+
+  it.each<{
+    name: string
+    patch: Partial<TransactionPageRow>
+    metadataOnly: boolean
+    remove: boolean
+    classify: boolean
+  }>([
+    { name: 'ordinary', patch: {}, metadataOnly: false, remove: true, classify: true },
+    {
+      name: 'unresolved placeholder',
+      patch: { is_placeholder: 1, placeholder_status: null },
+      metadataOnly: false,
+      remove: true,
+      classify: true,
+    },
+    {
+      name: 'transfer',
+      patch: { type: 'transfer', transfer_to_account_id: 'acc-2' },
+      metadataOnly: false,
+      remove: true,
+      classify: false,
+    },
+    { name: 'split', patch: { has_splits: 1 }, metadataOnly: true, remove: true, classify: true },
+    {
+      name: 'finalized projection',
+      patch: { is_finalized_statement: 1 },
+      metadataOnly: true,
+      remove: false,
+      classify: true,
+    },
+    {
+      name: 'finalization ID without projection',
+      patch: { finalization_id: 'final' },
+      metadataOnly: true,
+      remove: false,
+      classify: true,
+    },
+    {
+      name: 'split finalized transfer',
+      patch: {
+        has_splits: 1,
+        is_finalized_statement: 1,
+        finalization_id: 'final',
+        type: 'transfer',
+        transfer_to_account_id: 'acc-2',
+      },
+      metadataOnly: true,
+      remove: false,
+      classify: false,
+    },
+  ])(
+    'preserves financial locks and deletion for $name',
+    async ({ patch, metadataOnly, remove, classify }) => {
+      mockEditingTransactionId = 'tx-edit'
+      mockGetTransactionById.mockResolvedValueOnce({ ...mockTransaction, ...patch })
+      const user = userEvent.setup()
+      render(<TransactionDialog />)
+
+      expect(await screen.findByRole('button', { name: 'actions.save' })).toBeEnabled()
+      expect(screen.getByRole('heading', { name: 'editTransaction' })).toBeVisible()
+      expect(screen.getByLabelText('form.amount')).toHaveProperty('readOnly', metadataOnly)
+      expect(screen.getByLabelText('form.date')).toHaveProperty('readOnly', metadataOnly)
+      expect(screen.getByRole('combobox', { name: 'form.type' })).toHaveProperty(
+        'disabled',
+        metadataOnly
+      )
+      expect(screen.getByRole('combobox', { name: 'form.account' })).toHaveProperty(
+        'disabled',
+        metadataOnly
+      )
+      expect(screen.getByLabelText('form.description')).toBeEnabled()
+      expect(screen.queryByText('correction.financialLocked') !== null).toBe(metadataOnly)
+      await user.click(screen.getByText('detail.details'))
+      expect(screen.queryByRole('button', { name: 'deleteTransaction' }) !== null).toBe(remove)
+      if (classify) {
+        expect(screen.getByRole('button', { name: 'actions.classify' })).toBeEnabled()
+      } else {
+        expect(screen.queryByRole('button', { name: 'actions.classify' })).not.toBeInTheDocument()
+      }
+    }
+  )
+
+  it.each<{
+    name: string
+    patch: Partial<TransactionPageRow>
+  }>([
+    { name: 'split', patch: { has_splits: 1 } },
+    { name: 'finalized projection', patch: { is_finalized_statement: 1 } },
+    { name: 'finalization ID', patch: { finalization_id: 'final' } },
+    {
+      name: 'split and both finalization fields',
+      patch: { has_splits: 1, is_finalized_statement: 1, finalization_id: 'final' },
+    },
+  ])('submits only metadata correction for $name', async ({ patch }) => {
+    mockEditingTransactionId = 'tx-edit'
+    mockGetTransactionById.mockResolvedValueOnce({ ...mockTransaction, ...patch })
+    render(<TransactionDialog />)
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'actions.save' }))
+
+    await waitFor(() =>
+      expect(mockCorrectMetadata).toHaveBeenCalledExactlyOnceWith(
+        'tx-edit',
+        {
+          description: 'Test expense',
+          category_id: null,
+          subcategory_id: null,
+          notes: null,
+          reporting_treatment: 'normal',
+        },
+        undefined
+      )
+    )
+    expect(mockUpdate).not.toHaveBeenCalled()
+    expect(mockInvalidateTransactionPage).toHaveBeenCalledExactlyOnceWith('edit')
+    expect(mockCorrectMetadata.mock.invocationCallOrder[0]).toBeLessThan(
+      mockInvalidateTransactionPage.mock.invocationCallOrder[0]
+    )
+    expect(mockInvalidateTransactionPage.mock.invocationCallOrder[0]).toBeLessThan(
+      mockCloseTransactionDialog.mock.invocationCallOrder[0]
+    )
+  })
+
   it('keeps long references and source evidence inside the minimum-width detail track', async () => {
     const reference = '01JQFG5F2SPAYN0TM2BC3YW93G'
     mockEditingTransactionId = reference

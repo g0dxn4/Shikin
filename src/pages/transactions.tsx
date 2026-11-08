@@ -48,7 +48,11 @@ import { getErrorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import type { TransactionSplitWithCategory } from '@/types/database'
 import { StatementImportDialog } from '@/components/transactions/statement-import-dialog'
-import { transactionProtection } from '@/components/transactions/transaction-inspection-eligibility'
+import {
+  canDeleteTransaction,
+  transactionProtection,
+  transactionReviewProtection,
+} from '@/components/transactions/transaction-inspection-eligibility'
 import { ConsumptionBulkDialog } from '@/components/transactions/consumption-bulk-dialog'
 import { useTransactionPageQuery } from '@/hooks/use-transaction-page-query'
 import {
@@ -91,15 +95,6 @@ const sortableFields: TransactionSort[] = ['date', 'description', 'amount']
 
 type TransactionView = (typeof transactionViews)[number]
 type DatePreset = TransactionDatePreset
-type ReviewProtectionKey =
-  | 'review.protected.split'
-  | 'review.protected.receivable'
-  | 'review.protected.reconciliation'
-  | 'review.protected.finalized'
-  | 'review.protected.linked'
-  | 'review.protected.workflow'
-  | 'review.protected.transfer'
-  | 'review.protected.placeholderLifecycle'
 
 interface TransactionUrlState {
   search: string
@@ -248,23 +243,6 @@ function getReviewReasons(
   if (transaction.ledger_treatment === 'staged_no_balance_impact') reasons.push('staged')
   if (transaction.is_consumption_unclassified) reasons.push('unclassified')
   return reasons
-}
-
-function getReviewProtectionKey(transaction: TransactionPageRow): ReviewProtectionKey | null {
-  if (transaction.has_splits) return 'review.protected.split'
-  if (transaction.is_receivable_payment) return 'review.protected.receivable'
-  if (transaction.is_reconciliation_adjustment) return 'review.protected.reconciliation'
-  if (transaction.is_finalized_statement) return 'review.protected.finalized'
-  if (transaction.matched_transaction_id) return 'review.protected.linked'
-  if ((transaction.transaction_kind ?? 'standard') !== 'standard')
-    return 'review.protected.workflow'
-  if (
-    transaction.is_placeholder === 1 &&
-    (transaction.placeholder_status ?? 'unresolved') !== 'unresolved'
-  )
-    return 'review.protected.placeholderLifecycle'
-  if (transaction.type === 'transfer') return 'review.protected.transfer'
-  return null
 }
 
 function isEditingTarget(target: EventTarget | null): boolean {
@@ -1168,16 +1146,6 @@ function ledgerNoteText(transaction: TransactionPageRow): string | null {
   return null
 }
 
-function ledgerCanEdit(transaction: TransactionPageRow): boolean {
-  return (
-    !transaction.matched_transaction_id &&
-    !transaction.is_receivable_payment &&
-    !transaction.is_reconciliation_adjustment &&
-    (transaction.transaction_kind ?? 'standard') === 'standard' &&
-    !transactionProtection(transaction)
-  )
-}
-
 function ledgerHasSplits(transaction: TransactionPageRow): boolean {
   return Boolean(transaction.has_splits)
 }
@@ -1396,7 +1364,7 @@ function LedgerActions({
     >
       <TransactionActions
         transaction={transaction}
-        canEdit={ledgerCanEdit(transaction)}
+        canEdit={!transactionProtection(transaction)}
         onEdit={() => onEdit(transaction.id)}
         onDelete={() => onDelete(transaction.id)}
         compact
@@ -1697,7 +1665,7 @@ function TransactionRow({
         <div className="col-start-3 row-start-1 md:col-start-4">
           <TransactionActions
             transaction={transaction}
-            canEdit={ledgerCanEdit(transaction)}
+            canEdit={!transactionProtection(transaction)}
             onEdit={onEdit}
             onDelete={onDelete}
             compact
@@ -1859,7 +1827,7 @@ function ReviewInspector({
 }) {
   const { t } = useTranslation('transactions')
   const { t: tConsumption } = useTranslation('consumption')
-  const protectionKey = getReviewProtectionKey(transaction)
+  const protectionKey = transactionReviewProtection(transaction)
   const isMutable = !protectionKey
   const source = ledgerSourceChip(transaction)
   const compatibleAccounts = accounts.filter(
@@ -1939,7 +1907,7 @@ function ReviewInspector({
           <div className="mt-3">
             <TransactionActions
               transaction={transaction}
-              canEdit={ledgerCanEdit(transaction)}
+              canEdit={!transactionProtection(transaction)}
               onEdit={() => onEdit(transaction.id)}
               onDelete={() => onDelete(transaction.id)}
               compact
@@ -2131,22 +2099,20 @@ function TransactionActions({
           <Pencil size={13} />
         </Button>
       )}
-      {!transactionProtection(transaction) &&
-        !transaction.is_finalized_statement &&
-        !transaction.finalization_id && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className={cn('text-destructive hover:text-destructive h-8 w-8', buttonClassName)}
-            onClick={(event) => {
-              event.stopPropagation()
-              onDelete()
-            }}
-            aria-label={`Delete ${transaction.description}`}
-          >
-            <Trash2 size={13} />
-          </Button>
-        )}
+      {canDeleteTransaction(transaction) && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn('text-destructive hover:text-destructive h-8 w-8', buttonClassName)}
+          onClick={(event) => {
+            event.stopPropagation()
+            onDelete()
+          }}
+          aria-label={`Delete ${transaction.description}`}
+        >
+          <Trash2 size={13} />
+        </Button>
+      )}
     </div>
   )
 }

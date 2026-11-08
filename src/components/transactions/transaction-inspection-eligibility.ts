@@ -9,12 +9,21 @@ export type TransactionProtectionKey =
   | 'review.protected.workflow'
   | 'review.protected.placeholderLifecycle'
 
-export function transactionProtection(
-  transaction: TransactionPageRow
-): TransactionProtectionKey | null {
-  if (transaction.is_archived === 1) return 'dialog.archived'
+export type TransactionReviewProtectionKey =
+  | Exclude<TransactionProtectionKey, 'dialog.archived'>
+  | 'review.protected.split'
+  | 'review.protected.finalized'
+  | 'review.protected.transfer'
+
+type SharedProtectionKey = Exclude<TransactionProtectionKey, 'dialog.archived'>
+
+function provenanceProtection(transaction: TransactionPageRow): SharedProtectionKey | null {
   if (transaction.is_receivable_payment) return 'review.protected.receivable'
   if (transaction.is_reconciliation_adjustment) return 'review.protected.reconciliation'
+  return null
+}
+
+function workflowProtection(transaction: TransactionPageRow): SharedProtectionKey | null {
   if (transaction.matched_transaction_id) return 'review.protected.linked'
   if ((transaction.transaction_kind ?? 'standard') !== 'standard')
     return 'review.protected.workflow'
@@ -24,6 +33,44 @@ export function transactionProtection(
   )
     return 'review.protected.placeholderLifecycle'
   return null
+}
+
+export function transactionProtection(
+  transaction: TransactionPageRow
+): TransactionProtectionKey | null {
+  if (transaction.is_archived === 1) return 'dialog.archived'
+  return provenanceProtection(transaction) ?? workflowProtection(transaction)
+}
+
+/** Inline review deliberately uses its own order and only the finalized projection. */
+export function transactionReviewProtection(
+  transaction: TransactionPageRow
+): TransactionReviewProtectionKey | null {
+  if (transaction.has_splits) return 'review.protected.split'
+  const provenance = provenanceProtection(transaction)
+  if (provenance) return provenance
+  if (transaction.is_finalized_statement) return 'review.protected.finalized'
+  const workflow = workflowProtection(transaction)
+  if (workflow) return workflow
+  if (transaction.type === 'transfer') return 'review.protected.transfer'
+  return null
+}
+
+/** Splits and finalization lock financial fields, not the metadata correction form. */
+export function isTransactionMetadataOnly(transaction: TransactionPageRow): boolean {
+  return !!(
+    transaction.has_splits ||
+    transaction.is_finalized_statement ||
+    transaction.finalization_id
+  )
+}
+
+export function canDeleteTransaction(transaction: TransactionPageRow): boolean {
+  return (
+    !transactionProtection(transaction) &&
+    !transaction.is_finalized_statement &&
+    !transaction.finalization_id
+  )
 }
 
 export function isEligibleLegacyImportIdentityRow(transaction: TransactionPageRow): boolean {

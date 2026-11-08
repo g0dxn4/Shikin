@@ -40,10 +40,6 @@ export async function startWebHost(portOption: unknown = WEB_DEFAULT_PORT): Prom
     throw new Error(`Hosted web assets are missing at ${indexPath}. Rebuild Shikin CLI support.`)
   }
 
-  process.env.SHIKIN_DATA_SERVER_PORT = String(port)
-  process.env.SHIKIN_WEB_HOSTED = '1'
-  process.env.SHIKIN_WEB_STATIC_ROOT = staticRoot
-
   // Concurrent calls used the last validated configuration before module loading
   // completed. Retain that ordering without using env as the startup transport.
   pendingStartup = { port, hostedMode: true, staticRoot, storageEnvironment: process.env }

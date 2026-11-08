@@ -7,13 +7,20 @@ import { describe, expect, it } from 'vitest'
 // substituted, so listen completion is an explicit barrier rather than a timer.
 const STARTUP_PROBE = String.raw`
 import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { resolve, dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { stripTypeScriptTypes } from 'node:module'
 import { SourceTextModule, SyntheticModule, createContext } from 'node:vm'
-const [root, scenario, port, fault] = process.argv.slice(1)
+const [root, scenario, port, fault, environment = 'present'] = process.argv.slice(1)
 const trace = []
 const env = { SHIKIN_DATA_SERVER_PORT: 'old-port', SHIKIN_WEB_HOSTED: 'old-mode', SHIKIN_WEB_STATIC_ROOT: 'old-root' }
+if (environment === 'absent') for (const name of Object.keys(env)) delete env[name]
+if (environment === 'formats') Object.assign(env, {
+  SHIKIN_DATA_SERVER_PORT: ' 08480 ',
+  SHIKIN_WEB_HOSTED: 'False',
+  SHIKIN_WEB_STATIC_ROOT: ' ./unchanged root\t',
+})
 if (scenario === 'direct') {
   delete env.SHIKIN_WEB_HOSTED
   delete env.SHIKIN_WEB_STATIC_ROOT
@@ -138,14 +145,20 @@ if (listening) {
   await requestHandler({ url: '/api/store', method: 'GET', headers: { host: '127.0.0.1:8480' } }, response)
   signals.get('SIGTERM')()
 }
+const inherited = spawnSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(process.env))'], {
+  env, encoding: 'utf8',
+})
+if (inherited.status !== 0) throw new Error(inherited.stderr)
+const childEnv = JSON.parse(inherited.stdout)
 const normalize = (value) => JSON.parse(JSON.stringify(value).split(root).join('<root>'))
-process.stdout.write(JSON.stringify(normalize({ outcomes, env, trace, marker })))
+process.stdout.write(JSON.stringify(normalize({ outcomes, env, childEnv, trace, marker })))
 `
 
 function probe(
   scenario: 'cli' | 'direct' | 'inert' | 'concurrent' | 'explicit',
   port = 'default',
-  fault = ''
+  fault = '',
+  environment = 'present'
 ) {
   const result = spawnSync(
     process.execPath,
@@ -158,6 +171,7 @@ function probe(
       scenario,
       port,
       fault,
+      environment,
     ],
     { encoding: 'utf8' }
   )
@@ -231,13 +245,37 @@ describe('hosted startup boundary characterization', () => {
     expect(result.marker).toBeNull()
   })
 
-  it('keeps one startup, outward env writes, pre-listen completion, logs, HTTP and cleanup', () => {
+  it.each(['present', 'absent', 'formats'] as const)(
+    'pins %s embedding environment and subsequent child inheritance',
+    (environment) => {
+      const expected = {
+        present: {
+          SHIKIN_DATA_SERVER_PORT: 'old-port',
+          SHIKIN_WEB_HOSTED: 'old-mode',
+          SHIKIN_WEB_STATIC_ROOT: 'old-root',
+        },
+        absent: {},
+        formats: {
+          SHIKIN_DATA_SERVER_PORT: ' 08480 ',
+          SHIKIN_WEB_HOSTED: 'False',
+          SHIKIN_WEB_STATIC_ROOT: ' ./unchanged root\t',
+        },
+      }[environment]
+      for (const fault of ['', 'native']) {
+        const result = probe('cli', 'default', fault, environment)
+        expect(result.env).toEqual(expected)
+        expect(result.childEnv).toEqual(expected)
+      }
+    }
+  )
+
+  it('keeps one startup, prior env, pre-listen completion, logs, HTTP and cleanup', () => {
     const result = probe('cli')
     expect(result.outcomes).toEqual(['resolved', 'resolved'])
     expect(result.env).toEqual({
-      SHIKIN_DATA_SERVER_PORT: '9001',
-      SHIKIN_WEB_HOSTED: '1',
-      SHIKIN_WEB_STATIC_ROOT: '<root>/cli/web',
+      SHIKIN_DATA_SERVER_PORT: 'old-port',
+      SHIKIN_WEB_HOSTED: 'old-mode',
+      SHIKIN_WEB_STATIC_ROOT: 'old-root',
     })
     expect(result.trace).toEqual([
       ...bootstrap,
@@ -295,7 +333,7 @@ describe('hosted startup boundary characterization', () => {
     expect(result.trace).toEqual([['completed', false]])
   })
 
-  it('caches native failure without preparing storage and still rewrites env on another call', () => {
+  it('caches native failure without preparing storage or rewriting env on another call', () => {
     const result = probe('cli', 'default', 'native')
     const message =
       'The better-sqlite3 native binding could not be loaded for this Node.js runtime. Reinstall or rebuild the CLI dependencies for the active Node ABI.'
@@ -308,9 +346,9 @@ describe('hosted startup boundary characterization', () => {
       ['completed', false],
     ])
     expect(result.env).toEqual({
-      SHIKIN_DATA_SERVER_PORT: '9001',
-      SHIKIN_WEB_HOSTED: '1',
-      SHIKIN_WEB_STATIC_ROOT: '<root>/cli/web',
+      SHIKIN_DATA_SERVER_PORT: 'old-port',
+      SHIKIN_WEB_HOSTED: 'old-mode',
+      SHIKIN_WEB_STATIC_ROOT: 'old-root',
     })
   })
 

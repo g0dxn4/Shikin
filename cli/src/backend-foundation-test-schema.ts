@@ -49,7 +49,7 @@ export function runHostedTestMigrations(
   const source = readFileSync(new URL('../../scripts/data-server.mjs', import.meta.url), 'utf8')
   let migrations = source.slice(
     source.indexOf('function tableHasColumn('),
-    source.indexOf('\ntry {\n  runMigrations()')
+    source.indexOf('\ntry {\n  databaseSession.initialize(')
   )
   if (through === 19)
     migrations = migrations.replace(
@@ -82,7 +82,7 @@ export function runHostedTestMigrations(
         'if (false)'
       )
   }
-  runInNewContext(`${migrations}\nrunMigrations()`, {
+  runInNewContext(`${migrations}\nrunMigrations(db)`, {
     db,
     ...foundation,
     ...scopedBudgets,

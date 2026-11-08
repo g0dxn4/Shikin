@@ -10,6 +10,7 @@ All notable changes to Shikin are documented in this file.
 - Persisted import-review evidence rules (fingerprint material, same-source identity, decision matching) are shared from finance-core by the CLI importer and in-app statement import. Stored decisions remain compatible across both.
 - Gross cash-flow eligibility SQL and report integrity validation are defined once in finance-core reporting. CLI and app report adapters keep their own queries and messages.
 - Strict investment instrument identity decoding moved next to its encoder in finance-core valuation. Quote-chart availability is unchanged.
+- The local data bridge's database connection, request gate, transaction leases, restore, and shutdown state now have one owner module (`scripts/data-server-session.mjs`). Ordering, lease, restore, and shutdown behavior is unchanged.
 
 ## [1.2.1] - 2026-10-17
 

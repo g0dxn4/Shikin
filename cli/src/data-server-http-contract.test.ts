@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { request as requestHttp } from 'node:http'
 import { createServer } from 'node:net'
+import { EventEmitter, once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import Database from 'better-sqlite3'
@@ -99,6 +100,128 @@ afterAll(async () => {
     rmSync(tempHomeDir, { recursive: true, force: true })
   }
 })
+
+// Observe HTTP dispatch and pause native backups, not the server's ownership internals.
+// IPC barriers keep queued/cancelled/restore ordering deterministic without sleeps.
+async function withObservedServer(
+  run: (server: {
+    request: (id: string, path: string, body?: unknown, signal?: AbortSignal) => Promise<Response>
+    observed: (event: string) => Promise<void>
+    command: (command: string) => Promise<void>
+    process: ChildProcessWithoutNullStreams
+    exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>
+  }) => Promise<void>
+): Promise<void> {
+  const root = mkdtempSync(join(tmpdir(), 'shikin-session-boundary-'))
+  const preloadPath = join(root, 'observe.mjs')
+  writeFileSync(
+    preloadPath,
+    `import { createRequire } from 'node:module'
+import { Server } from 'node:http'
+const require = createRequire(process.env.SHIKIN_TEST_REQUIRE_FROM)
+const Database = require('better-sqlite3')
+const emit = Server.prototype.emit
+Server.prototype.emit = function (event, ...args) {
+  if (event === 'request') {
+    const [req, res] = args
+    const id = req.headers['x-test-request']
+    if (id) {
+      req.once('end', () => setImmediate(() => process.send('handled:' + id)))
+      res.once('close', () => setImmediate(() => process.send('closed:' + id)))
+    }
+  }
+  return emit.call(this, event, ...args)
+}
+let pause = null
+let resume = null
+process.on('message', command => {
+  if (command === 'release') {
+    resume?.()
+    resume = null
+  } else {
+    pause = command
+  }
+  process.send('command:' + command)
+})
+const backup = Database.prototype.backup
+Database.prototype.backup = async function (destination, ...args) {
+  if ((pause === 'export' && destination.includes('.export-')) ||
+      (pause === 'rollback' && this.name.includes('.backup-'))) {
+    const event = 'paused:' + pause
+    pause = null
+    const { promise, resolve } = Promise.withResolvers()
+    resume = resolve
+    process.send(event)
+    await promise
+  }
+  return backup.call(this, destination, ...args)
+}
+`
+  )
+  const port = await getFreePort()
+  const url = `http://127.0.0.1:${port}`
+  const child = spawn('node', ['--import', preloadPath, resolve('scripts/data-server.mjs')], {
+    env: {
+      ...process.env,
+      HOME: root,
+      XDG_DATA_HOME: join(root, 'data'),
+      SHIKIN_DATA_SERVER_PORT: String(port),
+      SHIKIN_DATA_SERVER_BRIDGE_TOKEN: TOKEN,
+      SHIKIN_SERVER_TRANSACTION_TTL_MS: '300',
+      SHIKIN_TEST_REQUIRE_FROM: resolve('package.json'),
+    },
+    stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+  }) as ChildProcessWithoutNullStreams
+  const events = new Set<string>()
+  const notifications = new EventEmitter()
+  child.on('message', (message) => {
+    const event = String(message)
+    events.add(event)
+    notifications.emit(event)
+  })
+  const observed = async (event: string) => {
+    if (!events.has(event)) await once(notifications, event)
+  }
+  const exited = once(child, 'exit').then(([code, signal]) => ({
+    code: code as number | null,
+    signal: signal as NodeJS.Signals | null,
+  }))
+  try {
+    await waitForServerReady(child, url)
+    await run({
+      request: (id, path, body, signal) =>
+        fetch(`${url}/api/${path}`, {
+          method: body === undefined ? 'GET' : 'POST',
+          headers: {
+            Origin: ORIGIN,
+            'X-Shikin-Bridge': TOKEN,
+            'X-Test-Request': id,
+            'Content-Type':
+              body instanceof Uint8Array ? 'application/octet-stream' : 'application/json',
+          },
+          body:
+            body instanceof Uint8Array
+              ? body
+              : body === undefined
+                ? undefined
+                : JSON.stringify(body),
+          signal,
+        }),
+      observed,
+      command: async (command) => {
+        events.delete(`command:${command}`)
+        child.send(command)
+        await observed(`command:${command}`)
+      },
+      process: child,
+      exited,
+    })
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+    await exited
+    rmSync(root, { recursive: true, force: true })
+  }
+}
 
 describe('data-server authenticated contract', () => {
   it('supports store, filesystem, and DB operations with valid bridge auth', async () => {
@@ -1220,6 +1343,207 @@ Database.prototype.backup = async function (destinationPath, ...args) {
       rmSync(shutdownRoot, { recursive: true, force: true })
     }
   }, 30_000)
+})
+
+describe('database session ownership boundaries', () => {
+  it('serves multiple queued operations in FIFO order', async () => {
+    await withObservedServer(async (server) => {
+      await server.command('export')
+      const owner = server.request('owner', 'db/export')
+      await server.observed('paused:export')
+      const insert = server.request('insert', 'db/execute', {
+        sql: "INSERT INTO accounts (id, name, type, balance) VALUES ('fifo', 'FIFO', 'checking', 1)",
+      })
+      await server.observed('handled:insert')
+      const update = server.request('update', 'db/execute', {
+        sql: "UPDATE accounts SET balance = balance + 1 WHERE id = 'fifo'",
+      })
+      await server.observed('handled:update')
+      const query = server.request('query', 'db/query', {
+        sql: "SELECT balance FROM accounts WHERE id = 'fifo'",
+      })
+      await server.observed('handled:query')
+      await server.command('release')
+      expect((await owner).status).toBe(200)
+      expect((await insert).status).toBe(200)
+      expect((await update).status).toBe(200)
+      expect(await (await query).json()).toEqual([{ balance: 2 }])
+    })
+  })
+
+  it('displaces queued work for pending maintenance and cancels a disconnected restore', async () => {
+    await withObservedServer(async (server) => {
+      const snapshot = new Uint8Array(
+        await (await server.request('snapshot', 'db/export')).arrayBuffer()
+      )
+      await server.command('export')
+      const owner = server.request('owner', 'db/export')
+      await server.observed('paused:export')
+      const displaced = server.request('displaced', 'db/execute', {
+        sql: "INSERT INTO accounts (id, name, type) VALUES ('displaced', 'Displaced', 'checking')",
+      })
+      await server.observed('handled:displaced')
+      const controller = new AbortController()
+      const restore = server.request('restore', 'db/import', snapshot, controller.signal).then(
+        () => 'completed',
+        () => 'cancelled'
+      )
+      await server.observed('handled:restore')
+      const displacedResponse = await displaced
+      expect(displacedResponse.status).toBe(409)
+      expect(await displacedResponse.json()).toEqual({
+        error: 'Database restore started before this queued database request ran.',
+      })
+      const blocked = await server.request('blocked', 'db/query', { sql: 'SELECT 1' })
+      expect(blocked.status).toBe(409)
+      expect(await blocked.json()).toEqual({ error: 'Database restore is in progress.' })
+      const secondRestore = await server.request('second-restore', 'db/import', snapshot)
+      expect(secondRestore.status).toBe(409)
+      expect(await secondRestore.json()).toEqual({
+        error: 'Cannot import a database snapshot while another database restore is in progress.',
+      })
+      controller.abort()
+      expect(await restore).toBe('cancelled')
+      await server.observed('closed:restore')
+      const query = server.request('after-cancel', 'db/query', {
+        sql: "SELECT id FROM accounts WHERE id = 'displaced'",
+      })
+      await server.observed('handled:after-cancel')
+      await server.command('release')
+      expect((await owner).status).toBe(200)
+      const response = await query
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual([])
+    })
+  })
+
+  it('keeps failed-migration rollback exclusive until original data is restored', async () => {
+    const fixture = new Database(':memory:')
+    try {
+      runHostedTestMigrations(fixture, 21)
+      fixture.exec('CREATE TABLE manual_exchange_rates (incompatible TEXT)')
+      await withObservedServer(async (server) => {
+        expect(
+          (
+            await server.request('seed', 'db/execute', {
+              sql: "INSERT INTO accounts (id, name, type, balance) VALUES ('preserved', 'Preserved', 'checking', 321)",
+            })
+          ).status
+        ).toBe(200)
+        await server.command('rollback')
+        const restore = server.request('restore', 'db/import', fixture.serialize())
+        await server.observed('paused:rollback')
+        const blocked = await server.request('blocked', 'db/query', { sql: 'SELECT 1' })
+        expect(blocked.status).toBe(409)
+        expect(await blocked.json()).toEqual({ error: 'Database restore is in progress.' })
+        await server.command('release')
+        expect((await restore).status).toBe(500)
+        const query = await server.request('after-rollback', 'db/query', {
+          sql: 'SELECT id, balance FROM accounts',
+        })
+        expect(query.status).toBe(200)
+        expect(await query.json()).toEqual([{ id: 'preserved', balance: 321 }])
+        const begin = await server.request('begin', 'db/transaction', { action: 'begin' })
+        expect(begin.status).toBe(200)
+        const { transactionId } = await begin.json()
+        expect(
+          (
+            await server.request('rollback', 'db/transaction', {
+              action: 'rollback',
+              transactionId,
+            })
+          ).status
+        ).toBe(200)
+      })
+    } finally {
+      fixture.close()
+    }
+  })
+
+  it('rejects queued work and releases an active transaction during shutdown', async () => {
+    await withObservedServer(async (server) => {
+      expect((await server.request('begin', 'db/transaction', { action: 'begin' })).status).toBe(
+        200
+      )
+      const queued = server.request('queued', 'db/query', { sql: 'SELECT 1' })
+      await server.observed('handled:queued')
+      server.process.kill('SIGTERM')
+      const response = await queued
+      expect(response.status).toBe(503)
+      expect(await response.json()).toEqual({ error: 'Database server is shutting down.' })
+      expect(await server.exited).toEqual({ code: 0, signal: null })
+    })
+  })
+
+  it('renews the lease for owner queries beyond the initial expiry', async () => {
+    const headers = {
+      Origin: ORIGIN,
+      'X-Shikin-Bridge': TOKEN,
+      'Content-Type': 'application/json',
+    }
+    const started = Date.now()
+    const begin = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ action: 'begin' }),
+    })
+    expect(begin.status).toBe(200)
+    const { transactionId } = await begin.json()
+    do {
+      const query = await fetch(`${SERVER_URL}/api/db/query`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ sql: 'SELECT 1 AS ok', transactionId }),
+      })
+      expect(query.status).toBe(200)
+      expect(await query.json()).toEqual([{ ok: 1 }])
+    } while (Date.now() - started <= 600)
+    const commit = await fetch(`${SERVER_URL}/api/db/transaction`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ action: 'commit', transactionId }),
+    })
+    expect(commit.status).toBe(200)
+    expect(await commit.json()).toEqual({ ok: true, status: 'committed' })
+  })
+
+  it.each(['committed', 'rolled_back', 'rollback_failed'] as const)(
+    'retains %s across repeated terminal requests',
+    async (status) => {
+      const headers = {
+        Origin: ORIGIN,
+        'X-Shikin-Bridge': TOKEN,
+        'Content-Type': 'application/json',
+      }
+      const transaction = async (body: unknown) =>
+        fetch(`${SERVER_URL}/api/db/transaction`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+        })
+      const begin = await transaction({ action: 'begin' })
+      expect(begin.status).toBe(200)
+      const { transactionId } = await begin.json()
+      if (status === 'rollback_failed') {
+        const forced = await fetch(`${SERVER_URL}/api/db/execute`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ sql: 'ROLLBACK', transactionId }),
+        })
+        expect(forced.status).toBe(200)
+      }
+      const close = await transaction({
+        action: status === 'committed' ? 'commit' : 'rollback',
+        transactionId,
+      })
+      expect(close.status).toBe(status === 'rollback_failed' ? 500 : 200)
+      for (const action of ['commit', 'rollback']) {
+        const repeated = await transaction({ action, transactionId })
+        expect(repeated.status).toBe(200)
+        expect(await repeated.json()).toEqual({ ok: true, status })
+      }
+    }
+  )
 })
 
 describe('dated FX browser restore boundary', () => {

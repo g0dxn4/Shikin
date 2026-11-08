@@ -5,16 +5,22 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { OverviewNetWorth } from '@/components/dashboard/overview-net-worth'
 import type { NetWorthPeriod } from '@/components/dashboard/overview-account-comparison-helpers'
 import { buildRecordedBalanceModel } from '@/components/charts/recorded-balance-model'
-import { summaryDateTickBudget } from '@/components/dashboard/overview-summary-visual'
+import { overviewDateTickBudget } from '@/components/dashboard/overview-chart-policy'
 import enDashboard from '@/i18n/locales/en/dashboard.json'
 import esDashboard from '@/i18n/locales/es/dashboard.json'
 import { formatMoney } from '@/lib/money'
 import type { Account } from '@/types/database'
 
+const chartLanguage = vi.hoisted(() => ({
+  resolvedLanguage: undefined as string | undefined,
+  language: undefined as string | undefined,
+}))
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, options?: Record<string, string>) =>
       options ? `${key} ${Object.values(options).join(' ')}` : key,
+    i18n: chartLanguage,
   }),
 }))
 
@@ -594,6 +600,85 @@ const baseProps = {
   accountLiabilities: [{ id: 'card', name: 'Card', currency: 'MXN', convertedBalance: 25_000 }],
 }
 
+describe('Overview chart tick and locale contract', () => {
+  const ticks = {
+    2: '1767225600000|1767571200000',
+    3: '1767225600000|1767398400000|1767571200000',
+    5: '1767225600000|1767312000000|1767398400000|1767484800000|1767571200000',
+  } as const
+  const history = [
+    { date: '2026-01-01', netWorth: 100_000 },
+    { date: '2026-01-05', netWorth: 115_000 },
+  ]
+
+  it.each([
+    [Number.NaN, 5],
+    [Infinity, 5],
+    [-Infinity, 5],
+    [-1, 5],
+    [-0, 5],
+    [0, 5],
+    [1, 2],
+    [329.999, 2],
+    [330, 3],
+    [767.999, 3],
+    [768, 5],
+    [1600, 5],
+  ] as const)('keeps summary and history model/render ticks at width %s', (width, budget) => {
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+    try {
+      render(<OverviewNetWorth {...baseProps} history={history} />)
+      for (const panel of ['summary', 'history']) {
+        const plot = screen.getByTestId(
+          panel === 'summary' ? 'overview-summary-plot-frame' : 'overview-history-plot'
+        )
+        expect(plot).toHaveAttribute('data-tick-budget', String(budget))
+        expect(plot).toHaveAttribute('data-max-date-ticks', String(budget))
+        expect(plot.querySelector('[data-testid="x-axis"]')).toHaveAttribute(
+          'data-ticks',
+          ticks[budget]
+        )
+      }
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
+    }
+  })
+
+  it.each([
+    [undefined, undefined, 'Jan 1, 2026'],
+    [undefined, '', 'Jan 1, 2026'],
+    [undefined, '  ', 'Jan 1, 2026'],
+    [undefined, ' es-MX ', '1 ene 2026'],
+    ['', 'es', 'Jan 1, 2026'],
+    ['  ', 'es', 'Jan 1, 2026'],
+    [' es-MX ', 'en', '1 ene 2026'],
+  ] as const)(
+    'keeps summary/history locale for resolved %s and language %s',
+    (resolved, language, date) => {
+      chartLanguage.resolvedLanguage = resolved
+      chartLanguage.language = language
+      try {
+        render(<OverviewNetWorth {...baseProps} history={history} />)
+        for (const panel of ['summary', 'history']) {
+          const table = document.getElementById(`overview-${panel}-recorded-snapshots`)
+          expect(table?.querySelector('time[datetime="2026-01-01"]')).toHaveTextContent(date)
+          expect(
+            screen
+              .getByTestId(
+                panel === 'summary' ? 'overview-summary-plot-frame' : 'overview-history-plot'
+              )
+              .querySelector('[data-testid="x-axis"] text')
+          ).toHaveAttribute('data-full', date)
+        }
+      } finally {
+        chartLanguage.resolvedLanguage = undefined
+        chartLanguage.language = undefined
+      }
+    }
+  )
+})
+
 describe('Overview summary visual', () => {
   it('charts exactly two recorded snapshots with full amounts and no area fill', () => {
     render(
@@ -680,7 +765,7 @@ describe('Overview summary visual', () => {
     const model = buildRecordedBalanceModel(
       history.map((point) => ({ date: point.date, amountCentavos: point.netWorth })),
       'USD',
-      { maxDateTicks: summaryDateTickBudget(window.innerWidth), locale: 'en' }
+      { maxDateTicks: overviewDateTickBudget(window.innerWidth), locale: 'en' }
     )
     expect(model.status).toBe('series')
     if (model.status !== 'series') return
@@ -862,7 +947,7 @@ describe('Overview summary visual', () => {
     const model = buildRecordedBalanceModel(
       oneCentHistory.map((point) => ({ date: point.date, amountCentavos: point.netWorth })),
       'USD',
-      { maxDateTicks: summaryDateTickBudget(window.innerWidth), locale: 'en' }
+      { maxDateTicks: overviewDateTickBudget(window.innerWidth), locale: 'en' }
     )
     expect(model.status).toBe('series')
     if (model.status !== 'series') return
@@ -1301,7 +1386,7 @@ describe('Overview summary ranges and point inspection', () => {
       history.map((point) => ({ date: point.date, amountCentavos: point.netWorth })),
       'USD',
       {
-        maxDateTicks: summaryDateTickBudget(window.innerWidth),
+        maxDateTicks: overviewDateTickBudget(window.innerWidth),
         includeZero: true,
         locale: 'en',
       }

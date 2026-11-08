@@ -4,7 +4,6 @@ import {
   recordedSnapshotLine,
   selectSummaryVisual,
   stepSummarySelection,
-  summaryDateTickBudget,
   summaryPointSelection,
   type SummaryCompositionAccount,
   type SummaryVisualInput,
@@ -345,20 +344,5 @@ describe('summary point inspection identity', () => {
       index: 0,
       date: '2026-01-15',
     })
-  })
-})
-
-describe('summaryDateTickBudget', () => {
-  it('uses two labels at 320, three at 375, and five on desktop', () => {
-    expect(summaryDateTickBudget(286)).toBe(2)
-    expect(summaryDateTickBudget(320)).toBe(2)
-    expect(summaryDateTickBudget(329)).toBe(2)
-    expect(summaryDateTickBudget(341)).toBe(3)
-    expect(summaryDateTickBudget(375)).toBe(3)
-    expect(summaryDateTickBudget(767)).toBe(3)
-    expect(summaryDateTickBudget(768)).toBe(5)
-    expect(summaryDateTickBudget(1600)).toBe(5)
-    expect(summaryDateTickBudget(0)).toBe(5)
-    expect(summaryDateTickBudget(Number.NaN)).toBe(5)
   })
 })

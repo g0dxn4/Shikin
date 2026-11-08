@@ -13,10 +13,16 @@ import esDashboard from '@/i18n/locales/es/dashboard.json'
 import type { Account } from '@/types/database'
 import { useCurrencyStore } from '@/stores/currency-store'
 
+const chartLanguage = vi.hoisted(() => ({
+  resolvedLanguage: undefined as string | undefined,
+  language: undefined as string | undefined,
+}))
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, options?: Record<string, string>) =>
       options ? `${key} ${Object.values(options).join(' ')}` : key,
+    i18n: chartLanguage,
   }),
 }))
 
@@ -295,6 +301,78 @@ describe('OverviewAccountComparison', () => {
       manualRates: [rate('EUR', 'USD', '2')],
     })
   })
+
+  it.each([
+    [Number.NaN, 5],
+    [Infinity, 5],
+    [-Infinity, 5],
+    [-1, 5],
+    [-0, 5],
+    [0, 5],
+    [1, 2],
+    [329.999, 2],
+    [330, 3],
+    [767.999, 3],
+    [768, 5],
+    [1600, 5],
+  ] as const)('keeps comparison model/render ticks at width %s', (width, budget) => {
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+    history.firstHistory = [
+      { date: '2026-01-01', balance: -20_000 },
+      { date: '2026-01-05', balance: -5_000 },
+    ]
+    history.secondHistory = [
+      { date: '2026-01-01', balance: 100_000 },
+      { date: '2026-01-05', balance: 120_000 },
+    ]
+    const ticks = {
+      2: '1767225600000|1767571200000',
+      3: '1767225600000|1767398400000|1767571200000',
+      5: '1767225600000|1767312000000|1767398400000|1767484800000|1767571200000',
+    } as const
+    try {
+      render(<ComparisonHarness accounts={accounts} preferredCurrency="USD" />)
+      const plot = screen.getByTestId('overview-comparison-plot')
+      expect(plot).toHaveAttribute('data-tick-budget', String(budget))
+      expect(plot).toHaveAttribute('data-max-date-ticks', String(budget))
+      expect(plot.querySelector('[data-testid="x-axis"]')).toHaveAttribute(
+        'data-ticks',
+        ticks[budget]
+      )
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
+    }
+  })
+
+  it.each([
+    [undefined, undefined, 'Jan 1, 2026'],
+    [undefined, '', 'Jan 1, 2026'],
+    [undefined, '  ', 'Jan 1, 2026'],
+    [undefined, ' es-MX ', '1 ene 2026'],
+    ['', 'es', 'Jan 1, 2026'],
+    ['  ', 'es', 'Jan 1, 2026'],
+    [' es-MX ', 'en', '1 ene 2026'],
+  ] as const)(
+    'keeps comparison locale for resolved %s and language %s',
+    (resolved, language, date) => {
+      chartLanguage.resolvedLanguage = resolved
+      chartLanguage.language = language
+      try {
+        render(<ComparisonHarness accounts={accounts} preferredCurrency="USD" />)
+        const table = document.getElementById('overview-comparison-recorded-snapshots')
+        expect(table?.querySelector('time[datetime="2026-01-01"]')).toHaveTextContent('Jan 1, 2026')
+        expect(
+          screen
+            .getByTestId('overview-comparison-plot')
+            .querySelector('[data-testid="x-axis"] text')
+        ).toHaveAttribute('data-full', date)
+      } finally {
+        chartLanguage.resolvedLanguage = undefined
+        chartLanguage.language = undefined
+      }
+    }
+  )
 
   it('shows negative card debt, missing dates as dashes, and account-specific change baselines', async () => {
     const user = userEvent.setup()

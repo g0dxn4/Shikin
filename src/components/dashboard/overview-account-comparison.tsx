@@ -35,6 +35,10 @@ import {
   type PreparedAccountComparison,
 } from '@/components/dashboard/overview-account-comparison-helpers'
 import { useOverviewAccountComparison } from '@/components/dashboard/use-overview-account-comparison'
+import {
+  overviewChartLocale,
+  overviewDateTickBudget,
+} from '@/components/dashboard/overview-chart-policy'
 import { useCurrencyStore } from '@/stores/currency-store'
 
 interface OverviewAccountComparisonProps {
@@ -83,19 +87,6 @@ interface ComparisonPlotRow {
   first: number | null
   second: number | null
   utcTimestamp: number
-}
-
-/** 2 at 320px, 3 at 375px, 5 once the plot is a desktop width. Ends stay anchored. */
-function comparisonDateTickBudget(width: number): RecordedBalanceDateTicks {
-  if (!Number.isFinite(width) || width <= 0) return 5
-  if (width < 330) return 2
-  if (width < 768) return 3
-  return 5
-}
-
-function chartLocale(language: string | undefined): string {
-  const value = language?.trim()
-  return value && value.length > 0 ? value : 'en'
 }
 
 function comparisonFullDate(utcTimestamp: number, locale: string) {
@@ -188,7 +179,7 @@ export function OverviewAccountComparison({
   onModeChange,
 }: OverviewAccountComparisonProps) {
   const { t, i18n } = useTranslation('dashboard')
-  const locale = chartLocale(i18n?.resolvedLanguage ?? i18n?.language)
+  const locale = overviewChartLocale(i18n?.resolvedLanguage ?? i18n?.language)
   const mainCurrency = useCurrencyStore((state) => state.mainCurrency)
   const setupDraft = useCurrencyStore((state) => state.preferredCurrency)
   const manualRates = useCurrencyStore((state) => state.manualRates)
@@ -240,7 +231,7 @@ export function OverviewAccountComparison({
       ? buildRecordedBalanceModel(axisRows, preferredCurrency, {
           includeZero: false,
           locale,
-          maxDateTicks: comparisonDateTickBudget(plotWidth),
+          maxDateTicks: overviewDateTickBudget(plotWidth),
         })
       : null
   const chartRows = isCompareSeries(axisModel)
@@ -426,7 +417,7 @@ export function OverviewAccountComparison({
               secondName={secondAccount.name}
               currency={preferredCurrency}
               plotRef={plotRef}
-              tickBudget={comparisonDateTickBudget(plotWidth)}
+              tickBudget={overviewDateTickBudget(plotWidth)}
             />
           ) : (
             <p

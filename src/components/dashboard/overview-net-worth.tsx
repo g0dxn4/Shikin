@@ -34,6 +34,10 @@ import type {
 import { OverviewAccountComparison } from '@/components/dashboard/overview-account-comparison'
 import { OverviewRecordedFigure } from '@/components/dashboard/overview-recorded-figure'
 import {
+  overviewChartLocale,
+  overviewDateTickBudget,
+} from '@/components/dashboard/overview-chart-policy'
+import {
   selectSummaryVisual,
   type SummaryCompositionAccount,
 } from '@/components/dashboard/overview-summary-visual'
@@ -90,19 +94,6 @@ function isHistoryPlotted(model: RecordedBalanceModel | null): model is HistoryP
 
 function safeCentavos(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value)
-}
-
-/** 2 at 320px, 3 at 375px, 5 once the plot is a desktop width. Ends stay anchored. */
-function historyDateTickBudget(width: number): RecordedBalanceDateTicks {
-  if (!Number.isFinite(width) || width <= 0) return 5
-  if (width < 330) return 2
-  if (width < 768) return 3
-  return 5
-}
-
-function chartLocale(language: string | undefined): string {
-  const value = language?.trim()
-  return value && value.length > 0 ? value : 'en'
 }
 
 function historyFullDate(utcTimestamp: number, locale: string) {
@@ -178,7 +169,7 @@ export function OverviewNetWorth({
   accountLiabilities = [],
 }: OverviewNetWorthProps) {
   const { t, i18n } = useTranslation('dashboard')
-  const locale = chartLocale(i18n?.resolvedLanguage ?? i18n?.language)
+  const locale = overviewChartLocale(i18n?.resolvedLanguage ?? i18n?.language)
   const [view, setView] = useState<OverviewView>('summary')
   const [comparisonSelection, setComparisonSelection] = useState<[string, string]>(['', ''])
   const [comparisonPeriod, setComparisonPeriod] = useState<NetWorthPeriod>('6m')
@@ -218,7 +209,7 @@ export function OverviewNetWorth({
           {
             includeZero: true,
             locale,
-            maxDateTicks: historyDateTickBudget(historyPlotWidth),
+            maxDateTicks: overviewDateTickBudget(historyPlotWidth),
           }
         )
       : null
@@ -435,7 +426,7 @@ export function OverviewNetWorth({
               locale={locale}
               periodLabel={historyPeriodLabel}
               plotRef={historyPlotRef}
-              tickBudget={historyDateTickBudget(historyPlotWidth)}
+              tickBudget={overviewDateTickBudget(historyPlotWidth)}
               seriesName={t('overview.netWorth')}
             />
           ) : isHistoryFlat(historyModel) && historyAligned ? (

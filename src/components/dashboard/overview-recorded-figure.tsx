@@ -19,8 +19,11 @@ import { formatMoney } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import type { NetWorthPeriod } from '@/components/dashboard/overview-account-comparison-helpers'
 import {
+  overviewChartLocale,
+  overviewDateTickBudget,
+} from '@/components/dashboard/overview-chart-policy'
+import {
   stepSummarySelection,
-  summaryDateTickBudget,
   summaryPointSelection,
   type SummaryComposition,
   type SummaryHistoryPoint,
@@ -96,11 +99,6 @@ interface OverviewRecordedFigureProps {
   onPeriodChange: (period: NetWorthPeriod) => void
 }
 
-function chartLocale(language: string | undefined): string {
-  const value = language?.trim()
-  return value && value.length > 0 ? value : 'en'
-}
-
 function fullDate(utcTimestamp: number, locale: string) {
   return formatRecordedAxisDate(utcTimestamp, locale, true)
 }
@@ -113,7 +111,7 @@ export function OverviewRecordedFigure({
   onPeriodChange,
 }: OverviewRecordedFigureProps) {
   const { i18n } = useTranslation('dashboard')
-  const locale = chartLocale(i18n?.resolvedLanguage ?? i18n?.language)
+  const locale = overviewChartLocale(i18n?.resolvedLanguage ?? i18n?.language)
   const [display, setDisplay] = useState<ChartDisplay>('line')
   const [selection, setSelection] = useState<{
     period: NetWorthPeriod
@@ -132,7 +130,7 @@ export function OverviewRecordedFigure({
           rows.map((point) => ({ date: point.date, amountCentavos: point.netWorth })),
           currency,
           {
-            maxDateTicks: summaryDateTickBudget(plotWidth),
+            maxDateTicks: overviewDateTickBudget(plotWidth),
             includeZero: display === 'area' && visual.kind === 'line',
             locale,
           }
@@ -170,7 +168,7 @@ export function OverviewRecordedFigure({
           display={display}
           active={active}
           plotRef={plotRef}
-          tickBudget={summaryDateTickBudget(plotWidth)}
+          tickBudget={overviewDateTickBudget(plotWidth)}
           onSelect={(point) => setSelection({ period, point })}
         />
       ) : null}

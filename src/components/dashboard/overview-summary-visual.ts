@@ -270,15 +270,3 @@ export function selectSummaryVisual(input: SummaryVisualInput): SummaryVisual {
   if (input.currentComplete) return { kind: 'plain', reason: 'composition-unproven' }
   return { kind: 'plain', reason: 'no-snapshots' }
 }
-
-/**
- * Date-label budget for the summary plot.
- * A 320px card is under 330px wide; 375px is still under the desktop breakpoint.
- * Non-positive widths wait for measurement and use the desktop budget.
- */
-export function summaryDateTickBudget(width: number): 2 | 3 | 5 {
-  if (!Number.isFinite(width) || width <= 0) return 5
-  if (width < 330) return 2
-  if (width < 768) return 3
-  return 5
-}

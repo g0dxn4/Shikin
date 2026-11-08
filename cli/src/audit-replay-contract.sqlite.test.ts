@@ -226,100 +226,9 @@ describe('public audit replay protocol', () => {
     const before = dump()
     expect(await run('undo', { auditId: 'audit' })).toMatchInlineSnapshot(`
       {
-        "auditEntry": {
-          "action": "delete",
-          "after": null,
-          "before": {
-            "transaction": {
-              "accountId": "a",
-              "amountCentavos": 100.5,
-              "currency": " usd ",
-              "date": "not-a-date",
-              "description": "x",
-              "id": "t",
-              "isPlaceholder": "0",
-              "status": "CLEARED",
-              "tags": [
-                "Work",
-                8,
-                "",
-              ],
-              "type": "expense",
-            },
-          },
-          "createdAt": "2026-01-11T00:00:00.000Z",
-          "entity": "transaction",
-          "entityId": "t",
-          "id": "audit",
-          "note": null,
-          "source": "fixture",
-        },
-        "dependentWrites": [],
-        "dryRun": true,
-        "message": "Dry run: audit entry audit would be undone with inverse action create.",
-        "requiresApply": true,
-        "success": true,
-        "wouldUndo": {
-          "action": "delete",
-          "afterUndo": {
-            "accountId": "a",
-            "amount": 1.005,
-            "amountCentavos": 100.5,
-            "categoryId": null,
-            "currency": " usd ",
-            "date": "not-a-date",
-            "description": "x",
-            "id": "t",
-            "isPlaceholder": true,
-            "note": null,
-            "notes": null,
-            "placeholderParentTransactionId": null,
-            "placeholderReason": null,
-            "placeholderStatus": null,
-            "recurringRuleId": null,
-            "resolvedAt": null,
-            "resolvedByTransactionId": null,
-            "source": null,
-            "status": "posted",
-            "tags": [
-              "Work",
-              "",
-            ],
-            "transferToAccountId": null,
-            "type": "expense",
-          },
-          "balanceImpact": {
-            "accounts": [
-              {
-                "accountId": "a",
-                "accountName": "Bank",
-                "delta": -1.005,
-                "deltaCentavos": -100.5,
-                "newBalance": 8.995,
-                "newBalanceCentavos": 899.5,
-                "previousBalance": 10,
-                "previousBalanceCentavos": 1000,
-              },
-            ],
-            "affectsBalances": true,
-            "deltas": [
-              {
-                "accountId": "a",
-                "accountName": "Bank",
-                "delta": -1.005,
-                "deltaCentavos": -100.5,
-                "newBalance": 8.995,
-                "newBalanceCentavos": 899.5,
-                "previousBalance": 10,
-                "previousBalanceCentavos": 1000,
-              },
-            ],
-          },
-          "beforeUndo": null,
-          "entity": "transaction",
-          "entityId": "t",
-          "inverseAction": "create",
-        },
+        "message": "Invalid ledger transaction t: amountCentavos must be a non-negative safe integer. Use an audited financial correction before undo; no historical inverse was inferred.",
+        "reason": "invalid_ledger_evidence",
+        "success": false,
       }
     `)
     expect(dump()).toEqual(before)
@@ -577,9 +486,23 @@ describe('public audit replay protocol', () => {
         ],
         [
           "query",
+          "SELECT id, currency, account_mode FROM accounts WHERE id = $1 LIMIT 1",
+          [
+            "a",
+          ],
+        ],
+        [
+          "query",
           "SELECT id FROM transactions WHERE id = $1 LIMIT 1",
           [
             "fixed-1",
+          ],
+        ],
+        [
+          "query",
+          "SELECT id, currency, account_mode FROM accounts WHERE id = $1 LIMIT 1",
+          [
+            "a",
           ],
         ],
         [
@@ -594,6 +517,13 @@ describe('public audit replay protocol', () => {
           "SELECT * FROM transactions WHERE id = $1 LIMIT 1",
           [
             "fixed-1",
+          ],
+        ],
+        [
+          "query",
+          "SELECT id, currency, account_mode FROM accounts WHERE id = $1 LIMIT 1",
+          [
+            "a",
           ],
         ],
         [
@@ -735,9 +665,23 @@ describe('public audit replay protocol', () => {
         ],
         [
           "query",
+          "SELECT id, currency, account_mode FROM accounts WHERE id = $1 LIMIT 1",
+          [
+            "a",
+          ],
+        ],
+        [
+          "query",
           "SELECT id FROM transactions WHERE id = $1 LIMIT 1",
           [
             "fixed-1",
+          ],
+        ],
+        [
+          "query",
+          "SELECT id, currency, account_mode FROM accounts WHERE id = $1 LIMIT 1",
+          [
+            "a",
           ],
         ],
         [
@@ -767,6 +711,13 @@ describe('public audit replay protocol', () => {
           "SELECT * FROM transactions WHERE id = $1 LIMIT 1",
           [
             "fixed-1",
+          ],
+        ],
+        [
+          "query",
+          "SELECT id, currency, account_mode FROM accounts WHERE id = $1 LIMIT 1",
+          [
+            "a",
           ],
         ],
         [

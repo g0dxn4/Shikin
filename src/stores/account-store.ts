@@ -3,6 +3,7 @@ import { calculateReconciliationAdjustment } from '@shikin/finance-core'
 import {
   accountValuationDeclaration,
   assertObservationDate,
+  assertReconciliationLedgerAccount,
   datedLedgerQuery,
   planDatedReconciliation,
   projectDatedLedger,
@@ -172,6 +173,11 @@ async function reconcileTransactionalAccountBalance(
     updatedAt: string
   }
 ) {
+  assertReconciliationLedgerAccount({
+    accountId: input.accountId,
+    currency: input.currency,
+    accountMode: 'transactional',
+  })
   const rows = await getLedgerRows(tx, input.accountId)
   const anchors = await tx.query<{ reconciliation_date: string }>(
     'SELECT reconciliation_date FROM account_reconciliations WHERE account_id = ?',
@@ -428,6 +434,9 @@ export const useAccountStore = create<AccountState>((set, get) => ({
         valuationMode: data.valuationMode,
         creating: true,
       })
+      if (accountMode === 'transactional' && observedBalance !== 0) {
+        assertReconciliationLedgerAccount({ accountId: id, currency: data.currency, accountMode })
+      }
       await withTransaction(async (tx) => {
         await tx.execute(
           `INSERT INTO accounts (id, name, type, currency, balance, credit_limit, statement_closing_day, payment_due_day, account_mode, valuation_mode, icon, color, is_archived, created_at, updated_at)
@@ -567,6 +576,18 @@ export const useAccountStore = create<AccountState>((set, get) => ({
           metadata.color,
           now,
         ]
+        const balanceChanged =
+          data.balance !== undefined &&
+          (requestedBalance !== existing[0].balance || data.observedDate !== undefined)
+        const modeNeedsOpeningProvenance =
+          currentMode === 'snapshot_only' && nextMode === 'transactional' && requestedBalance !== 0
+        if (nextMode === 'transactional' && (balanceChanged || modeNeedsOpeningProvenance)) {
+          assertReconciliationLedgerAccount({
+            accountId: id,
+            currency: data.currency,
+            accountMode: nextMode,
+          })
+        }
 
         let metadataUpdate: { rowsAffected: number }
         if (nextMode === 'snapshot_only' && requestedBalance !== existing[0].balance) {
@@ -589,11 +610,6 @@ export const useAccountStore = create<AccountState>((set, get) => ({
           throw new Error(`Account ${id} could not be updated safely.`)
         }
 
-        const balanceChanged =
-          data.balance !== undefined &&
-          (requestedBalance !== existing[0].balance || data.observedDate !== undefined)
-        const modeNeedsOpeningProvenance =
-          currentMode === 'snapshot_only' && nextMode === 'transactional' && requestedBalance !== 0
         if (nextMode === 'transactional' && (balanceChanged || modeNeedsOpeningProvenance)) {
           reconciliation = await reconcileTransactionalAccountBalance(tx, {
             accountId: id,

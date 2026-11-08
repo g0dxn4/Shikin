@@ -106,6 +106,25 @@ afterEach(() => {
 })
 
 describe('browser/Tauri card payment service on real SQLite 021', () => {
+  it('pins a card payment whose two account currency codes are malformed', async () => {
+    db.exec("UPDATE accounts SET currency = 'US-D' WHERE id IN ('bank','card')")
+    const input = {
+      cardAccountId: 'card',
+      fromAccountId: 'bank',
+      amount: 300,
+      date: '2026-02-01',
+      source: 'test',
+      note: 'payment',
+    }
+    const before = allTableSnapshot()
+    await expect(previewRecordCardPayment(input)).rejects.toThrow(
+      'account.currency must be a 2-10 character asset or currency code'
+    )
+    await expect(recordCardPayment(input, 'stale-preview')).rejects.toThrow(
+      'account.currency must be a 2-10 character asset or currency code'
+    )
+    expect(allTableSnapshot()).toEqual(before)
+  })
   it('creates, explicitly edits and deletes statement-only accounting without fake transactions', async () => {
     const statement = await createStatement(200)
     expect(statement).toMatchObject({ paidAmount: 200, unattributedPaidAmount: 200 })

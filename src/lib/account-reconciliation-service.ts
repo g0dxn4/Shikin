@@ -1,5 +1,7 @@
+import type { AccountMode } from '@shikin/finance-core'
 import {
   assertObservationDate,
+  assertReconciliationLedgerAccount,
   assertReconciliationPeriodCovered,
   datedLedgerQuery,
   planReconciliationBridgeSupersession,
@@ -415,7 +417,7 @@ export function commitAccountStagedTransactions(input: StagedSettlementInput): P
       rows: await ledgerRows(tx, account.id),
       accountId: account.id,
       accountCurrency: account.currency,
-      accountMode: account.account_mode,
+      accountMode: account.account_mode ?? 'transactional',
       transactionIds: input.transactionIds,
       allowPending: true,
     })
@@ -447,6 +449,11 @@ async function createFinalizationMaterial(
   input: FinalizationInput
 ): Promise<FinalizationPreviewMaterial> {
   const account = await accountFor(tx, input.accountId)
+  assertReconciliationLedgerAccount({
+    accountId: account.id,
+    currency: account.currency,
+    accountMode: (account.account_mode ?? 'transactional') as AccountMode,
+  })
   const [beforeRows, anchors, allCoverage, state] = await Promise.all([
     ledgerRows(tx, account.id),
     observations(tx, account.id),
@@ -457,7 +464,7 @@ async function createFinalizationMaterial(
     rows: beforeRows,
     accountId: account.id,
     accountCurrency: account.currency,
-    accountMode: account.account_mode,
+    accountMode: account.account_mode ?? 'transactional',
     transactionIds: input.transactionIds,
     stagingBatchId: input.stagingBatchId,
   })
@@ -629,6 +636,11 @@ async function createSupersessionMaterial(
   input: SupersessionInput
 ): Promise<SupersessionPreviewMaterial> {
   const account = await accountFor(tx, input.accountId)
+  assertReconciliationLedgerAccount({
+    accountId: account.id,
+    currency: account.currency,
+    accountMode: (account.account_mode ?? 'transactional') as AccountMode,
+  })
   const [all, anchors, allCoverage, state] = await Promise.all([
     ledgerRows(tx, account.id),
     observations(tx, account.id),
@@ -654,7 +666,7 @@ async function createSupersessionMaterial(
     rows: all,
     accountId: account.id,
     accountCurrency: account.currency,
-    accountMode: account.account_mode,
+    accountMode: account.account_mode ?? 'transactional',
     transactionIds: input.transactionIds,
   })
   const coverage = selectReconciliationCoverage({

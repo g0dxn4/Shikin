@@ -145,6 +145,36 @@ afterEach(() => {
 })
 
 describe('importStatementFile real schema 021 SQLite rollback and staging', () => {
+  it.each(['posted', 'staged_posted', 'staged_pending'] as const)(
+    'pins malformed currency on %s statement import',
+    async (treatment) => {
+      db.exec("UPDATE accounts SET currency = 'US-D' WHERE id = 'account-1'")
+      mockParseStatement.mockReturnValue([
+        {
+          date: '2026-07-13',
+          amount: 1,
+          description: 'Malformed currency',
+          type: 'expense',
+          currency: 'US-D',
+        },
+      ])
+      const options = { treatment, acknowledgePending: true }
+      const before = databaseSnapshot()
+      const preview = await previewStatementFile(statementFile(), 'account-1', [], options)
+      expect(preview.success).toBe(false)
+      expect(preview.errors).toEqual([
+        'account.currency must be a 2-10 character asset or currency code',
+      ])
+      expect(preview.balanceImpactCentavos).toBe(0)
+      await expect(importStatementFile(statementFile(), 'account-1', options)).resolves.toEqual({
+        imported: 0,
+        skipped: 0,
+        mode: 'unreviewed_atomic',
+        errors: ['account.currency must be a 2-10 character asset or currency code'],
+      })
+      expect(databaseSnapshot()).toEqual(before)
+    }
+  )
   it('keeps posted plus normal as the backwards-compatible default', async () => {
     mockParseStatement.mockReturnValue([
       {

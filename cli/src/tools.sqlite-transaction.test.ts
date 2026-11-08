@@ -719,9 +719,9 @@ describe('CLI tools SQLite transaction rollback', () => {
   }, 10_000)
 
   it.each([
-    ['padded pending', "status = ' Pending '", 10_000],
+    ['padded pending', "status = ' Pending '", 9_000],
     ['self transfer', "type = 'transfer', transfer_to_account_id = 'acct-1'", 9_000],
-  ])('preserves legacy %s deletion through SQLite', async (_name, assignment, balance) => {
+  ])('refuses ambiguous legacy %s deletion through SQLite', async (_name, assignment, balance) => {
     const tempHome = createTempHome()
     const dbPath = seedDatabase({
       tempHome,
@@ -748,11 +748,15 @@ describe('CLI tools SQLite transaction rollback', () => {
     fixture.exec(statusTrigger.sql)
     fixture.close()
     const deleteTransaction = tools.find((tool) => tool.name === 'delete-transaction')!
+    const before = readTransactionDetails(dbPath)
     await expect(
       deleteTransaction.execute(deleteTransaction.schema.parse({ transactionId: 'tx-1' }))
-    ).resolves.toMatchObject({ success: true })
+    ).resolves.toMatchObject({
+      success: false,
+      message: expect.stringContaining('audited financial correction'),
+    })
     expect(readAccountBalances(dbPath)).toEqual([{ id: 'acct-1', balance }])
-    expect(readTransactionDetails(dbPath)).toEqual([])
+    expect(readTransactionDetails(dbPath)).toEqual(before)
   })
 
   it('rolls back add-transaction when the later balance write fails', async () => {

@@ -3,7 +3,10 @@ import {
   TRANSACTION_FX_EVIDENCE_INSERT,
   assertTransactionFxAcceptanceGuard,
   buildTransactionFxEvidenceSnapshot,
-  calculateLegacyLedgerLegs,
+  calculateSignedLedgerDeltas,
+  assertUnambiguousLedgerHistory,
+  normalizePostingStatus,
+  type LedgerEntry,
   resolveTransactionFxPreview,
   transactionFxEvidenceBindings,
   type DatedExchangeRate,
@@ -114,7 +117,7 @@ export function resolveCliFxAcceptance(input: {
 }): TransactionFxPreview | null {
   const inputCurrency = normalizeCurrencyCode(input.inputCurrency ?? input.account.currency)
   if (!inputCurrency) throw new Error('Input currency is required.')
-  const foreign = inputCurrency !== input.account.currency
+  const foreign = inputCurrency !== normalizeCurrencyCode(input.account.currency)
   if (!foreign && !input.forceEvidence) return null
   if (input.transactionType === 'transfer') {
     throw new Error('Foreign input is not supported for transfers.')
@@ -164,34 +167,65 @@ export function getBalanceImpact(
     | 'id'
     | 'type'
     | 'amount'
+    | 'currency'
     | 'account_id'
     | 'transfer_to_account_id'
     | 'status'
     | 'ledger_treatment'
+    | 'transaction_kind'
     | 'is_archived'
-  >
+  >,
+  historical = false
 ): BalanceImpactResult {
-  const result = calculateLegacyLedgerLegs(
-    {
+  try {
+    const accountContext = (id: string) => {
+      const account = query<{
+        id: string
+        currency: string
+        account_mode: LedgerEntry['account']['accountMode'] | null
+      }>('SELECT id, currency, account_mode FROM accounts WHERE id = $1 LIMIT 1', [id])[0]
+      if (!account) throw new Error(`Account ${id} not found`)
+      return {
+        accountId: account.id,
+        currency: account.currency,
+        accountMode: account.account_mode ?? ('transactional' as const),
+      }
+    }
+    const entry: LedgerEntry = {
       type: tx.type,
       amountCentavos: tx.amount,
-      accountId: tx.account_id,
-      transferToAccountId: tx.transfer_to_account_id,
+      currency: tx.currency as string,
+      account: accountContext(tx.account_id),
+      transferToAccount:
+        tx.type === 'transfer' && tx.transfer_to_account_id
+          ? accountContext(tx.transfer_to_account_id)
+          : null,
       status: tx.status,
       ledgerTreatment: tx.ledger_treatment,
-      isArchived: tx.is_archived,
-    },
-    'cli-mutation'
-  )
-  if (result.status === 'missing_transfer_destination') {
+      transactionKind: tx.transaction_kind,
+      isArchived: tx.is_archived as LedgerEntry['isArchived'],
+    }
+    const result = calculateSignedLedgerDeltas(entry)
+    if (result.status === 'rejected' || result.status === 'unresolved')
+      throw new Error(result.reason)
+    if (historical) assertUnambiguousLedgerHistory(entry)
+    const impacts = new Map<string, number>()
+    for (const leg of result.deltas) addImpact(impacts, leg.accountId, leg.deltaCentavos)
+    return { success: true, impacts }
+  } catch (error) {
     return {
       success: false,
-      message: `Transfer transaction ${tx.id} has no destination account. Repair or recreate it before editing it.`,
+      message: `Invalid ledger transaction ${tx.id}: ${error instanceof Error ? error.message : String(error)}. Use an audited financial correction to repair the transaction and account evidence before retrying; no historical balance inverse was inferred.`,
     }
   }
-  const impacts = new Map<string, number>()
-  for (const leg of result.legs) addImpact(impacts, leg.accountId, leg.deltaCentavos)
-  return { success: true, impacts }
+}
+
+export function normalizeNewTransactionStatus(
+  status: string | null | undefined
+): TransactionStatus {
+  const normalized = normalizePostingStatus(status)
+  if (normalized === 'invalid') throw new TypeError('Invalid ledger status: invalid_status')
+  return normalized
 }
 
 export function diffBalanceImpacts(
@@ -449,7 +483,7 @@ export function resolveTransferDestination(
     }
   }
 
-  if (destination.currency !== source.currency) {
+  if (normalizeCurrencyCode(destination.currency) !== normalizeCurrencyCode(source.currency)) {
     return {
       success: false as const,
       message: `Cannot transfer from ${source.currency} to ${destination.currency}. Cross-currency transfers are not supported because no FX conversion is applied.`,
@@ -559,7 +593,7 @@ export function validateImportedTransactionSync(input: ImportedTransactionCreate
   }
   const ledgerTreatment = input.ledgerTreatment ?? 'normal'
   const reportingTreatment = input.reportingTreatment ?? 'normal'
-  const status = input.status ?? 'posted'
+  const status = normalizeNewTransactionStatus(input.status)
   if (ledgerTreatment === 'staged_no_balance_impact' && !input.stagingBatchId) {
     throw new Error('stagingBatchId is required for staged_no_balance_impact transactions.')
   }
@@ -572,7 +606,20 @@ export function validateImportedTransactionSync(input: ImportedTransactionCreate
   }
   const resolvedCategory = resolveCategoryId(input.category)
   if (!resolvedCategory.success) throw new Error(resolvedCategory.message)
-  return { ledgerTreatment, reportingTreatment, status, resolvedAccount, resolvedCategory }
+  const impact = getBalanceImpact({
+    id: input.id ?? '(import)',
+    type: input.type,
+    amount: input.amountCentavos,
+    currency: resolvedAccount.currency,
+    account_id: resolvedAccount.id,
+    transfer_to_account_id: null,
+    status,
+    ledger_treatment: ledgerTreatment,
+    transaction_kind: 'standard',
+    is_archived: 0,
+  })
+  if (!impact.success) throw new Error(impact.message)
+  return { ledgerTreatment, reportingTreatment, status, resolvedAccount, resolvedCategory, impact }
 }
 
 /**
@@ -604,7 +651,7 @@ function assertImportedBalanceChangesAreSafe(
 }
 
 export function createImportedTransactionSync(input: ImportedTransactionCreateInput) {
-  const { ledgerTreatment, reportingTreatment, status, resolvedAccount, resolvedCategory } =
+  const { ledgerTreatment, reportingTreatment, status, resolvedAccount, resolvedCategory, impact } =
     validateImportedTransactionSync(input)
   const id = input.id ?? generateId()
   const row: TransactionRow = {
@@ -632,8 +679,6 @@ export function createImportedTransactionSync(input: ImportedTransactionCreateIn
     is_archived: 0,
     date: input.date,
   }
-  const impact = getBalanceImpact(row)
-  if (!impact.success) throw new Error(impact.message)
   const balancesBefore = readAccountBalances([...impact.impacts.keys()])
   assertImportedBalanceChangesAreSafe(impact.impacts, balancesBefore)
   execute(
@@ -837,7 +882,7 @@ function prepareAddTransactionInTransaction(
   const transactionNotes = notes ?? null
   const transactionSource = source ?? null
   const transactionNote = note ?? null
-  const transactionStatus = status ?? 'posted'
+  const transactionStatus = normalizeNewTransactionStatus(status)
   const transactionLedgerTreatment = ledgerTreatment ?? 'normal'
   const transactionReportingTreatment = reportingTreatment ?? 'normal'
   const transactionStagingBatchId = stagingBatchId ?? null

@@ -33,6 +33,7 @@ export type LedgerRejectionReason =
   | 'snapshot_only_account'
   | 'same_account_transfer'
   | 'cross_currency_transfer'
+  | 'invalid_status'
 
 export type EffectiveLedgerStatus =
   | {
@@ -65,89 +66,33 @@ export type SignedLedgerDeltaResult =
   | {
       status: 'unresolved'
       reason: 'missing_transfer_destination'
-      effectiveStatus: EffectiveLedgerStatus & { postsToLedger: true }
+      effectiveStatus: EffectiveLedgerStatus
       deltas: readonly []
     }
 
-export interface LedgerLeg {
-  readonly accountId: string
-  readonly deltaCentavos: number
+function orderedLedgerLegs(entry: LedgerEntry): ReadonlyArray<{
+  accountId: string
+  deltaCentavos: number
+}> {
+  const source = {
+    accountId: entry.account.accountId,
+    deltaCentavos: entry.type === 'income' ? entry.amountCentavos : -entry.amountCentavos,
+  }
+  return entry.type === 'transfer' && entry.transferToAccount
+    ? [
+        source,
+        { accountId: entry.transferToAccount.accountId, deltaCentavos: entry.amountCentavos },
+      ]
+    : [source]
 }
 
-export type LegacyLedgerPolicy = 'cli-mutation' | 'frontend-mutation' | 'generic-undo'
-
-export interface LegacyLedgerInput {
-  readonly type: TransactionType
-  readonly amountCentavos: number
-  readonly accountId: string
-  readonly transferToAccountId?: string | null
-  readonly status?: string | null
-  readonly ledgerTreatment?: string | null
-  readonly isArchived?: unknown
-  readonly sourceAccountMode?: string | null
-  readonly transferAccountMode?: string | null
-}
-
-export type LegacyLedgerLegResult =
-  | { readonly status: 'ready'; readonly legs: readonly LedgerLeg[] }
-  | { readonly status: 'missing_transfer_destination'; readonly legs: readonly [] }
-
-/**
- * Compatibility contracts for existing mutation/replay paths, not strict validation.
- * Keep raw facts: normalizing here would reinterpret previously posted legacy rows.
- * Callers retain their guards and their distinct sum/overwrite/ordered-write projections.
- */
-export function calculateLegacyLedgerLegs(
-  input: LegacyLedgerInput,
-  policy: LegacyLedgerPolicy
-): LegacyLedgerLegResult {
-  if (input.status === 'pending') return { status: 'ready', legs: [] }
-  if (
-    policy !== 'generic-undo' &&
-    (input.isArchived === 1 ||
-      (policy === 'cli-mutation'
-        ? input.ledgerTreatment === 'staged_no_balance_impact'
-        : (input.ledgerTreatment ?? 'normal') !== 'normal'))
-  ) {
-    return { status: 'ready', legs: [] }
+/** A legacy noncanonical pending spelling may already have posted. Never guess its inverse. */
+export function assertUnambiguousLedgerHistory(entry: Pick<LedgerEntry, 'status'>): void {
+  if (entry.status !== 'pending' && normalizePostingStatus(entry.status) === 'pending') {
+    throw new Error(
+      'Ambiguous historical pending status; use an audited financial correction before editing, deleting, or undoing this record.'
+    )
   }
-  if (input.type === 'transfer' && !input.transferToAccountId) {
-    if (policy === 'cli-mutation') return { status: 'missing_transfer_destination', legs: [] }
-    if (policy === 'generic-undo') return { status: 'ready', legs: [] }
-  }
-  return {
-    status: 'ready',
-    legs: orderedLedgerLegs(input, policy === 'frontend-mutation' ? 'transactional-only' : 'all'),
-  }
-}
-
-function orderedLedgerLegs(
-  input: Pick<
-    LegacyLedgerInput,
-    | 'type'
-    | 'amountCentavos'
-    | 'accountId'
-    | 'transferToAccountId'
-    | 'sourceAccountMode'
-    | 'transferAccountMode'
-  >,
-  scope: 'all' | 'transactional-only'
-): readonly LedgerLeg[] {
-  const legs: LedgerLeg[] = []
-  if (scope === 'all' || (input.sourceAccountMode ?? 'transactional') === 'transactional') {
-    legs.push({
-      accountId: input.accountId,
-      deltaCentavos: input.type === 'income' ? input.amountCentavos : -input.amountCentavos,
-    })
-  }
-  if (
-    input.type === 'transfer' &&
-    input.transferToAccountId &&
-    (scope === 'all' || (input.transferAccountMode ?? 'transactional') === 'transactional')
-  ) {
-    legs.push({ accountId: input.transferToAccountId, deltaCentavos: input.amountCentavos })
-  }
-  return legs
 }
 
 /** Empty legacy status values have always been treated as posted by Shikin adapters. */
@@ -221,48 +166,21 @@ export function calculateSignedLedgerDeltas(entry: LedgerEntry): SignedLedgerDel
   }
 
   const effectiveStatus = getEffectiveLedgerStatus(entry)
+  if (effectiveStatus.reason === 'invalid_status') {
+    return { status: 'rejected', reason: 'invalid_status', deltas: [] }
+  }
+  if (entry.type === 'transfer' && !entry.transferToAccount) {
+    return {
+      status: 'unresolved',
+      reason: 'missing_transfer_destination',
+      effectiveStatus,
+      deltas: [],
+    }
+  }
   if (!effectiveStatus.postsToLedger) {
     return { status: 'excluded', effectiveStatus, deltas: [] }
   }
-
-  if (entry.type === 'transfer') {
-    const destination = entry.transferToAccount
-    if (!destination) {
-      return {
-        status: 'unresolved',
-        reason: 'missing_transfer_destination',
-        effectiveStatus,
-        deltas: [],
-      }
-    }
-
-    return {
-      status: 'applied',
-      effectiveStatus,
-      deltas: orderedLedgerLegs(
-        {
-          type: entry.type,
-          amountCentavos: entry.amountCentavos,
-          accountId: entry.account.accountId,
-          transferToAccountId: destination.accountId,
-        },
-        'all'
-      ),
-    }
-  }
-
-  return {
-    status: 'applied',
-    effectiveStatus,
-    deltas: orderedLedgerLegs(
-      {
-        type: entry.type,
-        amountCentavos: entry.amountCentavos,
-        accountId: entry.account.accountId,
-      },
-      'all'
-    ),
-  }
+  return { status: 'applied', effectiveStatus, deltas: orderedLedgerLegs(entry) }
 }
 
 export type SignedLedgerDeltaForAccountResult =

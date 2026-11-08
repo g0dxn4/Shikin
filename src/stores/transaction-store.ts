@@ -1,4 +1,10 @@
-import { calculateLegacyLedgerLegs } from '@shikin/finance-core'
+import {
+  calculateSignedLedgerDeltas,
+  assertUnambiguousLedgerHistory,
+  normalizePostingStatus,
+  type LedgerEntry,
+  type SignedLedgerDeltaResult,
+} from '@shikin/finance-core'
 import { applyMetadataCorrection, type MetadataCorrection } from '@shikin/finance-core/corrections'
 import { create } from 'zustand'
 import { query, withTransaction } from '@/lib/database'
@@ -58,6 +64,11 @@ export interface ReviewFieldUpdate {
 type BalanceImpactInput = {
   type: TransactionType
   amount: number
+  currency: string
+  sourceCurrency: string | null | undefined
+  transferCurrency?: string | null
+  transactionKind?: Transaction['transaction_kind']
+  historical?: boolean
   accountId: string
   transferToAccountId?: string | null
   status?: Transaction['status'] | null
@@ -222,30 +233,56 @@ async function resolveTransactionWriteAccounts(tx: TransactionClient, data: Tran
 }
 
 function frontendLedgerLegs(input: BalanceImpactInput) {
-  return calculateLegacyLedgerLegs(
-    {
+  try {
+    const result = calculateSignedLedgerDeltas({
       type: input.type,
       amountCentavos: input.amount,
-      accountId: input.accountId,
-      transferToAccountId: input.transferToAccountId,
+      currency: input.currency,
+      account: {
+        accountId: input.accountId,
+        currency: input.sourceCurrency as string,
+        accountMode: input.sourceAccountMode ?? 'transactional',
+      },
+      transferToAccount:
+        input.type === 'transfer' && input.transferToAccountId
+          ? {
+              accountId: input.transferToAccountId,
+              currency: input.transferCurrency as string,
+              accountMode: input.transferAccountMode ?? 'transactional',
+            }
+          : null,
       status: input.status,
       ledgerTreatment: input.ledgerTreatment,
-      isArchived: input.isArchived,
-      sourceAccountMode: input.sourceAccountMode,
-      transferAccountMode: input.transferAccountMode,
-    },
-    'frontend-mutation'
-  ).legs
+      transactionKind: input.transactionKind,
+      isArchived: input.isArchived as LedgerEntry['isArchived'],
+    })
+    if (result.status === 'rejected' || result.status === 'unresolved')
+      throw new Error(result.reason)
+    if (input.historical) assertUnambiguousLedgerHistory(input)
+    return result.deltas
+  } catch (error) {
+    const failure = new Error(
+      `Invalid ledger transaction: ${getErrorMessage(error)}. Use an audited financial correction to repair the transaction and account evidence before retrying; no historical balance inverse was inferred.`
+    ) as Error & { cause?: unknown }
+    failure.cause = error
+    throw failure
+  }
+}
+
+function newPostingStatus(status: string | null | undefined) {
+  const normalized = normalizePostingStatus(status)
+  if (normalized === 'invalid') throw new Error('Invalid ledger status: invalid_status')
+  return normalized
 }
 
 async function applyBalanceImpact(
   tx: TransactionClient,
-  input: BalanceImpactInput,
+  legs: SignedLedgerDeltaResult['deltas'],
   now: string,
   direction: 1 | -1
 ) {
-  // Do not use the overwrite Map: a legacy self-transfer still makes two ordered writes.
-  for (const leg of frontendLedgerLegs(input)) {
+  // Keep valid source/destination writes ordered, including signed-zero legs.
+  for (const leg of legs) {
     await tx.execute('UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ?', [
       leg.deltaCentavos * direction,
       now,
@@ -392,6 +429,8 @@ async function resolveFxAcceptance(
 type TransactionForMutation = Transaction & {
   source_account_mode?: Account['account_mode'] | null
   transfer_account_mode?: Account['account_mode'] | null
+  source_currency?: string | null
+  transfer_currency?: string | null
   is_receivable_payment?: number
   is_reconciliation_adjustment?: number
   is_finalized_statement?: number
@@ -406,6 +445,7 @@ async function getTransactionForMutation(
     (await tx.query<TransactionForMutation>(
       `SELECT t.*, a.account_mode AS source_account_mode,
               ta.account_mode AS transfer_account_mode,
+              a.currency AS source_currency, ta.currency AS transfer_currency,
               EXISTS(SELECT 1 FROM receivables r WHERE r.matched_transaction_id = t.id) AS is_receivable_payment,
               EXISTS(SELECT 1 FROM account_reconciliations ar WHERE ar.adjustment_transaction_id = t.id) AS is_reconciliation_adjustment,
               (t.finalization_id IS NOT NULL OR EXISTS(
@@ -506,15 +546,32 @@ async function updateTransactionWithData(
   if (existing.has_splits) {
     throw new Error('Split transactions require their dedicated split workflow.')
   }
+  const oldImpact = balanceImpactMap({
+    type: existing.type,
+    amount: existing.amount,
+    currency: existing.currency,
+    sourceCurrency: existing.source_currency,
+    transferCurrency: existing.transfer_currency,
+    transactionKind: existing.transaction_kind,
+    historical: true,
+    accountId: existing.account_id,
+    transferToAccountId: existing.transfer_to_account_id,
+    status: existing.status,
+    ledgerTreatment: existing.ledger_treatment,
+    isArchived: existing.is_archived,
+    sourceAccountMode: existing.source_account_mode,
+    transferAccountMode: existing.transfer_account_mode,
+  })
 
   const now = new Date().toISOString()
   let newAmountCentavos = toCentavos(data.amount)
   const oldIsTransfer = existing.type === 'transfer' && !!existing.transfer_to_account_id
   const newIsTransfer = data.type === 'transfer'
-  const newStatus =
-    options?.preserveLegacyStatus && (existing.status === undefined || existing.status === null)
-      ? null
-      : (data.status ?? existing.status ?? 'posted')
+  const newStatus = options?.preserveLegacyStatus
+    ? (existing.status ?? null)
+    : data.status === undefined || data.status === null || data.status === existing.status
+      ? (existing.status ?? 'posted')
+      : newPostingStatus(data.status)
   const { sourceAccount, transferDestination, currency } = await resolveTransactionWriteAccounts(
     tx,
     data
@@ -569,20 +626,13 @@ async function updateTransactionWithData(
     date: data.date,
     reporting_treatment: data.reportingTreatment ?? existing.reporting_treatment,
   })
-  const oldImpact = balanceImpactMap({
-    type: existing.type,
-    amount: existing.amount,
-    accountId: existing.account_id,
-    transferToAccountId: oldIsTransfer ? existing.transfer_to_account_id : null,
-    status: existing.status,
-    ledgerTreatment: existing.ledger_treatment,
-    isArchived: existing.is_archived,
-    sourceAccountMode: existing.source_account_mode,
-    transferAccountMode: existing.transfer_account_mode,
-  })
   const newImpact = balanceImpactMap({
     type: data.type,
     amount: newAmountCentavos,
+    currency,
+    sourceCurrency: sourceAccount.currency,
+    transferCurrency: transferDestination?.currency,
+    transactionKind: existing.transaction_kind,
     accountId: sourceAccount.id,
     transferToAccountId: transferDestination?.id ?? null,
     status: newStatus,
@@ -598,9 +648,14 @@ async function updateTransactionWithData(
 
   await applyBalanceImpact(
     tx,
-    {
+    frontendLedgerLegs({
       type: existing.type,
       amount: existing.amount,
+      currency: existing.currency,
+      sourceCurrency: existing.source_currency,
+      transferCurrency: existing.transfer_currency,
+      transactionKind: existing.transaction_kind,
+      historical: true,
       accountId: existing.account_id,
       transferToAccountId: oldIsTransfer ? existing.transfer_to_account_id : null,
       status: existing.status,
@@ -608,7 +663,7 @@ async function updateTransactionWithData(
       isArchived: existing.is_archived,
       sourceAccountMode: existing.source_account_mode,
       transferAccountMode: existing.transfer_account_mode,
-    },
+    }),
     now,
     -1
   )
@@ -637,9 +692,13 @@ async function updateTransactionWithData(
 
   await applyBalanceImpact(
     tx,
-    {
+    frontendLedgerLegs({
       type: data.type,
       amount: newAmountCentavos,
+      currency,
+      sourceCurrency: sourceAccount.currency,
+      transferCurrency: transferDestination?.currency,
+      transactionKind: existing.transaction_kind,
       accountId: sourceAccount.id,
       transferToAccountId: transferDestination?.id ?? null,
       status: newStatus,
@@ -647,7 +706,7 @@ async function updateTransactionWithData(
       isArchived: existing.is_archived,
       sourceAccountMode: sourceAccount.accountMode,
       transferAccountMode: transferDestination?.accountMode,
-    },
+    }),
     now,
     1
   )
@@ -680,7 +739,7 @@ async function updateTransactionWithData(
       nextEvidence
     )
   } else {
-    await auditFrontendCorrection(tx, id, 'update', existing, {
+    await auditFrontendCorrection(tx, id, 'update', transactionCorrectionSnapshot(existing), {
       ...data,
       amount: newAmountCentavos,
     })
@@ -717,6 +776,14 @@ async function assertCategoryAssignment(
     throw new Error('Subcategory must belong to the selected category.')
 }
 
+function transactionCorrectionSnapshot({
+  source_currency: _sourceCurrency,
+  transfer_currency: _transferCurrency,
+  ...transaction
+}: TransactionForMutation) {
+  return transaction
+}
+
 async function correctMetadata(
   tx: TransactionClient,
   existing: TransactionForMutation,
@@ -727,7 +794,7 @@ async function correctMetadata(
 ) {
   assertMutableTransaction(existing, true)
   const after = applyMetadataCorrection(
-    existing,
+    transactionCorrectionSnapshot(existing),
     patch,
     !!existing.has_splits,
     splits !== undefined
@@ -751,7 +818,7 @@ async function correctMetadata(
     tx,
     existing.id,
     'correct-metadata',
-    existing,
+    transactionCorrectionSnapshot(existing),
     after,
     auditSource,
     auditNote
@@ -841,6 +908,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   add: async (data, options) => {
     set({ error: null })
     try {
+      data = { ...data, status: newPostingStatus(data.status) }
       await withTransaction(async (tx) => {
         const id = generateId()
         const now = new Date().toISOString()
@@ -873,6 +941,9 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         const createdImpact = balanceImpactMap({
           type: data.type,
           amount: amountCentavos,
+          currency,
+          sourceCurrency: sourceAccount.currency,
+          transferCurrency: transferDestination?.currency,
           accountId: sourceAccount.id,
           transferToAccountId: transferDestination?.id ?? null,
           status: data.status ?? 'posted',
@@ -905,15 +976,18 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
 
         await applyBalanceImpact(
           tx,
-          {
+          frontendLedgerLegs({
             type: data.type,
             amount: amountCentavos,
+            currency,
+            sourceCurrency: sourceAccount.currency,
+            transferCurrency: transferDestination?.currency,
             accountId: sourceAccount.id,
             transferToAccountId: transferDestination?.id ?? null,
             status: data.status ?? 'posted',
             sourceAccountMode: sourceAccount.accountMode,
             transferAccountMode: transferDestination?.accountMode,
-          },
+          }),
           now,
           1
         )
@@ -1055,6 +1129,11 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
         const existingImpact = balanceImpactMap({
           type: existing.type,
           amount: existing.amount,
+          currency: existing.currency,
+          sourceCurrency: existing.source_currency,
+          transferCurrency: existing.transfer_currency,
+          transactionKind: existing.transaction_kind,
+          historical: true,
           accountId: existing.account_id,
           transferToAccountId: existing.transfer_to_account_id,
           status: existing.status,
@@ -1072,9 +1151,14 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
 
         await applyBalanceImpact(
           tx,
-          {
+          frontendLedgerLegs({
             type: existing.type,
             amount: existing.amount,
+            currency: existing.currency,
+            sourceCurrency: existing.source_currency,
+            transferCurrency: existing.transfer_currency,
+            transactionKind: existing.transaction_kind,
+            historical: true,
             accountId: existing.account_id,
             transferToAccountId: existing.transfer_to_account_id,
             status: existing.status,
@@ -1082,7 +1166,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
             isArchived: existing.is_archived,
             sourceAccountMode: existing.source_account_mode,
             transferAccountMode: existing.transfer_account_mode,
-          },
+          }),
           now,
           -1
         )
@@ -1115,6 +1199,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   addWithSplits: async (data, splits) => {
     set({ error: null })
     try {
+      data = { ...data, status: newPostingStatus(data.status) }
       await withTransaction(async (tx) => {
         const id = generateId()
         const now = new Date().toISOString()
@@ -1130,6 +1215,15 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
             'Foreign-input split transactions are not supported. Save in account units before allocating splits.'
           )
         }
+        const legs = frontendLedgerLegs({
+          type: data.type,
+          amount: amountCentavos,
+          currency,
+          sourceCurrency: sourceAccount.currency,
+          accountId: sourceAccount.id,
+          status: data.status,
+          sourceAccountMode: sourceAccount.accountMode,
+        })
 
         await tx.execute(
           `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, status, date, created_at, updated_at)
@@ -1152,18 +1246,7 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
 
         await createSplits(id, splits, amountCentavos, tx)
 
-        await applyBalanceImpact(
-          tx,
-          {
-            type: data.type,
-            amount: amountCentavos,
-            accountId: sourceAccount.id,
-            status: data.status ?? 'posted',
-            sourceAccountMode: sourceAccount.accountMode,
-          },
-          now,
-          1
-        )
+        await applyBalanceImpact(tx, legs, now, 1)
       })
     } catch (error) {
       set({ error: getErrorMessage(error) })

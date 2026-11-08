@@ -1,4 +1,5 @@
 import { advanceAnchoredRecurrence, advanceLegacyRecurrence } from './recurrence.js'
+import { calculateSignedLedgerDeltas, type LedgerEntry } from './ledger.js'
 
 /** Stored rule and joined account evidence; adapters retain SQL, IDs, and transaction ownership. */
 export interface RecurringOccurrenceRule {
@@ -30,7 +31,9 @@ export interface RecurringOccurrenceFailure {
     | 'snapshot_only_account'
     | 'unknown_rule_currency'
     | 'rule_account_currency_mismatch'
+    | 'invalid_ledger_evidence'
   rule: RecurringOccurrenceRule
+  detail?: string
 }
 
 /** Scan the whole due set in the established first-error order, before any claims or writes. */
@@ -48,12 +51,25 @@ export function validateRecurringOccurrences(
   const mismatch = rules.find(
     (rule) => normalizeCurrency(rule.currency) !== normalizeCurrency(rule.account_currency)
   )
-  return mismatch ? { reason: 'rule_account_currency_mismatch', rule: mismatch } : null
+  if (mismatch) return { reason: 'rule_account_currency_mismatch', rule: mismatch }
+  for (const rule of rules) {
+    try {
+      recurringLedgerDelta(rule)
+    } catch (error) {
+      return {
+        reason: 'invalid_ledger_evidence',
+        rule,
+        detail: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+  return null
 }
 
 export function recurringOccurrenceFailureMessage({
   reason,
   rule,
+  detail,
 }: RecurringOccurrenceFailure): string {
   switch (reason) {
     case 'unsupported_recurring_transfer':
@@ -66,6 +82,8 @@ export function recurringOccurrenceFailureMessage({
       return `${rule.description ? `Recurring rule "${rule.description}"` : `Recurring rule ${rule.id}`} has no stored currency. Repair or recreate the rule before moving or materializing it.`
     case 'rule_account_currency_mismatch':
       return `Recurring rule "${rule.description ?? 'Unknown rule'}" has stored currency ${rule.currency ?? 'unknown'} but the linked account is now ${rule.account_currency ?? 'unknown'}. Repair or recreate the rule before materializing it.`
+    case 'invalid_ledger_evidence':
+      return `Recurring rule "${rule.description}" has invalid ledger evidence: ${detail}. Correct the rule and account evidence before materializing it.`
   }
 }
 
@@ -172,8 +190,26 @@ export function planRecurringOccurrence(
       transfer_to_account_id: rule.to_account_id ?? null,
       recurring_rule_id: rule.id,
     },
-    balanceDelta: rule.type === 'income' ? rule.amount : -rule.amount,
+    balanceDelta: recurringLedgerDelta(rule),
   }
+}
+
+function recurringLedgerDelta(rule: RecurringOccurrenceRule): number {
+  const result = calculateSignedLedgerDeltas({
+    type: rule.type as LedgerEntry['type'],
+    amountCentavos: rule.amount,
+    currency: rule.currency as string,
+    account: {
+      accountId: rule.account_id,
+      currency: rule.account_currency as string,
+      accountMode: (rule.account_mode ?? 'transactional') as LedgerEntry['account']['accountMode'],
+    },
+    status: 'posted',
+  })
+  if (result.status !== 'applied') {
+    throw new Error(result.status === 'excluded' ? result.effectiveStatus.reason : result.reason)
+  }
+  return result.deltas[0]!.deltaCentavos
 }
 
 function normalizeCurrency(value: string | null | undefined): string {

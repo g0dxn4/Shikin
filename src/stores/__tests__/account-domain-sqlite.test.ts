@@ -57,6 +57,40 @@ beforeEach(() => {
 })
 afterEach(() => holder.db.close())
 describe('native account domain real SQLite parity', () => {
+  it.each([false, true])(
+    'refuses malformed reconciliation account evidence with existing rows=%s',
+    async (hasRows) => {
+      holder.db.exec(
+        "INSERT INTO accounts (id,name,type,currency,balance) VALUES ('bad','Bad','checking','US-D',0)"
+      )
+      if (hasRows)
+        holder.db.exec(
+          "INSERT INTO transactions (id,account_id,type,amount,currency,description,date) VALUES ('old','bad','expense',100,'US-D','Old','2026-01-01')"
+        )
+      const before = history()
+      await expect(
+        store().update('bad', { ...data, currency: 'US-D', balance: 0, observedDate: '2026-01-02' })
+      ).rejects.toThrow('Account bad has invalid reconciliation ledger evidence')
+      expect(history()).toEqual(before)
+      await store().update('bad', { ...data, name: 'Corrected metadata', currency: 'US-D' })
+      expect(rows('accounts')[0]).toMatchObject({
+        name: 'Corrected metadata',
+        currency: 'US-D',
+        balance: 0,
+      })
+      expect(rows('transactions')).toEqual(before.transactions)
+    }
+  )
+  it('preserves accepted account currency bytes on new reconciliation bridges', async () => {
+    await store().add({ ...data, currency: ' usd ', balance: 1, observedDate: '2026-01-02' })
+    expect(rows('transactions')[0]).toMatchObject({
+      currency: ' usd ',
+      amount: 100,
+      type: 'income',
+      date: '2026-01-02',
+    })
+    expect(rows('accounts')[0]).toMatchObject({ currency: ' usd ', balance: 100 })
+  })
   it('requires explicit portfolio choice and audits ownership without balance/history writes', async () => {
     const before = history()
     await expect(store().add({ ...data, type: 'investment', balance: 0 })).rejects.toThrow(

@@ -1,4 +1,4 @@
-import { CASH_FLOW_SQL } from '@shikin/finance-core'
+import { CASH_FLOW_SQL, calculateSignedLedgerDeltas } from '@shikin/finance-core'
 import {
   z,
   query,
@@ -258,6 +258,36 @@ function buildCardPaymentBalanceImpact(input: {
   }
 
   return formatCardPaymentBalanceImpact(changes)
+}
+
+function assertCardPaymentLedger(
+  transaction: CardPaymentTransactionPreview,
+  source: PaymentSourceAccountRow,
+  card: CreditCardAccountRow
+) {
+  const result = calculateSignedLedgerDeltas({
+    type: transaction.type,
+    amountCentavos: transaction.amountCentavos,
+    currency: transaction.currency as string,
+    account: {
+      accountId: source.id,
+      currency: source.currency as string,
+      accountMode: source.account_mode ?? 'transactional',
+    },
+    transferToAccount:
+      transaction.type === 'transfer'
+        ? {
+            accountId: card.id,
+            currency: card.currency,
+            accountMode: card.account_mode ?? 'transactional',
+          }
+        : null,
+    status: transaction.status,
+    ledgerTreatment: 'normal',
+    transactionKind: 'standard',
+    isArchived: 0,
+  })
+  if (result.status === 'rejected' || result.status === 'unresolved') throw new Error(result.reason)
 }
 
 function cardPaymentTransactionSnapshot(transaction: CardPaymentTransactionPreview) {
@@ -979,6 +1009,17 @@ const recordCardPayment: ToolDefinition = {
             status: 'posted',
             date: paymentDate,
           }
+    if (transactionPreview) {
+      try {
+        assertCardPaymentLedger(transactionPreview, sourceAccount!, card)
+      } catch (error) {
+        return {
+          success: false,
+          reason: 'invalid_ledger_evidence',
+          message: `Invalid payment ledger evidence: ${error instanceof Error ? error.message : String(error)}. Correct the account evidence before recording a payment.`,
+        }
+      }
+    }
 
     const balanceImpact = buildCardPaymentBalanceImpact({
       mode,
@@ -1138,6 +1179,7 @@ const recordCardPayment: ToolDefinition = {
         ) {
           throw new Error('A payment account changed; retry the card payment.')
         }
+        assertCardPaymentLedger(transactionPreview, lockedSource.account, lockedCard.account)
         execute(
           `INSERT INTO transactions
              (id, account_id, category_id, transfer_to_account_id, type, amount, currency, description, notes, status, source, note, date)

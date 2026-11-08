@@ -44,6 +44,15 @@ const mirror = (overrides: Partial<DatedLedgerRow> = {}) =>
     ...overrides,
   })
 describe('pure dated account projection', () => {
+  it.each<Partial<DatedLedgerRow>>([
+    { currency: ' usd ' },
+    { source_currency: '\u00a0USD\uFEFF' },
+    { destination_currency: 'usd' },
+    { source_account_mode: null },
+    { destination_account_mode: null },
+  ])('pins matched projection context %j', (patch) => {
+    expect(projectDatedLedger([row(patch), mirror()], 'a')).toBe(-1000)
+  })
   it('keeps source debit and mirror credit on their original dates, regardless of row order', () => {
     const rows = [mirror(), row()]
     expect(projectDatedLedger(rows, 'a', '2025-01-30')).toBe(-1000)

@@ -57,37 +57,55 @@ const { tools } = await import('./tools.js')
 import { getBalanceImpact } from './transaction-mutations.js'
 import { transactionBalanceImpacts, transactionSnapshotFromAudit } from './transaction-audit.js'
 
-describe('legacy ledger adapter parent outputs', () => {
+describe('strict ledger adapter outputs', () => {
+  beforeEach(() => {
+    mockQuery.mockReset()
+    mockQuery.mockImplementation((_sql: string, params: unknown[]) => [
+      { id: params[0], currency: 'USD', account_mode: 'transactional' },
+    ])
+  })
   it.each([
-    ['padded pending', { status: ' Pending ' }, [['a', -1]]],
-    ['Unicode pending', { status: '\u00a0PENDING\uFEFF' }, [['a', -1]]],
-    ['unknown status', { status: 'bogus' }, [['a', -1]]],
-    ['unknown treatment', { ledger_treatment: 'normal ' }, [['a', -1]]],
+    ['padded pending', { status: ' Pending ' }, []],
+    ['Unicode pending', { status: '\u00a0PENDING\uFEFF' }, []],
+    ['unknown status', { status: 'bogus' }, 'invalid_status'],
+    ['unknown treatment', { ledger_treatment: 'normal ' }, 'Unsupported ledger treatment: normal '],
     ['staged', { ledger_treatment: 'staged_no_balance_impact' }, []],
     ['numeric archive', { is_archived: 1 }, []],
-    ['boolean archive', { is_archived: true }, [['a', -1]]],
-    ['unknown archive', { is_archived: 2 }, [['a', -1]]],
-    ['same account', { type: 'transfer', transfer_to_account_id: 'a' }, [['a', 0]]],
+    ['boolean archive', { is_archived: true }, []],
+    ['unknown archive', { is_archived: 2 }, 'Unsupported archive flag: 2'],
+    ['same account', { type: 'transfer', transfer_to_account_id: 'a' }, 'same_account_transfer'],
     ['zero', { amount: 0 }, [['a', 0]]],
-    ['negative', { amount: -1 }, [['a', 1]]],
-    ['fractional', { amount: 0.5 }, [['a', -0.5]]],
-    ['unknown type', { type: 'refund' }, [['a', -1]]],
-    ['empty account', { account_id: '' }, [['', -1]]],
-    ['pending missing transfer', { type: 'transfer', status: 'pending' }, []],
-  ])('%s retains its CLI Map', (_name, patch, expected) => {
+    ['negative', { amount: -1 }, 'amountCentavos must be a non-negative safe integer'],
+    ['fractional', { amount: 0.5 }, 'amountCentavos must be a non-negative safe integer'],
+    ['unknown type', { type: 'refund' }, 'Unsupported transaction type: refund'],
+    ['empty account', { account_id: '' }, 'account.accountId must not be empty'],
+    [
+      'pending missing transfer',
+      { type: 'transfer', status: 'pending' },
+      'missing_transfer_destination',
+    ],
+  ])('%s follows the strict policy', (_name, patch, expected) => {
     const input = {
       id: 't',
       type: 'expense',
       amount: 1,
+      currency: 'USD',
       account_id: 'a',
       transfer_to_account_id: null,
       status: 'posted',
       ...(patch as object),
     } as Parameters<typeof getBalanceImpact>[0]
-    expect(getBalanceImpact(input)).toEqual({
-      success: true,
-      impacts: new Map(expected as [string, number][]),
-    })
+    expect(getBalanceImpact(input)).toEqual(
+      typeof expected === 'string'
+        ? {
+            success: false,
+            message: `Invalid ledger transaction t: ${expected}. Use an audited financial correction to repair the transaction and account evidence before retrying; no historical balance inverse was inferred.`,
+          }
+        : {
+            success: true,
+            impacts: new Map(expected as [string, number][]),
+          }
+    )
   })
 
   it('keeps the exact missing destination failure', () => {
@@ -96,6 +114,7 @@ describe('legacy ledger adapter parent outputs', () => {
         id: 't',
         type: 'transfer',
         amount: 1,
+        currency: 'USD',
         account_id: 'a',
         transfer_to_account_id: null,
         status: 'posted',
@@ -103,7 +122,7 @@ describe('legacy ledger adapter parent outputs', () => {
     ).toEqual({
       success: false,
       message:
-        'Transfer transaction t has no destination account. Repair or recreate it before editing it.',
+        'Invalid ledger transaction t: missing_transfer_destination. Use an audited financial correction to repair the transaction and account evidence before retrying; no historical balance inverse was inferred.',
     })
   })
 
@@ -111,8 +130,8 @@ describe('legacy ledger adapter parent outputs', () => {
     ['padded pending', { status: ' Pending ' }, [['a', -1]]],
     ['staged snapshot calculation', { ledgerTreatment: 'staged_no_balance_impact' }, [['a', -1]]],
     ['numeric archive calculation', { isArchived: 1 }, [['a', -1]]],
-    ['same account', { type: 'transfer', transferToAccountId: 'a' }, [['a', 0]]],
-    ['missing destination', { type: 'transfer' }, []],
+    ['same account', { type: 'transfer', transferToAccountId: 'a' }, 'same_account_transfer'],
+    ['missing destination', { type: 'transfer' }, 'missing_transfer_destination'],
     ['zero', { amountCentavos: 0 }, [['a', 0]]],
   ])('%s retains its decoded undo Map', (_name, patch, expected) => {
     const decoded = transactionSnapshotFromAudit({
@@ -120,6 +139,7 @@ describe('legacy ledger adapter parent outputs', () => {
         id: 't',
         type: 'expense',
         amountCentavos: 1,
+        currency: 'USD',
         accountId: 'a',
         status: 'posted',
         description: 'x',
@@ -128,7 +148,10 @@ describe('legacy ledger adapter parent outputs', () => {
       },
     })
     expect(decoded).not.toBeNull()
-    expect(transactionBalanceImpacts(decoded!)).toEqual(new Map(expected as [string, number][]))
+    if (typeof expected === 'string')
+      expect(() => transactionBalanceImpacts(decoded!)).toThrow(expected)
+    else
+      expect(transactionBalanceImpacts(decoded!)).toEqual(new Map(expected as [string, number][]))
   })
 })
 
@@ -276,7 +299,17 @@ describe('CLI tool validation regressions', () => {
     mockBackupDatabase.mockReset()
     mockRestoreDatabase.mockReset()
     mockTransaction.mockImplementation((fn: () => unknown) => fn())
-    mockQuery.mockImplementation(() => [])
+    mockQuery.mockImplementation((sql: string, params: unknown[] = []) =>
+      sql.startsWith('SELECT id, currency, account_mode FROM accounts')
+        ? [
+            {
+              id: params[0],
+              currency: params[0] === 'acct-2' ? 'EUR' : 'USD',
+              account_mode: 'transactional',
+            },
+          ]
+        : []
+    )
     mockExecute.mockReturnValue({ rowsAffected: 1, lastInsertId: 1 })
   })
 
@@ -298,6 +331,8 @@ describe('CLI tool validation regressions', () => {
     mockQuery.mockImplementation((sql: string, params?: unknown[]) => {
       const handled = handler(sql, params)
       if (handled !== undefined) return handled
+      if (sql.startsWith('SELECT id, currency, account_mode FROM accounts'))
+        return [{ id: params?.[0], currency: 'USD', account_mode: 'transactional' }]
       return []
     })
   }
@@ -354,14 +389,14 @@ describe('CLI tool validation regressions', () => {
 
     const result = await addTransaction.execute(input)
 
-    expect(mockQuery).toHaveBeenCalledTimes(4)
+    expect(mockQuery).toHaveBeenCalledTimes(5)
     expect(mockQuery).toHaveBeenNthCalledWith(
       1,
       'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1',
       ['acct-2']
     )
     expect(mockQuery).toHaveBeenNthCalledWith(
-      4,
+      5,
       'SELECT id, balance FROM accounts WHERE id IN ($1)',
       ['acct-2']
     )
@@ -416,11 +451,7 @@ describe('CLI tool validation regressions', () => {
 
   it('previews add-transaction balance impact and audit on dry-runs', async () => {
     mockQuery.mockImplementation((sql: string) => {
-      if (
-        sql.includes(
-          'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1'
-        )
-      ) {
+      if (sql.includes('FROM accounts WHERE id = $1 LIMIT 1')) {
         return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
       }
       if (sql.includes('SELECT id, balance FROM accounts')) {
@@ -481,11 +512,7 @@ describe('CLI tool validation regressions', () => {
 
   it('previews placeholder transaction creation with balance and audit impact', async () => {
     mockQuery.mockImplementation((sql: string) => {
-      if (
-        sql.includes(
-          'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1'
-        )
-      ) {
+      if (sql.includes('FROM accounts WHERE id = $1 LIMIT 1')) {
         return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
       }
       if (sql.includes('SELECT id, balance FROM accounts')) {
@@ -536,11 +563,7 @@ describe('CLI tool validation regressions', () => {
 
   it('creates placeholder transactions with dryRun false on actual writes', async () => {
     mockQuery.mockImplementation((sql: string) => {
-      if (
-        sql.includes(
-          'SELECT id, currency, is_archived, account_mode FROM accounts WHERE id = $1 LIMIT 1'
-        )
-      ) {
+      if (sql.includes('FROM accounts WHERE id = $1 LIMIT 1')) {
         return [{ id: 'acct-1', currency: 'USD', is_archived: 0 }]
       }
       if (sql.includes('SELECT id, balance FROM accounts')) {
@@ -616,6 +639,8 @@ describe('CLI tool validation regressions', () => {
 
   it('resolves placeholders by mutating the original transaction without double counting', async () => {
     mockQuery.mockImplementation((sql: string) => {
+      if (sql.startsWith('SELECT id, currency, account_mode FROM accounts'))
+        return [{ id: 'acct-1', currency: 'USD' }]
       if (sql.includes('SELECT * FROM transactions WHERE id = $1 LIMIT 1')) {
         return [
           {
@@ -688,6 +713,8 @@ describe('CLI tool validation regressions', () => {
 
   it('resolves placeholders with dryRun false on actual writes', async () => {
     mockQuery.mockImplementation((sql: string) => {
+      if (sql.startsWith('SELECT id, currency, account_mode FROM accounts'))
+        return [{ id: 'acct-1', currency: 'USD' }]
       if (sql.includes('SELECT * FROM transactions WHERE id = $1 LIMIT 1')) {
         return [
           {
@@ -783,6 +810,8 @@ describe('CLI tool validation regressions', () => {
 
   it('splits placeholders with dryRun false on actual writes', async () => {
     mockQuery.mockImplementation((sql: string) => {
+      if (sql.startsWith('SELECT id, currency, account_mode FROM accounts'))
+        return [{ id: 'acct-1', currency: 'USD' }]
       if (sql.includes('SELECT * FROM transactions WHERE id = $1 LIMIT 1')) {
         return [
           {
@@ -1180,6 +1209,11 @@ describe('CLI tool validation regressions', () => {
   })
 
   it('wraps add-transaction writes in a transaction', async () => {
+    mockQuery.mockImplementation((sql: string) =>
+      sql.startsWith('SELECT id, currency, account_mode FROM accounts')
+        ? [{ id: 'acct-1', currency: 'BRL' }]
+        : []
+    )
     mockQuery.mockReturnValueOnce([{ id: 'acct-1', name: 'Primary', currency: 'BRL' }])
 
     const input = addTransaction.schema.parse({
@@ -1407,38 +1441,35 @@ describe('CLI tool validation regressions', () => {
   })
 
   it.each([
-    [
-      ' usd ',
-      'transactional',
-      'Cannot transfer from USD to  usd . Cross-currency transfers are not supported because no FX conversion is applied.',
-    ],
+    [' usd ', 'transactional', null],
     [
       'EUR',
       'snapshot_only',
       'Cannot transfer from USD to EUR. Cross-currency transfers are not supported because no FX conversion is applied.',
     ],
-  ])(
-    'retains raw currency comparison before %s/%s mode rejection',
-    async (currency, accountMode, message) => {
-      mockQuery
-        .mockReturnValueOnce([{ id: 'acct-usd', currency: 'USD', is_archived: 0 }])
-        .mockReturnValueOnce([
-          { id: 'acct-other', currency, account_mode: accountMode, is_archived: 0 },
-        ])
-      expect(
-        await addTransaction.execute(
-          addTransaction.schema.parse({
-            amount: 25,
-            type: 'transfer',
-            description: 'Move cash',
-            accountId: 'acct-usd',
-            transferToAccountId: 'acct-other',
-          })
-        )
-      ).toEqual({ success: false, message })
+  ])('normalizes currency comparison for %s/%s', async (currency, accountMode, message) => {
+    mockQuery
+      .mockReturnValueOnce([{ id: 'acct-usd', currency: 'USD', is_archived: 0 }])
+      .mockReturnValueOnce([
+        { id: 'acct-other', currency, account_mode: accountMode, is_archived: 0 },
+      ])
+    const result = await addTransaction.execute(
+      addTransaction.schema.parse({
+        amount: 25,
+        type: 'transfer',
+        description: 'Move cash',
+        accountId: 'acct-usd',
+        transferToAccountId: 'acct-other',
+      })
+    )
+    if (message === null) {
+      expect(result).toMatchObject({ success: true })
+      expect(mockExecute).toHaveBeenCalledTimes(4)
+    } else {
+      expect(result).toEqual({ success: false, message })
       expect(mockExecute).not.toHaveBeenCalled()
     }
-  )
+  })
 
   it('rejects archived transfer destination accounts', async () => {
     mockQuery
@@ -5574,6 +5605,8 @@ describe('CLI tool validation regressions', () => {
       created_at: '2026-05-18T10:00:00.000Z',
     }
     mockQuery.mockImplementation((sql: string) => {
+      if (sql.startsWith('SELECT id, currency, account_mode FROM accounts'))
+        return [{ id: 'acct-1', currency: 'USD' }]
       if (sql.includes('FROM audit_log') && sql.includes('created_at >')) return []
       if (sql.includes('FROM audit_log')) return [auditRow]
       if (sql.includes('FROM transactions') && sql.includes('WHERE id = $1'))
@@ -5684,6 +5717,8 @@ describe('CLI tool validation regressions', () => {
       created_at: '2026-05-18T10:00:00.000Z',
     }
     mockQuery.mockImplementation((sql: string) => {
+      if (sql.startsWith('SELECT id, currency, account_mode FROM accounts'))
+        return [{ id: 'acct-1', currency: 'USD' }]
       if (sql.includes('FROM audit_log') && sql.includes('created_at >')) return []
       if (sql.includes('FROM audit_log')) return [auditRow]
       if (sql.includes('FROM transactions') && sql.includes('WHERE id = $1'))
@@ -5801,6 +5836,8 @@ describe('CLI tool validation regressions', () => {
       created_at: '2026-05-18T10:00:00.000Z',
     }
     mockQuery.mockImplementation((sql: string) => {
+      if (sql.startsWith('SELECT id, currency, account_mode FROM accounts'))
+        return [{ id: 'acct-1', currency: 'USD' }]
       if (sql.includes('FROM audit_log') && sql.includes('created_at >')) return []
       if (sql.includes('FROM audit_log')) return [auditRow]
       if (sql.includes('FROM transactions') && sql.includes('WHERE id = $1'))
@@ -5904,6 +5941,8 @@ describe('CLI tool validation regressions', () => {
       created_at: '2026-05-18T10:05:00.000Z',
     }
     mockQuery.mockImplementation((sql: string) => {
+      if (sql.startsWith('SELECT id, currency, account_mode FROM accounts'))
+        return [{ id: 'acct-1', currency: 'USD' }]
       if (sql.includes('FROM audit_log') && sql.includes('created_at >')) return [dependentRow]
       if (sql.includes('FROM audit_log')) return [auditRow]
       if (sql.includes('FROM transactions') && sql.includes('WHERE id = $1'))
@@ -8701,6 +8740,8 @@ describe('CLI tool validation regressions', () => {
 
   it('clears update-transaction source and note in the audit row metadata', async () => {
     mockQueryDefault((sql) => {
+      if (sql.startsWith('SELECT id, currency, account_mode FROM accounts'))
+        return [{ id: 'acct-1', currency: 'GBP' }]
       if (sql.includes('SELECT * FROM transactions WHERE id = $1')) {
         return [
           {
@@ -8958,11 +8999,13 @@ describe('CLI tool validation regressions', () => {
           amount: 1000,
           type: 'expense',
           account_id: 'acct-archived',
+          currency: 'USD',
           description: 'Old coffee',
           date: '2026-04-14',
         },
       ])
       .mockReturnValueOnce([]) // no existing FX evidence
+      .mockReturnValueOnce([{ id: 'acct-archived', currency: 'USD' }])
       .mockReturnValueOnce([{ id: 'acct-archived', name: 'Archived Checking' }])
 
     const result = await deleteTransaction.execute(
@@ -9860,6 +9903,8 @@ describe('CLI tool validation regressions', () => {
 
   it('wraps update-transaction balance and row writes in a transaction', async () => {
     mockQueryDefault((sql) => {
+      if (sql.startsWith('SELECT id, currency, account_mode FROM accounts'))
+        return [{ id: 'acct-1', currency: 'JPY' }]
       if (sql.includes('SELECT * FROM transactions WHERE id = $1')) {
         return [
           {
@@ -9938,6 +9983,8 @@ describe('CLI tool validation regressions', () => {
 
   it('previews update-transaction dry-runs without writing', async () => {
     mockQuery.mockImplementation((sql: string) => {
+      if (sql.startsWith('SELECT id, currency, account_mode FROM accounts'))
+        return [{ id: 'acct-1', currency: 'USD' }]
       if (sql.includes('SELECT * FROM transactions WHERE id = $1')) {
         return [
           {
@@ -10063,6 +10110,7 @@ describe('CLI tool validation regressions', () => {
         amount: 1000,
         type: 'expense',
         account_id: 'acct-1',
+        currency: 'USD',
         description: 'Coffee',
         date: '2026-04-14',
       },
@@ -10099,6 +10147,8 @@ describe('CLI tool validation regressions', () => {
 
   it('previews delete-transaction dry-runs without writing', async () => {
     mockQuery.mockImplementation((sql: string) => {
+      if (sql.startsWith('SELECT id, currency, account_mode FROM accounts'))
+        return [{ id: 'acct-1', currency: 'USD' }]
       if (sql.includes('SELECT * FROM transactions WHERE id = $1')) {
         return [
           {
@@ -10180,6 +10230,7 @@ describe('CLI tool validation regressions', () => {
         type: 'transfer',
         account_id: 'acct-checking',
         transfer_to_account_id: 'acct-savings',
+        currency: 'USD',
         description: 'Move cash',
         date: '2026-04-14',
       },

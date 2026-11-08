@@ -1,4 +1,8 @@
-import { calculateLegacyLedgerLegs } from '@shikin/finance-core'
+import {
+  calculateSignedLedgerDeltas,
+  assertUnambiguousLedgerHistory,
+  type LedgerEntry,
+} from '@shikin/finance-core'
 import type { CorrectionTransaction } from '@shikin/finance-core/corrections'
 import { guardTransactionEvidence } from './transaction-corrections.js'
 import { query, execute, fromCentavos } from './tools/shared.js'
@@ -170,7 +174,8 @@ export function protectedUndoSemanticsFailure(entry: AuditLogRow) {
       Boolean(tx.stagingBatchId) ||
       Boolean(tx.reconciliationId) ||
       Boolean(tx.matchedTransactionId) ||
-      tx.isArchived === true
+      tx.isArchived === true ||
+      tx.isArchived === 1
     ) {
       return failure(
         'dedicated_financial_undo_required',
@@ -192,6 +197,18 @@ export function protectedUndoSemanticsFailure(entry: AuditLogRow) {
         )
       }
     }
+    try {
+      transactionBalanceImpacts(tx as unknown as UndoTransactionSnapshot)
+      // The decoder must not hide unknown discriminants or ambiguous legacy status.
+      const flag = tx.isArchived
+      if (flag !== undefined && flag !== null && flag !== false && flag !== 0)
+        throw new Error(`Unsupported archive flag: ${String(flag)}`)
+    } catch (error) {
+      return failure(
+        'invalid_ledger_evidence',
+        `Invalid ledger transaction ${String(tx.id)}: ${error instanceof Error ? error.message : String(error)}. Use an audited financial correction before undo; no historical inverse was inferred.`
+      )
+    }
   }
   return null
 }
@@ -205,17 +222,31 @@ export function transactionSnapshotPublic(tx: UndoTransactionSnapshot) {
 
 export function transactionBalanceImpacts(tx: UndoTransactionSnapshot): Map<string, number> {
   const impacts = new Map<string, number>()
-  const result = calculateLegacyLedgerLegs(
-    {
-      type: tx.type,
-      amountCentavos: tx.amountCentavos,
-      accountId: tx.accountId,
-      transferToAccountId: tx.transferToAccountId,
-      status: tx.status,
-    },
-    'generic-undo'
-  )
-  for (const leg of result.legs) {
+  const context = (id: string) => {
+    const account = query<{
+      id: string
+      currency: string
+      account_mode: LedgerEntry['account']['accountMode'] | null
+    }>('SELECT id, currency, account_mode FROM accounts WHERE id = $1 LIMIT 1', [id])[0]
+    if (!account) throw new Error(`Account ${id} not found`)
+    return {
+      accountId: account.id,
+      currency: account.currency,
+      accountMode: account.account_mode ?? ('transactional' as const),
+    }
+  }
+  const result = calculateSignedLedgerDeltas({
+    type: tx.type,
+    amountCentavos: tx.amountCentavos,
+    currency: tx.currency as string,
+    account: context(tx.accountId),
+    transferToAccount:
+      tx.type === 'transfer' && tx.transferToAccountId ? context(tx.transferToAccountId) : null,
+    status: tx.status,
+  })
+  if (result.status === 'rejected' || result.status === 'unresolved') throw new Error(result.reason)
+  assertUnambiguousLedgerHistory(tx)
+  for (const leg of result.deltas) {
     impacts.set(leg.accountId, (impacts.get(leg.accountId) ?? 0) + leg.deltaCentavos)
   }
   return impacts
@@ -408,6 +439,19 @@ export function assertCurrentTransactionUndoState(
       `Transaction ${plan.entityId} now uses protected financial semantics and requires a dedicated workflow.`
     )
   }
+  transactionBalanceImpacts({
+    ...expectedCurrent,
+    status: current.status as UndoTransactionSnapshot['status'],
+  })
+  if (
+    current.is_archived !== undefined &&
+    current.is_archived !== null &&
+    current.is_archived !== 0 &&
+    current.is_archived !== false
+  )
+    throw new Error(
+      `Invalid archive evidence for transaction ${plan.entityId}; use an audited financial correction before undo.`
+    )
 
   guardTransactionEvidence(current as unknown as CorrectionTransaction, null)
   if (

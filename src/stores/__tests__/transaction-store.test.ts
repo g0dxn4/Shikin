@@ -57,7 +57,9 @@ const mockWithTransaction = vi.mocked(withTransaction)
 
 function mockCurrentTransactionFromStore(id = '01TX001') {
   const current = useTransactionStore.getState().getById(id)
-  mockQuery.mockResolvedValueOnce(current ? [current] : [])
+  mockQuery.mockResolvedValueOnce(
+    current ? [{ ...current, source_currency: 'USD', transfer_currency: 'USD' }] : []
+  )
 }
 
 function reviewTransaction(overrides: Record<string, unknown> = {}) {
@@ -69,6 +71,8 @@ function reviewTransaction(overrides: Record<string, unknown> = {}) {
     type: 'expense',
     amount: 2500,
     currency: 'USD',
+    source_currency: 'USD',
+    transfer_currency: 'USD',
     description: 'Imported lunch',
     notes: 'keep this note',
     date: '2024-01-15',
@@ -995,20 +999,25 @@ describe('transaction-store', () => {
 
   describe('remove', () => {
     it.each([
-      ['padded pending', { status: ' Pending ' }, [2500]],
-      ['Unicode pending', { status: '\u00a0PENDING\uFEFF' }, [2500]],
+      ['padded pending', { status: ' Pending ' }, 'Ambiguous historical pending status'],
+      ['Unicode pending', { status: '\u00a0PENDING\uFEFF' }, 'Ambiguous historical pending status'],
       [
         'same-account transfer',
         { type: 'transfer', transfer_to_account_id: '01ACC001' },
-        [2500, -2500],
+        'same_account_transfer',
       ],
-      ['missing transfer destination', { type: 'transfer' }, [2500]],
+      ['missing transfer destination', { type: 'transfer' }, 'missing_transfer_destination'],
       ['zero', { amount: 0 }, [0]],
     ])('preserves ordered inverse writes for %s', async (_name, patch, deltas) => {
       mockQuery
         .mockResolvedValueOnce([reviewTransaction(patch as Record<string, unknown>)])
         .mockResolvedValue([])
       mockExecute.mockResolvedValue({ rowsAffected: 1, lastInsertId: 0 })
+      if (typeof deltas === 'string') {
+        await expect(useTransactionStore.getState().remove('01TX001')).rejects.toThrow(deltas)
+        expect(mockExecute).not.toHaveBeenCalled()
+        return
+      }
       await useTransactionStore.getState().remove('01TX001')
       const calls = mockExecute.mock.calls
       expect(calls).toHaveLength((deltas as number[]).length + 1)

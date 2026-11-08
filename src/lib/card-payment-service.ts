@@ -12,6 +12,7 @@ import {
   type StatementPaymentState,
 } from '@shikin/finance-core/payments'
 import { importPlanToken } from '@shikin/finance-core/imports'
+import { calculateSignedLedgerDeltas, type AccountMode } from '@shikin/finance-core'
 import { withTransaction, type TransactionClient } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
 import { readFrontendPaymentEvidenceSequential } from '@/lib/transaction-evidence'
@@ -1224,6 +1225,30 @@ async function buildRecordPayment(
   if (source.id === card.id) throw new Error('Payment source and destination must differ.')
   if (source.currency?.trim().toUpperCase() !== card.currency?.trim().toUpperCase())
     throw new Error('Payment source and card currencies do not match.')
+  const ledger = calculateSignedLedgerDeltas({
+    type: 'transfer',
+    amountCentavos: input.amount,
+    currency: card.currency as string,
+    account: {
+      accountId: source.id,
+      currency: source.currency as string,
+      accountMode: (source.account_mode ?? 'transactional') as AccountMode,
+    },
+    transferToAccount: {
+      accountId: card.id,
+      currency: card.currency as string,
+      accountMode: (card.account_mode ?? 'transactional') as AccountMode,
+    },
+    status: 'posted',
+    ledgerTreatment: 'normal',
+    transactionKind: 'standard',
+    isArchived: 0,
+  })
+  if (ledger.status === 'rejected' || ledger.status === 'unresolved') {
+    throw new Error(
+      `Invalid payment ledger evidence: ${ledger.reason}. Correct the account evidence before recording a payment.`
+    )
+  }
   const sourceBalanceAfter = resultingBalance(
     source.balance,
     -input.amount,

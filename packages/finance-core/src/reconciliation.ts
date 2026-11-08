@@ -1,4 +1,10 @@
-import { signedLedgerDeltaForAccount, type AccountMode, type LedgerEntry } from './ledger.js'
+import {
+  calculateSignedLedgerDeltas,
+  signedLedgerDeltaForAccount,
+  type AccountMode,
+  type LedgerAccountContext,
+  type LedgerEntry,
+} from './ledger.js'
 
 export type ReconciliationInput =
   | {
@@ -116,6 +122,28 @@ export function safeMoney(value: number): number {
   return value
 }
 
+/** Validate a bridge account even when an empty ledger or a zero adjustment has no legs. */
+export function assertReconciliationLedgerAccount(account: LedgerAccountContext): void {
+  try {
+    const result = calculateSignedLedgerDeltas({
+      type: 'income',
+      amountCentavos: 0,
+      currency: account.currency,
+      account,
+      status: 'posted',
+      transactionKind: 'reconciliation_bridge',
+    })
+    if (result.status === 'rejected' || result.status === 'unresolved')
+      throw new Error(result.reason)
+  } catch (error) {
+    const failure = new Error(
+      `Account ${account.accountId} has invalid reconciliation ledger evidence: ${error instanceof Error ? error.message : String(error)}. Correct the account evidence through an audited workflow before retrying.`
+    ) as Error & { cause?: unknown }
+    failure.cause = error
+    throw failure
+  }
+}
+
 export function assertObservationDate(date: string, today: string): void {
   assertLedgerDate(date)
   if (date > today)
@@ -172,6 +200,7 @@ export const datedLedgerQuery = `SELECT t.*,
 
 function validatePair(source: DatedLedgerRow, mirror: DatedLedgerRow | undefined): void {
   const posted = (r: DatedLedgerRow) => r.status === 'posted' || r.status === 'cleared'
+  const currency = (value: string | null) => value?.trim().toUpperCase()
   if (
     !mirror ||
     mirror.id === source.id ||
@@ -196,15 +225,15 @@ function validatePair(source: DatedLedgerRow, mirror: DatedLedgerRow | undefined
     source.amount <= 0 ||
     !Number.isSafeInteger(source.amount) ||
     source.amount !== mirror.amount ||
-    source.currency !== mirror.currency ||
-    source.currency !== source.source_currency ||
-    mirror.currency !== mirror.source_currency ||
-    source.destination_currency !== mirror.currency ||
+    currency(source.currency) !== currency(mirror.currency) ||
+    currency(source.currency) !== currency(source.source_currency) ||
+    currency(mirror.currency) !== currency(mirror.source_currency) ||
+    currency(source.destination_currency) !== currency(mirror.currency) ||
     source.source_account_id !== source.account_id ||
     mirror.source_account_id !== mirror.account_id ||
-    source.source_account_mode !== 'transactional' ||
-    mirror.source_account_mode !== 'transactional' ||
-    source.destination_account_mode !== 'transactional'
+    (source.source_account_mode ?? 'transactional') !== 'transactional' ||
+    (mirror.source_account_mode ?? 'transactional') !== 'transactional' ||
+    (source.destination_account_mode ?? 'transactional') !== 'transactional'
   ) {
     throw new Error(
       `Broken or ambiguous matched transfer ${source.id}; repair the pair explicitly before reconciliation.`
@@ -224,21 +253,6 @@ export function projectDatedLedger(
   if (byId.size !== rows.length) throw new Error('Duplicate projection row IDs.')
   let balance = 0
   for (const row of rows) {
-    if (row.matched_transaction_id || row.transaction_kind === 'archived_transfer_mirror') {
-      const source =
-        row.transaction_kind === 'archived_transfer_mirror'
-          ? byId.get(row.matched_transaction_id ?? '')
-          : row
-      if (!source) throw new Error(`Missing matched source for ${row.id}.`)
-      const mirror = byId.get(source.matched_transaction_id ?? '')
-      validatePair(source, mirror)
-      if (row !== source) continue
-      if (source.account_id === accountId && (!asOf || source.date <= asOf))
-        balance = safeMoney(balance - source.amount)
-      if (mirror!.account_id === accountId && (!asOf || mirror!.date <= asOf))
-        balance = safeMoney(balance + source.amount)
-      continue
-    }
     assertLedgerDate(row.date)
     if (!row.source_account_id || !row.source_currency)
       throw new Error(`Missing account for ${row.id}.`)
@@ -269,6 +283,21 @@ export function projectDatedLedger(
     )
     if (result.status === 'rejected' || result.status === 'unresolved')
       throw new Error(`Invalid ledger row ${row.id}: ${result.reason}`)
+    if (row.matched_transaction_id || row.transaction_kind === 'archived_transfer_mirror') {
+      const source =
+        row.transaction_kind === 'archived_transfer_mirror'
+          ? byId.get(row.matched_transaction_id ?? '')
+          : row
+      if (!source) throw new Error(`Missing matched source for ${row.id}.`)
+      const mirror = byId.get(source.matched_transaction_id ?? '')
+      validatePair(source, mirror)
+      if (row !== source) continue
+      if (source.account_id === accountId && (!asOf || source.date <= asOf))
+        balance = safeMoney(balance - source.amount)
+      if (mirror!.account_id === accountId && (!asOf || mirror!.date <= asOf))
+        balance = safeMoney(balance + source.amount)
+      continue
+    }
     if (result.status === 'applied' && (!asOf || row.date <= asOf))
       balance = safeMoney(balance + result.deltaCentavos)
   }
@@ -347,6 +376,11 @@ export function selectStagedReconciliationRows(input: {
 }): ReconciliationSelectionRow[] {
   if (input.accountMode !== 'transactional')
     throw new Error('Staged finalization requires a transactional account.')
+  assertReconciliationLedgerAccount({
+    accountId: input.accountId,
+    currency: input.accountCurrency,
+    accountMode: input.accountMode,
+  })
   if (!input.transactionIds?.length && !input.stagingBatchId)
     throw new Error('Provide exact transactionIds or stagingBatchId.')
   if (input.transactionIds && new Set(input.transactionIds).size !== input.transactionIds.length)
@@ -386,7 +420,7 @@ export function selectStagedReconciliationRows(input: {
       row.transfer_to_account_id ||
       (row.type !== 'income' && row.type !== 'expense') ||
       row.ledger_treatment !== 'staged_no_balance_impact' ||
-      row.currency !== input.accountCurrency ||
+      row.currency?.trim().toUpperCase() !== input.accountCurrency.trim().toUpperCase() ||
       !Number.isSafeInteger(row.amount) ||
       row.amount <= 0 ||
       (input.stagingBatchId && row.staging_batch_id !== input.stagingBatchId) ||
@@ -396,6 +430,24 @@ export function selectStagedReconciliationRows(input: {
     )
       throw new Error(
         `Row ${row.id} is not an eligible ${allowPending ? 'pending' : 'posted/cleared'} ordinary staged selection. Already-finalized, matched and technical rows reject.`
+      )
+    const ledger = calculateSignedLedgerDeltas({
+      type: row.type,
+      amountCentavos: row.amount,
+      currency: row.currency,
+      account: {
+        accountId: input.accountId,
+        currency: input.accountCurrency,
+        accountMode: 'transactional',
+      },
+      status: row.status,
+      ledgerTreatment: row.ledger_treatment,
+      transactionKind: row.transaction_kind,
+      isArchived: row.is_archived,
+    })
+    if (ledger.status === 'rejected' || ledger.status === 'unresolved')
+      throw new Error(
+        `Invalid ledger row ${row.id}: ${ledger.reason}. Use an audited financial correction before settling or finalizing it.`
       )
   }
   return [...selected].sort((a, b) => a.id.localeCompare(b.id))

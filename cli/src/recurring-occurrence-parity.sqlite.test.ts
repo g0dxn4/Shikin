@@ -181,6 +181,51 @@ const dateFormatCases = [
 )
 
 describe.each(['cli', 'native'] as const)('%s recurring occurrence contract', (client) => {
+  it.each([
+    [
+      'UPDATE recurring_rules SET amount = -1',
+      'amountCentavos must be a non-negative safe integer',
+    ],
+    [
+      'UPDATE recurring_rules SET amount = 0.5',
+      'amountCentavos must be a non-negative safe integer',
+    ],
+    [
+      'UPDATE recurring_rules SET amount = 9007199254740992',
+      'amountCentavos must be a non-negative safe integer',
+    ],
+    ["UPDATE recurring_rules SET type = 'refund'", 'Unsupported transaction type: refund'],
+    [
+      "UPDATE accounts SET account_mode = 'hybrid' WHERE id = 'a'",
+      'Unsupported account mode: hybrid',
+    ],
+    [
+      "UPDATE accounts SET currency = 'US-D' WHERE id = 'a'; UPDATE recurring_rules SET currency = 'US-D'",
+      'account.currency must be a 2-10 character asset or currency code',
+    ],
+  ])('refuses unsafe occurrence evidence: %s', async (sql, detail) => {
+    holder.db.pragma('ignore_check_constraints = ON')
+    holder.db.exec(sql)
+    const before = {
+      state: state(),
+      transactions: holder.db.prepare('SELECT * FROM transactions ORDER BY id').all(),
+      rules: holder.db.prepare('SELECT * FROM recurring_rules ORDER BY id').all(),
+      revision: holder.db.prepare('SELECT * FROM app_data_state').all(),
+    }
+    if (client === 'cli')
+      expect(await materialize(client)).toMatchObject({
+        success: false,
+        reason: 'invalid_ledger_evidence',
+        message: expect.stringContaining(detail),
+      })
+    else await expect(materialize(client)).rejects.toThrow(detail)
+    expect({
+      state: state(),
+      transactions: holder.db.prepare('SELECT * FROM transactions ORDER BY id').all(),
+      rules: holder.db.prepare('SELECT * FROM recurring_rules ORDER BY id').all(),
+      revision: holder.db.prepare('SELECT * FROM app_data_state').all(),
+    }).toEqual(before)
+  })
   it.each(dateFormatCases)(
     'preserves parent $frequency dates for $date in $zone',
     async ({ zone, frequency, date, nextDate, dailyDates }) => {

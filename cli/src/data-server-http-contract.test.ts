@@ -495,6 +495,53 @@ describe('data-server authenticated contract', () => {
     })
   })
 
+  it.each([-1, 0.5, 9007199254740992])(
+    'rejects unsafe recurring money %s before any HTTP batch claim',
+    async (amount) => {
+      await withObservedServer(async ({ request }) => {
+        expect(
+          (
+            await request('account', 'db/execute', {
+              sql: "INSERT INTO accounts (id,name,type,currency,balance) VALUES ('a','A','checking','USD',1000)",
+            })
+          ).status
+        ).toBe(200)
+        expect(
+          (
+            await request('rules', 'db/execute', {
+              sql: "INSERT INTO recurring_rules (id,description,amount,currency,type,frequency,next_date,end_date,account_id,active) VALUES ('r1','R1',100,'USD','expense','daily','2026-11-01','2026-11-01','a',1), ('r2','R2',$1,'USD','expense','daily','2026-11-01','2026-11-01','a',1)",
+              params: [amount],
+            })
+          ).status
+        ).toBe(200)
+        const before = await (
+          await request('before', 'db/query', { sql: 'SELECT * FROM app_data_state' })
+        ).json()
+        const response = await request('materialize', 'recurring/materialize', {})
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+          success: false,
+          reason: 'invalid_ledger_evidence',
+          message:
+            'Recurring rule "R2" has invalid ledger evidence: amountCentavos must be a non-negative safe integer. Correct the rule and account evidence before materializing it.',
+        })
+        expect(
+          await (await request('after', 'db/query', { sql: 'SELECT * FROM app_data_state' })).json()
+        ).toEqual(before)
+        expect(
+          await (
+            await request('state', 'db/query', {
+              sql: 'SELECT a.balance,r.id,r.next_date,r.active,(SELECT COUNT(*) FROM transactions) AS count FROM accounts a JOIN recurring_rules r ON r.account_id=a.id ORDER BY r.id',
+            })
+          ).json()
+        ).toEqual([
+          { balance: 1000, id: 'r1', next_date: '2026-11-01', active: 1, count: 0 },
+          { balance: 1000, id: 'r2', next_date: '2026-11-01', active: 1, count: 0 },
+        ])
+      })
+    }
+  )
+
   it.each(['archive-two', 'fractional-anchor'])(
     'pins legacy recurring %s handling at the HTTP boundary',
     async (scenario) => {

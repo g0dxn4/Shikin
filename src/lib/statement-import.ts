@@ -2,6 +2,7 @@ import { withTransaction, type TransactionClient } from '@/lib/database'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
 import { parseStatement, type ParsedTransaction } from '@/lib/statement-parser'
+import { calculateSignedLedgerDeltas } from '@shikin/finance-core'
 import {
   canonicalReviewDecisions,
   existingImportEvidenceFingerprint,
@@ -299,6 +300,25 @@ async function createPlan(
   for (const row of prepared) {
     if (!Number.isSafeInteger(row.amountCentavos) || row.amountCentavos <= 0) {
       throw new Error(`Invalid imported amount for "${row.transaction.description}"`)
+    }
+    const ledger = calculateSignedLedgerDeltas({
+      type: row.transaction.type,
+      amountCentavos: row.amountCentavos,
+      currency: accountCurrency,
+      account: {
+        accountId,
+        currency: accountCurrency,
+        accountMode: account.account_mode ?? 'transactional',
+      },
+      status: importTreatment.status,
+      ledgerTreatment: importTreatment.ledgerTreatment,
+      transactionKind: 'standard',
+      isArchived: 0,
+    })
+    if (ledger.status === 'rejected' || ledger.status === 'unresolved') {
+      throw new Error(
+        `Invalid statement ledger evidence: ${ledger.reason}. Correct the statement or account before importing.`
+      )
     }
   }
   const identities = prepareImportIdentities(

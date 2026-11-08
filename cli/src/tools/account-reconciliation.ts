@@ -1,5 +1,7 @@
+import type { AccountMode } from '@shikin/finance-core'
 import { createHash } from 'node:crypto'
 import {
+  assertReconciliationLedgerAccount,
   assertObservationDate,
   assertReconciliationPeriodCovered,
   datedLedgerQuery,
@@ -100,6 +102,11 @@ function context(
   rows = ledgerRows(account.id),
   storedBalance = account.balance
 ) {
+  assertReconciliationLedgerAccount({
+    accountId: account.id,
+    currency: account.currency,
+    accountMode: (account.account_mode ?? 'transactional') as AccountMode,
+  })
   return planDatedReconciliation({
     rows,
     accountId: account.id,
@@ -115,7 +122,9 @@ export function previewTransactionalAccountBalance(
   observedBalance: number,
   date = today()
 ) {
-  return context(accountFor({ accountId }), date, observedBalance)
+  // Account updates also preview opening provenance for an explicitly requested mode conversion.
+  const account = accountFor({ accountId })
+  return context({ ...account, account_mode: 'transactional' }, date, observedBalance)
 }
 function insertObservation(input: {
   id: string
@@ -551,7 +560,7 @@ function selectedRows(
     rows: ledgerRows(account.id),
     accountId: account.id,
     accountCurrency: account.currency,
-    accountMode: account.account_mode,
+    accountMode: account.account_mode ?? 'transactional',
     transactionIds: input.transactionIds,
     stagingBatchId: input.stagingBatchId,
     allowPending,

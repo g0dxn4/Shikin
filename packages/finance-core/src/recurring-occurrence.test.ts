@@ -29,6 +29,24 @@ const rule: RecurringOccurrenceRule = {
 }
 
 describe('recurring occurrence policy', () => {
+  it.each([
+    [{ amount: -1 }, 'amountCentavos must be a non-negative safe integer'],
+    [{ amount: 0.5 }, 'amountCentavos must be a non-negative safe integer'],
+    [{ amount: 9007199254740992 }, 'amountCentavos must be a non-negative safe integer'],
+    [{ type: 'refund' }, 'Unsupported transaction type: refund'],
+    [{ account_mode: 'hybrid' }, 'Unsupported account mode: hybrid'],
+    [
+      { currency: 'US-D', account_currency: 'US-D' },
+      'account.currency must be a 2-10 character asset or currency code',
+    ],
+  ] as const)('refuses invalid financial shape %j before posting', (patch, message) => {
+    const input = { ...rule, ...patch }
+    expect(validateRecurringOccurrences([input])).toMatchObject({
+      reason: 'invalid_ledger_evidence',
+      detail: message,
+    })
+    expect(() => planRecurringOccurrence(input, rule.next_date, rule.next_date)).toThrow(message)
+  })
   it('plans exact occurrence fields without mutating the rule or supplying clocks and IDs', () => {
     const input = Object.freeze({ ...rule })
     expect(validateRecurringOccurrences([input])).toBeNull()

@@ -33,6 +33,7 @@ import {
   resolveCliFxAcceptance,
   appendCliFxEvidence,
   getBalanceImpact,
+  normalizeNewTransactionStatus,
   addImpact,
   diffBalanceImpacts,
   combineBalanceImpacts,
@@ -684,7 +685,10 @@ export const updateTransaction: ToolDefinition = {
 
       let newAmount = amount !== undefined ? toCentavos(amount) : oldAmountCentavos
       const newType = type || oldType
-      const newStatus = status ?? normalizeTransactionStatus(tx.status)
+      const newStatus =
+        status === undefined || status === tx.status
+          ? normalizeTransactionStatus(tx.status)
+          : normalizeNewTransactionStatus(status)
       const newLedgerTreatment = ledgerTreatment ?? normalizeLedgerTreatment(tx.ledger_treatment)
       const newReportingTreatment =
         reportingTreatment ?? normalizeReportingTreatment(tx.reporting_treatment)
@@ -744,7 +748,10 @@ export const updateTransaction: ToolDefinition = {
           }
         }
 
-        if (sourceCurrency && resolvedAccount.currency !== sourceCurrency) {
+        if (
+          sourceCurrency &&
+          normalizeCurrencyCode(resolvedAccount.currency) !== normalizeCurrencyCode(sourceCurrency)
+        ) {
           return {
             success: false,
             message: crossCurrencyMoveMessage(
@@ -760,7 +767,7 @@ export const updateTransaction: ToolDefinition = {
       const newCurrency = sourceCurrency
       const normalizedInputCurrency = normalizeCurrencyCode(inputCurrency)
       const requestsForeignInput = Boolean(
-        normalizedInputCurrency && normalizedInputCurrency !== newCurrency
+        normalizedInputCurrency && normalizedInputCurrency !== normalizeCurrencyCode(newCurrency)
       )
       if (latestFxEvidence || requestsForeignInput) {
         if (amount === undefined || inputCurrency === undefined || date === undefined) {
@@ -882,7 +889,7 @@ export const updateTransaction: ToolDefinition = {
           updatedTx.amount !== tx.amount)
       )
         throw new Error('Split transactions require explicit split correction.')
-      const oldImpact = getBalanceImpact(tx)
+      const oldImpact = getBalanceImpact(tx, true)
       if (!oldImpact.success) {
         return { success: false, message: oldImpact.message }
       }
@@ -1064,7 +1071,7 @@ export const deleteTransaction: ToolDefinition = {
       const financialFailure = protectedFinancialTransactionFailure(tx, 'delete', false)
       if (financialFailure) return financialFailure
 
-      const balanceImpact = getBalanceImpact(tx)
+      const balanceImpact = getBalanceImpact(tx, true)
       if (!balanceImpact.success) {
         return { success: false, message: balanceImpact.message }
       }
@@ -1265,22 +1272,18 @@ export const matchTransferTransactions: ToolDefinition = {
         matched_transaction_id: sourceTransaction.id,
         is_archived: 1,
       }
-      const sourceBeforeImpact = getBalanceImpact(sourceTransaction)
-      const mirrorBeforeImpact = getBalanceImpact(mirrorTransaction)
+      const sourceBeforeImpact = getBalanceImpact(sourceTransaction, true)
+      const mirrorBeforeImpact = getBalanceImpact(mirrorTransaction, true)
       const sourceAfterImpact = getBalanceImpact(transfer)
       const mirrorAfterImpact = getBalanceImpact(archivedMirror)
-      if (
-        !sourceBeforeImpact.success ||
-        !mirrorBeforeImpact.success ||
-        !sourceAfterImpact.success ||
-        !mirrorAfterImpact.success
-      ) {
-        return {
-          success: false as const,
-          reason: 'balance_impact_invalid' as const,
-          message: 'The transfer pair has invalid balance-impact data.',
-        }
-      }
+      if (!sourceBeforeImpact.success)
+        return { ...sourceBeforeImpact, reason: 'balance_impact_invalid' as const }
+      if (!mirrorBeforeImpact.success)
+        return { ...mirrorBeforeImpact, reason: 'balance_impact_invalid' as const }
+      if (!sourceAfterImpact.success)
+        return { ...sourceAfterImpact, reason: 'balance_impact_invalid' as const }
+      if (!mirrorAfterImpact.success)
+        return { ...mirrorAfterImpact, reason: 'balance_impact_invalid' as const }
       const oldImpacts = combineBalanceImpacts(
         sourceBeforeImpact.impacts,
         mirrorBeforeImpact.impacts
@@ -1550,7 +1553,7 @@ export const unmatchTransferTransactions: ToolDefinition = {
         [restoredSource, 1],
         [restoredMirror, 1],
       ] as const) {
-        const impact = getBalanceImpact(row)
+        const impact = getBalanceImpact(row, true)
         if (!impact.success) return impact
         for (const [accountId, amount] of impact.impacts) {
           addImpact(deltas, accountId, amount * multiplier)
@@ -2025,7 +2028,7 @@ export const resolvePlaceholderTransaction: ToolDefinition = {
         resolved_at: dayjs().toISOString(),
         resolved_by_transaction_id: before.id,
       }
-      const oldImpact = getBalanceImpact(before)
+      const oldImpact = getBalanceImpact(before, true)
       if (!oldImpact.success) return { success: false, message: oldImpact.message }
       const newImpact = getBalanceImpact(after)
       if (!newImpact.success) return { success: false, message: newImpact.message }
@@ -2178,7 +2181,7 @@ export const splitPlaceholderTransaction: ToolDefinition = {
         placeholder_status: 'split',
         resolved_at: dayjs().toISOString(),
       }
-      const oldImpact = getBalanceImpact(before)
+      const oldImpact = getBalanceImpact(before, true)
       if (!oldImpact.success) return { success: false, message: oldImpact.message }
       const afterImpact = getBalanceImpact(after)
       if (!afterImpact.success) return { success: false, message: afterImpact.message }

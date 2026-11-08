@@ -5,6 +5,7 @@ import {
   transaction,
   generateId,
   boundedText,
+  assertSingleRowUpdated,
   writeAuditLog,
   type ToolDefinition,
 } from './shared.js'
@@ -43,12 +44,6 @@ type ReviewSuggestionRow = {
   reviewed_at: string | null
   category_name?: string | null
   subcategory_name?: string | null
-}
-
-function assertSingleRowUpdated(result: { rowsAffected: number }, message: string) {
-  if (result.rowsAffected !== 1) {
-    throw new Error(message)
-  }
 }
 
 function reviewSuggestionSnapshot(suggestion: ReviewSuggestionRow) {

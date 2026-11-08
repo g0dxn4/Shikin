@@ -13,6 +13,7 @@ import {
   currencyCode,
   resolveAccountId,
   normalizeCurrencyCode,
+  assertSingleRowUpdated,
   writeAuditLog,
   type ToolDefinition,
 } from './shared.js'
@@ -171,10 +172,6 @@ function accountCurrencyFailure(currency: string, accountCurrency: string | null
 function statusForAmounts(amount: number, receivedAmount: number): ReceivableStatus {
   if (receivedAmount >= amount) return 'received'
   return receivedAmount > 0 ? 'partial' : 'open'
-}
-
-function assertSingleRowUpdated(result: { rowsAffected: number }, message: string) {
-  if (result.rowsAffected !== 1) throw new Error(message)
 }
 
 const manageReceivable: ToolDefinition = {

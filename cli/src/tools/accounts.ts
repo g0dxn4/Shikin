@@ -30,6 +30,7 @@ import {
   resolveAccountId,
   setAccountAlias,
   validateAccountAlias,
+  assertSingleRowUpdated,
   writeAuditLog,
   type ToolDefinition,
 } from './shared.js'
@@ -147,12 +148,6 @@ function archivedAccountResult(account: AccountRow) {
   return {
     success: false as const,
     message: `Account "${account.name}" (${account.id}) is archived. Unarchive it before using it for new writes.`,
-  }
-}
-
-function assertSingleRowUpdated(result: { rowsAffected: number }, message: string) {
-  if (result.rowsAffected !== 1) {
-    throw new Error(message)
   }
 }
 

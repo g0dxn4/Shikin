@@ -20,6 +20,7 @@ import {
   getAccountAliases,
   normalizeAccountAlias,
   resolveCategoryId,
+  assertSingleRowUpdated,
   writeAuditLog,
   type ToolDefinition,
 } from './shared.js'
@@ -357,12 +358,6 @@ function buildStatementPaymentImpact(input: {
       paymentStatus: effectiveStatementStatus(updatedStatement),
       dueDate: input.statement.due_date,
     },
-  }
-}
-
-function assertSingleRowUpdated(result: { rowsAffected: number }, message: string) {
-  if (result.rowsAffected !== 1) {
-    throw new Error(message)
   }
 }
 

@@ -17,6 +17,7 @@ import {
   unknownTransactionCurrencyFailure,
   normalizeCurrencyCode,
   resolveCategoryId,
+  assertSingleRowUpdated,
   writeAuditLog,
   type ToolDefinition,
 } from './shared.js'
@@ -118,10 +119,6 @@ function archivedBalanceMutationFailure(accountIds: string[]) {
     accountIds: protectedAccounts.map((account) => account.id),
     message: `Cannot mutate balances for archived account${protectedAccounts.length === 1 ? '' : 's'} ${archivedLabels.join(', ')}. Unarchive affected accounts before editing or deleting balance-affecting transactions.`,
   }
-}
-
-function assertSingleRowUpdated(result: { rowsAffected: number }, message: string) {
-  if (result.rowsAffected !== 1) throw new Error(message)
 }
 
 function publicTransactionSnapshot(tx: TransactionRow) {

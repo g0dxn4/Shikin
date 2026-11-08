@@ -24,6 +24,7 @@ import {
   normalizeCurrencyCode,
   isAccountWriteEligible,
   resolveAccountId,
+  assertSingleRowUpdated,
   writeAuditLog,
   type ToolDefinition,
 } from './shared.js'
@@ -121,12 +122,6 @@ function allocationSnapshot(allocation: CashflowAllocationRow) {
     reversesAllocationId: allocation.reverses_allocation_id ?? null,
     replacesAllocationId: allocation.replaces_allocation_id ?? null,
     createdAt: allocation.created_at ?? null,
-  }
-}
-
-function assertSingleRowUpdated(result: { rowsAffected: number }, message: string) {
-  if (result.rowsAffected !== 1) {
-    throw new Error(message)
   }
 }
 

@@ -19,6 +19,7 @@ All notable changes to Shikin are documented in this file.
 - The dashboard `NetWorthPeriod` type lives in `overview-account-comparison-helpers.ts`, removing the only file-level import cycle in the app (type-only). No runtime change.
 - Frontend transaction evidence reads, capacity guards, and correction auditing live in `src/lib/transaction-evidence.ts`. Split and card-payment workflows keep their own read schedules.
 - Overview chart tick budgets and locale handling come from one policy module (`overview-chart-policy.ts`) shared by the three overview charts. Chart output is unchanged.
+- Native (desktop) database schema migration and readiness helpers live in `src/lib/tauri-database-schema.ts`, separate from the connection, queue, and restore lifecycle in `src/lib/database.ts`.
 
 ## [1.2.1] - 2026-10-17
 

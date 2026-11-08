@@ -95,12 +95,14 @@ function reconciliation(db: Database.Database, id: string, mode = 'legacy_batch'
 }
 async function mockNative(db: Database.Database, fail: boolean | string = false) {
   vi.resetModules()
+  const trace: unknown[][] = []
   vi.doMock('@/lib/runtime', () => ({ isTauri: true }))
   vi.doMock('@tauri-apps/api/path', () => ({
     appDataDir: async () => '/synthetic',
     join: async (...parts: string[]) => parts.join('/'),
   }))
   const execute = async (sql: string, params: unknown[] = []) => {
+    trace.push(['execute', sql, params])
     if (
       fail &&
       sql.includes(
@@ -116,6 +118,7 @@ async function mockNative(db: Database.Database, fail: boolean | string = false)
       command: string,
       args: { statement?: { query: string; values: unknown[] }; localInstanceId?: string }
     ) => {
+      trace.push(['invoke', command, args])
       if (command === 'shikin_db_tx_begin') return db.exec('BEGIN IMMEDIATE')
       if (command === 'shikin_db_tx_commit') return db.exec('COMMIT')
       if (command === 'shikin_db_tx_rollback') return db.exec('ROLLBACK')
@@ -130,14 +133,26 @@ async function mockNative(db: Database.Database, fail: boolean | string = false)
   vi.doMock('@tauri-apps/api/core', () => ({ invoke }))
   vi.doMock('@tauri-apps/plugin-sql', () => ({
     default: {
-      load: async () => ({
-        select: async (sql: string, params: unknown[] = []) => db.prepare(sql).all(...params),
-        execute,
-        close: async () => {},
-      }),
+      load: async () => {
+        trace.push(['load'])
+        return {
+          select: async (sql: string, params: unknown[] = []) => {
+            trace.push(['select', sql, params])
+            return db.prepare(sql).all(...params)
+          },
+          execute,
+          close: async () => {
+            trace.push(['close'])
+          },
+        }
+      },
     },
   }))
-  return { api: await import(/* @vite-ignore */ ['../../src', 'lib/database'].join('/')), invoke }
+  return {
+    api: await import(/* @vite-ignore */ ['../../src', 'lib/database'].join('/')),
+    invoke,
+    trace,
+  }
 }
 afterEach(() => {
   for (const db of databases.splice(0)) if (db.open) db.close()
@@ -497,6 +512,59 @@ describe('021 backend remediation foundation', () => {
       expect(commands.at(-1)).toBe(fail ? 'shikin_db_tx_rollback' : 'initialize_runtime_identity')
     }
   )
+
+  it('validates current native 024 without migration writes or persisted changes', async () => {
+    const db = database()
+    runHostedTestMigrations(db)
+    legacyEvidence(db)
+    const before = snapshot(db)
+    const schema = rows(db, 'SELECT * FROM sqlite_master ORDER BY name')
+    const { api, trace } = await mockNative(db)
+    await api.getDb()
+    expect(trace.filter(([operation]) => operation === 'execute')).toEqual([
+      ['execute', 'PRAGMA foreign_keys = ON', []],
+    ])
+    expect(trace.slice(0, 4)).toEqual([
+      ['load'],
+      ['execute', 'PRAGMA foreign_keys = ON', []],
+      [
+        'select',
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_migrations'",
+        [],
+      ],
+      ['select', 'SELECT id, name FROM _migrations', []],
+    ])
+    expect(trace.at(-1)?.slice(0, 2)).toEqual(['invoke', 'initialize_runtime_identity'])
+    expect(snapshot(db)).toEqual(before)
+    expect(rows(db, 'SELECT * FROM sqlite_master ORDER BY name')).toEqual(schema)
+  })
+
+  it('finishes the pre-019 path on the loaded pool before identity is initialized', async () => {
+    const db = database()
+    runHostedTestMigrations(db, 19)
+    db.exec('DELETE FROM _migrations WHERE id = 19')
+    const { api, trace } = await mockNative(db)
+    await api.getDb()
+    const boundary = trace
+      .filter(
+        ([operation, command]) =>
+          operation === 'invoke' &&
+          command !== 'shikin_db_tx_query' &&
+          command !== 'shikin_db_tx_execute'
+      )
+      .map(([, command]) => command)
+    expect(boundary).toEqual([
+      'shikin_db_tx_begin',
+      'shikin_db_tx_commit',
+      'initialize_runtime_identity',
+    ])
+    expect(rows(db, 'SELECT id FROM _migrations ORDER BY id')).toEqual(
+      [1, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24].map((id) => ({
+        id,
+      }))
+    )
+    assertIntegrity(db)
+  })
 
   it('initializes fresh native schema using complete trigger statements', async () => {
     const db = database()

@@ -54,6 +54,7 @@ afterEach(() => {
   vi.doUnmock('@tauri-apps/api/core')
   vi.doUnmock('@tauri-apps/api/path')
   vi.doUnmock('@tauri-apps/plugin-sql')
+  vi.doUnmock('@tauri-apps/plugin-fs')
   vi.resetModules()
 })
 
@@ -732,6 +733,192 @@ describe('database browser transactions', () => {
       'runInTransaction() is no longer supported.'
     )
   })
+})
+
+describe('database Tauri initialization and restore', () => {
+  // Reset modules and install each native mock before importing the singleton facade.
+  it('loads once and does not publish either first read before readiness and identity finish', async () => {
+    const { invoke, loadDatabase, tauriDatabase } = mockTauriDatabaseModules()
+    const events: string[] = []
+    const loaded = deferred<typeof tauriDatabase>()
+    const loading = deferred<void>()
+    const identityStarted = deferred<void>()
+    const identity = deferred<void>()
+    const select = tauriDatabase.select.getMockImplementation()!
+    loadDatabase.mockImplementation(async () => {
+      events.push('load')
+      loading.resolve()
+      return loaded.promise
+    })
+    tauriDatabase.execute.mockImplementation(async () => {
+      events.push('foreign_keys')
+      return { rowsAffected: 0, lastInsertId: 0 }
+    })
+    tauriDatabase.select.mockImplementation(async (sql) => {
+      if (sql.includes("name = '_migrations'")) events.push('migrations')
+      if (sql === 'SELECT first' || sql === 'SELECT second') events.push(sql)
+      return select(sql)
+    })
+    invoke.mockImplementation(async (command) => {
+      expect(command).toBe('initialize_runtime_identity')
+      events.push('identity')
+      identityStarted.resolve()
+      await identity.promise
+    })
+    const api = await import('@/lib/database')
+    const first = api.query('SELECT first')
+    const second = api.query('SELECT second')
+    const published = api.getDb().then((db) => {
+      events.push('publish')
+      return db
+    })
+    await loading.promise
+    expect(events).toEqual(['load'])
+    loaded.resolve(tauriDatabase)
+    await identityStarted.promise
+    expect(events).toEqual(['load', 'foreign_keys', 'migrations', 'identity'])
+    expect(loadDatabase).toHaveBeenCalledTimes(1)
+    identity.resolve()
+    await expect(published).resolves.toBe(tauriDatabase)
+    await expect(first).resolves.toEqual([])
+    await expect(second).resolves.toEqual([])
+    expect(events).toEqual([
+      'load',
+      'foreign_keys',
+      'migrations',
+      'identity',
+      'SELECT first',
+      'publish',
+      'SELECT second',
+    ])
+    expect(tauriDatabase.execute.mock.calls).toEqual([['PRAGMA foreign_keys = ON']])
+    expect(invoke).toHaveBeenCalledTimes(1)
+  })
+
+  it('closes a failed initialization, preserves its error, and retries the loaded pool', async () => {
+    const { invoke, loadDatabase, tauriDatabase } = mockTauriDatabaseModules()
+    const failure = new Error('migration read failed')
+    tauriDatabase.select.mockRejectedValueOnce(failure)
+    tauriDatabase.close.mockRejectedValueOnce(new Error('close failed'))
+    const api = await import('@/lib/database')
+    await expect(api.getDb()).rejects.toBe(failure)
+    expect(tauriDatabase.close).toHaveBeenCalledTimes(1)
+    expect(invoke).not.toHaveBeenCalled()
+    await expect(api.getDb()).resolves.toBe(tauriDatabase)
+    expect(loadDatabase).toHaveBeenCalledTimes(2)
+    expect(tauriDatabase.execute.mock.calls).toEqual([
+      ['PRAGMA foreign_keys = ON'],
+      ['PRAGMA foreign_keys = ON'],
+    ])
+    expect(invoke.mock.calls.map(([command]) => command)).toEqual(['initialize_runtime_identity'])
+  })
+
+  it.each(['success', 'candidate-failure', 'rollback-failure', 'restore-failure'] as const)(
+    'preserves restore initialization, cleanup, and error precedence for %s',
+    async (scenario) => {
+      const { invoke, loadDatabase, tauriDatabase } = mockTauriDatabaseModules()
+      const events: string[] = []
+      const candidateFailure = new Error('candidate initialization failed')
+      const rollbackFailure = new Error('rollback initialization failed')
+      const restoreFailure = new Error('native restore failed')
+      const select = tauriDatabase.select.getMockImplementation()!
+      let generation = 0
+      let restoring = false
+      vi.spyOn(Date, 'now').mockReturnValue(1700000000000)
+      const tempPath = '/tmp/shikin-test/shikin.db.import-check-1700000000000'
+      const files = new Set<string>()
+      const writeFile = vi.fn(async (path: string) => {
+        events.push('write')
+        for (const suffix of ['', '-wal', '-shm', '-journal']) files.add(`${path}${suffix}`)
+      })
+      const remove = vi.fn(async (path: string) => {
+        events.push(`remove:${path.slice(tempPath.length) || 'candidate'}`)
+        files.delete(path)
+      })
+      vi.doMock('@tauri-apps/plugin-fs', () => ({
+        exists: async (path: string) => files.has(path),
+        writeFile,
+        remove,
+      }))
+      loadDatabase.mockImplementation(async () => {
+        generation += 1
+        events.push(`load:${generation}`)
+        return tauriDatabase
+      })
+      tauriDatabase.execute.mockImplementation(async () => {
+        events.push(`foreign_keys:${generation}`)
+        return { rowsAffected: 0, lastInsertId: 0 }
+      })
+      tauriDatabase.select.mockImplementation(async (sql) => {
+        if (sql.includes("name = '_migrations'")) {
+          events.push(`migrations:${generation}`)
+          if (generation === 2 && scenario !== 'success' && scenario !== 'restore-failure')
+            throw candidateFailure
+          if (generation === 3 && scenario === 'rollback-failure') throw rollbackFailure
+        }
+        return select(sql)
+      })
+      tauriDatabase.close.mockImplementation(async () => {
+        events.push(`close:${generation}`)
+      })
+      invoke.mockImplementation(async (command, args) => {
+        if (command === 'initialize_runtime_identity') {
+          events.push(`identity:${generation}`)
+          return args.localInstanceId
+        }
+        expect(command).toBe('shikin_db_restore_snapshot')
+        events.push(args.candidatePath === tempPath ? 'restore:candidate' : 'restore:rollback')
+        if (scenario === 'restore-failure') throw restoreFailure
+        restoring = true
+        return { rollbackPath: '/synthetic/rollback.db' }
+      })
+      const api = await import('@/lib/database')
+      await api.getDb()
+      events.length = 0
+      const bytes = new TextEncoder().encode('SQLite format 3\0synthetic')
+      const restored = api.importDatabaseSnapshot(bytes)
+      if (scenario === 'success') await expect(restored).resolves.toBeUndefined()
+      else if (scenario === 'candidate-failure')
+        await expect(restored).rejects.toBe(candidateFailure)
+      else if (scenario === 'restore-failure') await expect(restored).rejects.toBe(restoreFailure)
+      else {
+        await expect(restored).rejects.toMatchObject({
+          message:
+            'Database import failed and rollback could not be completed. Import error: candidate initialization failed. Rollback error: rollback initialization failed',
+          cause: rollbackFailure,
+        })
+      }
+      expect(restoring).toBe(scenario !== 'restore-failure')
+      expect(events).toEqual([
+        'write',
+        'close:1',
+        'restore:candidate',
+        'load:2',
+        'foreign_keys:2',
+        'migrations:2',
+        ...(scenario === 'success' || scenario === 'restore-failure'
+          ? ['identity:2']
+          : [
+              'close:2',
+              'restore:rollback',
+              'load:3',
+              'foreign_keys:3',
+              'migrations:3',
+              scenario === 'rollback-failure' ? 'close:3' : 'identity:3',
+            ]),
+        'remove:candidate',
+        'remove:-wal',
+        'remove:-shm',
+        'remove:-journal',
+      ])
+      expect(writeFile).toHaveBeenCalledWith(tempPath, bytes, { mode: 0o600 })
+      expect(files.size).toBe(0)
+      if (scenario !== 'rollback-failure') {
+        await expect(api.getDb()).resolves.toBe(tauriDatabase)
+        expect(loadDatabase).toHaveBeenCalledTimes(scenario === 'candidate-failure' ? 3 : 2)
+      }
+    }
+  )
 })
 
 describe('database Tauri transactions', () => {

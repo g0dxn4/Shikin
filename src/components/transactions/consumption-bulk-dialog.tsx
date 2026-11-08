@@ -22,23 +22,8 @@ import {
   MAX_TARGETS,
   treatmentKey,
   useConsumptionBulkSession,
+  type ConsumptionBulkDialogProps,
 } from './use-consumption-bulk-session'
-
-export interface ConsumptionBulkCandidate {
-  id: string
-  description: string
-  date: string
-  currency: string
-  type: string
-  amount: number
-}
-
-export interface ConsumptionBulkDialogProps {
-  open: boolean
-  candidates: readonly ConsumptionBulkCandidate[]
-  onOpenChange: (open: boolean) => void
-  onChanged?: () => void
-}
 
 const currencyMetadata = Intl as typeof Intl & {
   supportedValuesOf?: (key: 'currency') => string[]

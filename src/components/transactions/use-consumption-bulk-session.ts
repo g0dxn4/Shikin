@@ -18,10 +18,22 @@ import {
   type ConsumptionPurchaseOption,
 } from '@/lib/consumption-service'
 import { getErrorMessage } from '@/lib/errors'
-import type {
-  ConsumptionBulkCandidate,
-  ConsumptionBulkDialogProps,
-} from './consumption-bulk-dialog'
+
+export interface ConsumptionBulkCandidate {
+  id: string
+  description: string
+  date: string
+  currency: string
+  type: string
+  amount: number
+}
+
+export interface ConsumptionBulkDialogProps {
+  open: boolean
+  candidates: readonly ConsumptionBulkCandidate[]
+  onOpenChange: (open: boolean) => void
+  onChanged?: () => void
+}
 
 export const MAX_TARGETS = 100
 

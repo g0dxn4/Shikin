@@ -4,7 +4,8 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ClassificationCatalogEntry } from '@shikin/finance-core'
 import esConsumption from '@/i18n/locales/es/consumption.json'
-import { ConsumptionBulkDialog, type ConsumptionBulkCandidate } from '../consumption-bulk-dialog'
+import { ConsumptionBulkDialog } from '../consumption-bulk-dialog'
+import type { ConsumptionBulkCandidate } from '../use-consumption-bulk-session'
 import {
   applyConsumptionClassifications,
   listClassificationTypes,

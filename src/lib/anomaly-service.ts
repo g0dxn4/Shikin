@@ -1,10 +1,7 @@
+import { CASH_FLOW_SQL } from '@shikin/finance-core'
 import { query } from '@/lib/database'
 import { formatMoney, fromCentavos } from '@/lib/money'
-import {
-  assertReportingReadComplete,
-  CASH_FLOW_SQL,
-  CATEGORY_ALLOCATION_CTE,
-} from '@/lib/reporting-read'
+import { assertReportingReadComplete, CATEGORY_ALLOCATION_CTE } from '@/lib/reporting-read'
 import { generateId } from '@/lib/ulid'
 import dayjs from 'dayjs'
 

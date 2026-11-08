@@ -5,6 +5,18 @@ import {
   type TransactionKind,
 } from './ledger.js'
 
+// ECMAScript trim whitespace, matching posting-status normalization and currency validation.
+export const SQL_WHITESPACE =
+  'char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)'
+
+/** Fixed alias only; mirrors getCashFlowEligibility, including legacy nulls. */
+export const CASH_FLOW_SQL = `t.type IN ('income', 'expense')
+  AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
+  AND COALESCE(t.ledger_treatment, 'normal') = 'normal'
+  AND COALESCE(t.transaction_kind, 'standard') = 'standard'
+  AND COALESCE(t.is_archived, 0) = 0
+  AND COALESCE(NULLIF(LOWER(TRIM(t.status, ${SQL_WHITESPACE})), ''), 'posted') IN ('posted', 'cleared')`
+
 export type ReportingTreatment = 'normal' | 'exclude_from_cashflow'
 
 export interface CashFlowCandidate {
@@ -84,6 +96,48 @@ export function getCashFlowEligibility(candidate: CashFlowCandidate): CashFlowEl
 
 export function isCashFlowEligible(candidate: CashFlowCandidate): boolean {
   return getCashFlowEligibility(candidate).eligible
+}
+
+export interface CashFlowIntegrityRow {
+  id: string
+  type: string
+  amount: number
+  currency: string | null
+  split_count: number
+  split_total: number | null
+  invalid_splits: number
+}
+
+export interface CashFlowIntegrityFailure {
+  reason: 'invalid_currency_data' | 'invalid_category_allocations' | 'unsafe_cashflow_total'
+  transactionId: string
+}
+
+/** Validate already-loaded eligible rows in input order before publishing complete totals. */
+export function getCashFlowIntegrityFailure(
+  rows: readonly CashFlowIntegrityRow[]
+): CashFlowIntegrityFailure | null {
+  const totals = new Map<string, number>()
+  for (const row of rows) {
+    const currency = row.currency?.trim().toUpperCase()
+    if (!currency || !/^[A-Z]{3}$/.test(currency)) {
+      return { reason: 'invalid_currency_data', transactionId: row.id }
+    }
+    if (
+      !Number.isSafeInteger(row.amount) ||
+      row.amount < 0 ||
+      (row.split_count > 0 && (row.invalid_splits > 0 || row.split_total !== row.amount))
+    ) {
+      return { reason: 'invalid_category_allocations', transactionId: row.id }
+    }
+    const key = `${currency}:${row.type}`
+    const total = (totals.get(key) ?? 0) + row.amount
+    if (!Number.isSafeInteger(total)) {
+      return { reason: 'unsafe_cashflow_total', transactionId: row.id }
+    }
+    totals.set(key, total)
+  }
+  return null
 }
 
 function isTransactionType(value: unknown): value is 'income' | 'expense' | 'transfer' {

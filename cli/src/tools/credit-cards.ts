@@ -1,3 +1,4 @@
+import { CASH_FLOW_SQL } from '@shikin/finance-core'
 import {
   z,
   query,
@@ -22,7 +23,7 @@ import {
   writeAuditLog,
   type ToolDefinition,
 } from './shared.js'
-import { CASH_FLOW_SQL, reportingReadFailure } from '../reporting-read.js'
+import { reportingReadFailure } from '../reporting-read.js'
 import {
   findTransactionDuplicate,
   transactionDuplicateReason,

@@ -1,10 +1,11 @@
+import { CASH_FLOW_SQL } from '@shikin/finance-core'
 import {
   apportionConvertedAmount,
   convertDatedAmounts,
   type DatedExchangeRate,
 } from '@shikin/finance-core/fx'
 import { query } from '@/lib/database'
-import { assertReportingReadComplete, CASH_FLOW_SQL } from '@/lib/reporting-read'
+import { assertReportingReadComplete } from '@/lib/reporting-read'
 
 interface SpendingAllocationRow {
   transaction_id: string

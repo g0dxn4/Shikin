@@ -1,3 +1,4 @@
+import { CASH_FLOW_SQL } from '@shikin/finance-core'
 import {
   dayjs,
   query,
@@ -11,12 +12,7 @@ import {
   type CategorySpendRow,
   type AnomalySeverity,
 } from './shared.js'
-import {
-  CASH_FLOW_SQL,
-  REPORTING_CTE,
-  reportingReadFailure,
-  readConvertedCashFlow,
-} from '../reporting-read.js'
+import { REPORTING_CTE, reportingReadFailure, readConvertedCashFlow } from '../reporting-read.js'
 
 export async function detectSpendingAnomaliesSummary(largeTransactionThreshold: number) {
   const thresholdCentavos = Math.round(largeTransactionThreshold * 100)

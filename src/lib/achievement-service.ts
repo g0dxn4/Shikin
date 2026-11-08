@@ -1,9 +1,6 @@
+import { CASH_FLOW_SQL } from '@shikin/finance-core'
 import { query } from '@/lib/database'
-import {
-  assertReportingReadComplete,
-  CASH_FLOW_SQL,
-  CATEGORY_ALLOCATION_CTE,
-} from '@/lib/reporting-read'
+import { assertReportingReadComplete, CATEGORY_ALLOCATION_CTE } from '@/lib/reporting-read'
 import { load } from '@/lib/storage'
 import {
   captureReportingContext,

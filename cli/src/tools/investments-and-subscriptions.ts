@@ -37,7 +37,7 @@ import {
   rowToHoldingInput,
   type InvestmentValuationRow,
 } from '../valuation-read.js'
-import { CASH_FLOW_SQL } from '../reporting-read.js'
+import { CASH_FLOW_SQL } from '@shikin/finance-core'
 import { getCreditCardBillEntries, type CreditCardBillEntry } from './credit-cards.js'
 
 const INVESTMENT_TYPES = [

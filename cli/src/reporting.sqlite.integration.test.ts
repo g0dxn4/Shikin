@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
 import { runHostedTestMigrations } from './backend-foundation-test-schema.js'
-import { isCashFlowEligible, type CashFlowCandidate } from '@shikin/finance-core'
+import { CASH_FLOW_SQL, isCashFlowEligible, type CashFlowCandidate } from '@shikin/finance-core'
 
 // The actual readers run against SQLite, but never initialize app storage or notebooks.
 const state = vi.hoisted(() => ({ db: null as Database.Database | null }))
@@ -30,7 +30,7 @@ import { analyticsTools } from './tools/analytics.js'
 import { budgetsandnetworthTools } from './tools/budgets-and-net-worth.js'
 import { auditAndContextTools } from './tools/audit-and-context.js'
 import { financialInsightsTools } from './tools/financial-insights.js'
-import { CASH_FLOW_SQL } from './reporting-read.js'
+import { reportingReadFailure } from './reporting-read.js'
 
 const tools = [
   ...transactionsTools,
@@ -225,6 +225,48 @@ describe('gross reporting cross-reader SQLite parity', () => {
       success: false,
       complete: false,
       reason: 'budget_currency_conversion_required',
+    })
+  })
+
+  it.each([
+    {
+      name: 'currency before an invalid amount on the same first row',
+      sql: "UPDATE transactions SET currency = '', amount = 9007199254740992 WHERE id = 'z-first'",
+      reason: 'invalid_currency_data',
+      transactionId: 'z-first',
+    },
+    {
+      name: 'the first invalid allocation before a later invalid currency',
+      sql: "UPDATE transactions SET amount = -1 WHERE id = 'z-first'; UPDATE transactions SET currency = '' WHERE id = 'a-later'",
+      reason: 'invalid_category_allocations',
+      transactionId: 'z-first',
+    },
+    {
+      name: 'invalid splits before overflow on the same row and later invalid currency',
+      sql: "INSERT INTO transaction_splits (id, transaction_id, category_id, amount) VALUES ('bad-split', 'm-second', 'food', 2); UPDATE transactions SET currency = '' WHERE id = 'a-later'",
+      reason: 'invalid_category_allocations',
+      transactionId: 'm-second',
+    },
+    {
+      name: 'the first overflowing row before a later invalid currency',
+      sql: "UPDATE transactions SET currency = '' WHERE id = 'a-later'",
+      reason: 'unsafe_cashflow_total',
+      transactionId: 'm-second',
+    },
+  ])('preserves first-failure precedence: $name', ({ sql, reason, transactionId }) => {
+    state.db!.exec('DELETE FROM transaction_splits; DELETE FROM transactions')
+    expense('z-first', Number.MAX_SAFE_INTEGER)
+    expense('m-second', 1)
+    expense('a-later', 1)
+    state.db!.exec(sql)
+
+    expect(reportingReadFailure('2026-06-01', '2026-06-30')).toEqual({
+      success: false,
+      complete: false,
+      basis: 'gross_cashflow',
+      reason,
+      transactionIds: [transactionId],
+      message: `Gross cash-flow report is incomplete: transaction ${transactionId} has invalid currency, centavo totals or category allocations. No partial totals are reported.`,
     })
   })
 

@@ -146,6 +146,47 @@ it('validates an all-time upper bound without rejecting future or omitting old i
   await expect(assertReportingReadComplete(undefined, '2026-06-18')).resolves.toBeUndefined()
 })
 
+it.each([
+  {
+    name: 'currency before an invalid amount on the same first row',
+    sql: "UPDATE transactions SET currency = '', amount = 9007199254740992 WHERE id = 'z-first'",
+    reason: 'invalid_currency_data',
+    transactionId: 'z-first',
+  },
+  {
+    name: 'the first invalid allocation before a later invalid currency',
+    sql: "UPDATE transactions SET amount = -1 WHERE id = 'z-first'; UPDATE transactions SET currency = '' WHERE id = 'a-later'",
+    reason: 'invalid_category_allocations',
+    transactionId: 'z-first',
+  },
+  {
+    name: 'invalid splits before overflow on the same row and later invalid currency',
+    sql: "INSERT INTO transaction_splits (id, transaction_id, amount) VALUES ('bad-split', 'm-second', 2); UPDATE transactions SET currency = '' WHERE id = 'a-later'",
+    reason: 'invalid_category_allocations',
+    transactionId: 'm-second',
+  },
+  {
+    name: 'the first overflowing row before a later invalid currency',
+    sql: "UPDATE transactions SET currency = '' WHERE id = 'a-later'",
+    reason: 'unsafe_cashflow_total',
+    transactionId: 'm-second',
+  },
+])('preserves first-failure precedence: $name', async ({ sql, reason, transactionId }) => {
+  state.db!.exec(`DELETE FROM transaction_splits; DELETE FROM transactions;
+    INSERT INTO transactions (id, type, amount, currency, date) VALUES
+      ('z-first', 'expense', 9007199254740991, 'USD', '2026-06-15'),
+      ('m-second', 'expense', 1, 'USD', '2026-06-15'),
+      ('a-later', 'expense', 1, 'USD', '2026-06-15');`)
+  state.db!.exec(sql)
+
+  await expect(assertReportingReadComplete('2026-06-01', '2026-06-30')).rejects.toMatchObject({
+    name: 'ReportingReadError',
+    reason,
+    transactionIds: [transactionId],
+    message: `Financial reporting is unavailable because transaction ${transactionId} contains invalid currency, centavo totals, or category allocations.`,
+  })
+})
+
 it('actual frontend validation withholds malformed split evidence', async () => {
   state.db!.exec("UPDATE transaction_splits SET amount = 400 WHERE id = 'food-split'")
   await expect(assertReportingReadComplete('2026-06-01', '2026-06-30')).rejects.toMatchObject({

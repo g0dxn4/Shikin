@@ -8,6 +8,7 @@ All notable changes to Shikin are documented in this file.
 
 - Current database schema metadata (migration names, version, readiness columns) now has a single owner in finance-core, shared by the CLI, desktop/browser adapter, and data bridge. Historical migration vocabularies are pinned. No schema, migration output, or restore behavior changed.
 - Persisted import-review evidence rules (fingerprint material, same-source identity, decision matching) are shared from finance-core by the CLI importer and in-app statement import. Stored decisions remain compatible across both.
+- Gross cash-flow eligibility SQL and report integrity validation are defined once in finance-core reporting. CLI and app report adapters keep their own queries and messages.
 
 ## [1.2.1] - 2026-10-17
 

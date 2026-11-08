@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/database', () => ({ query: vi.fn() }))
 vi.mock('@/lib/reporting-read', () => ({
-  CASH_FLOW_SQL: "t.type IN ('income', 'expense')",
   assertReportingReadComplete: vi.fn(async () => {}),
 }))
 

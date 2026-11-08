@@ -1,3 +1,4 @@
+import { CASH_FLOW_SQL } from '@shikin/finance-core'
 import {
   dayjs,
   query,
@@ -8,7 +9,7 @@ import {
   type SubscriptionBillingCycle,
 } from './shared.js'
 import { readCurrentAmounts } from '../dated-read.js'
-import { CASH_FLOW_SQL, reportingReadFailure, readConvertedCashFlow } from '../reporting-read.js'
+import { reportingReadFailure, readConvertedCashFlow } from '../reporting-read.js'
 
 export async function generateCashFlowForecastSummary(days: number) {
   const boundedDays = Math.max(1, Math.min(90, Math.round(days)))

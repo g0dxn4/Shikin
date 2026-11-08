@@ -1,19 +1,13 @@
 import { apportionConvertedAmount } from '@shikin/finance-core/fx'
+import {
+  CASH_FLOW_SQL,
+  SQL_WHITESPACE,
+  getCashFlowIntegrityFailure,
+  type CashFlowIntegrityRow,
+} from '@shikin/finance-core'
 import { getCurrencySettings } from './fx-service.js'
 import { readDatedAmounts, sumCentavos } from './dated-read.js'
 import { query } from './database.js'
-
-// ECMAScript trim whitespace, matching normalizePostingStatus and currency validation.
-const SQL_WHITESPACE =
-  'char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)'
-
-/** Fixed alias only; mirrors finance-core getCashFlowEligibility, including legacy nulls. */
-export const CASH_FLOW_SQL = `t.type IN ('income', 'expense')
-  AND COALESCE(t.reporting_treatment, 'normal') = 'normal'
-  AND COALESCE(t.ledger_treatment, 'normal') = 'normal'
-  AND COALESCE(t.transaction_kind, 'standard') = 'standard'
-  AND COALESCE(t.is_archived, 0) = 0
-  AND COALESCE(NULLIF(LOWER(TRIM(t.status, ${SQL_WHITESPACE})), ''), 'posted') IN ('posted', 'cleared')`
 
 /** Use only after reportingReadFailure has validated the same date window.
  * Splits inherit their parent's currency; parent category is used only without splits.
@@ -36,15 +30,7 @@ export function reportingReadFailure(
 ) {
   const accountFilter = scope.accountId ? ' AND t.account_id = $3' : ''
   const params = scope.accountId ? [start, end, scope.accountId] : [start, end]
-  const rows = query<{
-    id: string
-    type: string
-    amount: number
-    currency: string | null
-    split_count: number
-    split_total: number | null
-    invalid_splits: number
-  }>(
+  const rows = query<CashFlowIntegrityRow>(
     `SELECT t.id, t.type, t.amount, t.currency,
        (SELECT COUNT(*) FROM transaction_splits s WHERE s.transaction_id = t.id) AS split_count,
        (SELECT SUM(s.amount) FROM transaction_splits s WHERE s.transaction_id = t.id) AS split_total,
@@ -53,33 +39,16 @@ export function reportingReadFailure(
      FROM transactions t WHERE ${CASH_FLOW_SQL} AND t.date >= $1 AND t.date <= $2${accountFilter}`,
     params
   )
-  const totals = new Map<string, number>()
-  for (const row of rows) {
-    const currency = row.currency?.trim().toUpperCase()
-    const key = `${currency}:${row.type}`
-    const total = (totals.get(key) ?? 0) + row.amount
-    totals.set(key, total)
-    const reason =
-      !currency || !/^[A-Z]{3}$/.test(currency)
-        ? 'invalid_currency_data'
-        : !Number.isSafeInteger(row.amount) ||
-            row.amount < 0 ||
-            (row.split_count > 0 && (row.invalid_splits > 0 || row.split_total !== row.amount))
-          ? 'invalid_category_allocations'
-          : !Number.isSafeInteger(total)
-            ? 'unsafe_cashflow_total'
-            : null
-    if (reason)
-      return {
-        success: false as const,
-        complete: false as const,
-        basis: 'gross_cashflow' as const,
-        reason,
-        transactionIds: [row.id],
-        message: `Gross cash-flow report is incomplete: transaction ${row.id} has invalid currency, centavo totals or category allocations. No partial totals are reported.`,
-      }
+  const failure = getCashFlowIntegrityFailure(rows)
+  if (!failure) return null
+  return {
+    success: false as const,
+    complete: false as const,
+    basis: 'gross_cashflow' as const,
+    reason: failure.reason,
+    transactionIds: [failure.transactionId],
+    message: `Gross cash-flow report is incomplete: transaction ${failure.transactionId} has invalid currency, centavo totals or category allocations. No partial totals are reported.`,
   }
-  return null
 }
 
 type CashFlowParent = {

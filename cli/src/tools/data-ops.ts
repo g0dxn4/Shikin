@@ -1285,12 +1285,8 @@ async function planCsvImportRow({
     }
   }
 
-  const validatedInput: ImportTransactionInput = {
-    ...parsedInput.data,
-    accountId: built.input.accountId,
-    date: built.input.date,
-    type: built.input.type,
-  }
+  // CSV construction narrows the shape; keep the schema's transformed field values intact.
+  const validatedInput = parsedInput.data as ImportTransactionInput
   const duplicate = findDuplicateImportTransaction(validatedInput, built.externalId)
   if (duplicate && !allowDuplicate) {
     return {

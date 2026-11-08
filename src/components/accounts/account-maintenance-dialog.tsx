@@ -19,17 +19,19 @@ import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 import { LegacyImportIdentityAction } from '@/components/transactions/legacy-import-identity-dialog'
 import type { Account } from '@/types/database'
 import {
-  finalizeAccountStatementHistory,
   previewAccountBridgeSupersession,
   previewAccountStatementFinalization,
   readAccountMaintenance,
-  setAccountSourceCoverage,
-  settleAccountStagedTransactions,
-  supersedeAccountReconciliationBridge,
   type AccountMaintenanceHistory,
   type FinalizationInput,
   type SupersessionInput,
 } from '@/lib/account-reconciliation-service'
+import {
+  finalizeAccountStatementHistory,
+  setAccountSourceCoverage,
+  settleAccountStagedTransactions,
+  supersedeAccountReconciliationBridge,
+} from '@/lib/account-maintenance-actions'
 
 type FinalizationPreview = Awaited<ReturnType<typeof previewAccountStatementFinalization>>
 type SupersessionPreview = Awaited<ReturnType<typeof previewAccountBridgeSupersession>>

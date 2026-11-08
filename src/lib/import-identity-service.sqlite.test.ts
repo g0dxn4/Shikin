@@ -44,10 +44,11 @@ vi.mock('@/lib/transaction-query-events', () => ({
 }))
 
 import {
-  bindLegacyImportIdentity,
+  commitLegacyImportIdentity,
   previewLegacyImportIdentity,
   readLegacyImportIdentityTransaction,
 } from './import-identity-service'
+import { bindLegacyImportIdentity } from './import-identity-actions'
 
 function addTransaction(id: string, overrides: Record<string, unknown> = {}) {
   const row = {
@@ -126,6 +127,20 @@ beforeEach(() => {
 afterEach(() => holder.db.close())
 
 describe('legacy import identity service on real schema 021 SQLite', () => {
+  it('commits a reviewed identity without publishing action completion effects', async () => {
+    addTransaction('legacy')
+    const input = { transactionId: 'legacy', sourceNamespace: 'Bank', externalId: '0001' }
+    const preview = await previewLegacyImportIdentity(input)
+    const result = await commitLegacyImportIdentity({
+      ...input,
+      previewToken: preview.previewToken,
+    })
+    expect(result).toEqual(preview)
+    expect(row('legacy')).toMatchObject({ import_source: 'Bank', import_external_id: '0001' })
+    expect(holder.invalidate).not.toHaveBeenCalled()
+    expect(holder.refresh).not.toHaveBeenCalled()
+  })
+
   it('previews then atomically binds exact case-sensitive identity while preserving the full ledger record', async () => {
     addTransaction('legacy')
     const before = row('legacy')

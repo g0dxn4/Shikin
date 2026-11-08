@@ -17,8 +17,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/account-reconciliation-service', () => ({
   readAccountMaintenance: mocks.read,
   previewAccountStatementFinalization: mocks.previewFinalization,
-  finalizeAccountStatementHistory: mocks.finalize,
   previewAccountBridgeSupersession: mocks.previewSupersession,
+}))
+vi.mock('@/lib/account-maintenance-actions', () => ({
+  finalizeAccountStatementHistory: mocks.finalize,
   supersedeAccountReconciliationBridge: mocks.supersede,
   setAccountSourceCoverage: mocks.coverage,
   settleAccountStagedTransactions: mocks.settle,

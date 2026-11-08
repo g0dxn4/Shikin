@@ -17,7 +17,8 @@ vi.mock('@/stores/account-store', () => ({
   useAccountStore: { getState: () => ({ fetch: mocks.fetchAccounts }) },
 }))
 
-import { importStatementFile, previewStatementFile } from '../statement-import'
+import { importStatementFile } from '../statement-import-actions'
+import { commitStatementFile, previewStatementFile, readStatementFile } from '../statement-import'
 
 function file(): File {
   const value = new File(['statement'], 'statement.ofx')
@@ -30,6 +31,20 @@ describe('statement import service boundaries', () => {
     vi.clearAllMocks()
     mocks.fetchTransactions.mockResolvedValue(undefined)
     mocks.fetchAccounts.mockResolvedValue(undefined)
+  })
+
+  it('returns committed counts without owning store refreshes', async () => {
+    mocks.parseStatement.mockReturnValue([
+      { date: '2026-01-01', amount: 1, description: 'Coffee', type: 'expense' },
+    ])
+    mocks.withTransaction.mockResolvedValue({ imported: 1, skipped: 0 })
+    const statement = await readStatementFile(file())
+    expect(await commitStatementFile('statement.ofx', 'account-1', statement)).toEqual({
+      imported: 1,
+      skipped: 0,
+    })
+    expect(mocks.fetchTransactions).not.toHaveBeenCalled()
+    expect(mocks.fetchAccounts).not.toHaveBeenCalled()
   })
 
   it('rejects unsupported parser rows inside the transactional plan', async () => {

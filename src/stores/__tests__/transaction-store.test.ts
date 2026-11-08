@@ -150,6 +150,78 @@ describe('transaction-store', () => {
   })
 
   describe('add', () => {
+    it('attempts transaction then account refresh and resolves after a committed add', async () => {
+      const trace: string[] = []
+      mockWithTransaction.mockImplementationOnce(async () => {
+        trace.push('commit')
+      })
+      mockQuery.mockImplementationOnce(async () => {
+        trace.push('transactions')
+        throw new Error('refresh failed')
+      })
+      mockAccountFetch.mockImplementationOnce(async () => {
+        trace.push('accounts')
+      })
+      await expect(
+        useTransactionStore.getState().add({
+          amount: 1,
+          type: 'expense',
+          description: 'Imported',
+          accountId: '01ACC001',
+          categoryId: null,
+          transferToAccountId: null,
+          currency: 'USD',
+          date: '2025-01-01',
+          notes: null,
+        })
+      ).resolves.toBeUndefined()
+      trace.push('resolve')
+      expect(trace).toEqual(['commit', 'transactions', 'accounts', 'resolve'])
+    })
+
+    it('skips both refreshes after a committed add with skipRefresh', async () => {
+      mockWithTransaction.mockResolvedValueOnce(undefined)
+      await expect(
+        useTransactionStore.getState().add(
+          {
+            amount: 1,
+            type: 'expense',
+            description: 'Imported',
+            accountId: '01ACC001',
+            categoryId: null,
+            transferToAccountId: null,
+            currency: 'USD',
+            date: '2025-01-01',
+            notes: null,
+          },
+          { skipRefresh: true }
+        )
+      ).resolves.toBeUndefined()
+      expect(mockWithTransaction).toHaveBeenCalledOnce()
+      expect(mockQuery).not.toHaveBeenCalled()
+      expect(mockAccountFetch).not.toHaveBeenCalled()
+    })
+
+    it('does not refresh a no-op update', async () => {
+      mockWithTransaction.mockResolvedValueOnce(false)
+      await expect(
+        useTransactionStore.getState().update('missing', {
+          amount: 1,
+          type: 'expense',
+          description: 'Missing row',
+          accountId: '01ACC001',
+          categoryId: null,
+          transferToAccountId: null,
+          currency: 'USD',
+          date: '2025-01-01',
+          notes: null,
+        })
+      ).resolves.toBeUndefined()
+      expect(mockWithTransaction).toHaveBeenCalledOnce()
+      expect(mockQuery).not.toHaveBeenCalled()
+      expect(mockAccountFetch).not.toHaveBeenCalled()
+    })
+
     it('inserts transaction and updates account balance for expense', async () => {
       // execute: insert transaction, update account balance
       mockExecute

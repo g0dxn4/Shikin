@@ -17,12 +17,12 @@ import { Label } from '@/components/ui/label'
 import { getErrorMessage } from '@/lib/errors'
 import { formatMoney } from '@/lib/money'
 import {
-  bindLegacyImportIdentity,
   previewLegacyImportIdentity,
   readLegacyImportIdentityTransaction,
   type LegacyImportIdentityPreview,
   type LegacyImportIdentityTransaction,
 } from '@/lib/import-identity-service'
+import { bindLegacyImportIdentity } from '@/lib/import-identity-actions'
 
 export function LegacyImportIdentityAction({
   transactionId,

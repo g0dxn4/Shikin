@@ -590,6 +590,67 @@ describe('recurring-store', () => {
   })
 
   describe('materializeTransactions', () => {
+    it.each([false, true])(
+      'preserves post-commit refresh rejection and skips later reads (native=%s)',
+      async (native) => {
+        runtimeState.isTauri = native
+        const trace: string[] = []
+        mockWithTransaction.mockReset()
+        mockQuery.mockResolvedValueOnce([
+          {
+            id: 'due',
+            description: 'Due rule',
+            type: 'expense',
+            currency: 'USD',
+            account_currency: 'USD',
+            account_is_archived: 0,
+          },
+        ])
+        mockWithTransaction.mockImplementationOnce(async () => {
+          trace.push('commit')
+          return 1
+        })
+        mockMaterializeRecurringTransactionsBrowser.mockImplementationOnce(async () => {
+          trace.push('commit')
+          return {
+            success: true,
+            created: 1,
+            message: 'Created 1 transaction(s) from recurring rules.',
+          }
+        })
+        mockTxFetch.mockImplementationOnce(async () => {
+          trace.push('transactions')
+          throw new Error('refresh failed after commit')
+        })
+        mockAccountFetch.mockImplementationOnce(async () => {
+          trace.push('accounts')
+        })
+
+        await expect(useRecurringStore.getState().materializeTransactions()).rejects.toThrow(
+          'refresh failed after commit'
+        )
+        trace.push('reject')
+        expect(trace).toEqual(['commit', 'transactions', 'reject'])
+        expect(mockAccountFetch).not.toHaveBeenCalled()
+        expect(mockQuery).toHaveBeenCalledTimes(native ? 1 : 0)
+        expect(useRecurringStore.getState().error).toBe('refresh failed after commit')
+        mockAccountFetch.mockReset()
+      }
+    )
+
+    it('does not refresh when the browser commits zero occurrences', async () => {
+      runtimeState.isTauri = false
+      mockMaterializeRecurringTransactionsBrowser.mockResolvedValueOnce({
+        success: true,
+        created: 0,
+        message: 'No due rules.',
+      })
+      expect(await useRecurringStore.getState().materializeTransactions()).toBe(0)
+      expect(mockTxFetch).not.toHaveBeenCalled()
+      expect(mockAccountFetch).not.toHaveBeenCalled()
+      expect(mockQuery).not.toHaveBeenCalled()
+    })
+
     it('uses the data-server materialization endpoint in browser mode', async () => {
       runtimeState.isTauri = false
       mockMaterializeRecurringTransactionsBrowser.mockResolvedValueOnce({

@@ -108,6 +108,29 @@ describe('useTransactionPageQuery', () => {
     })
   })
 
+  it('invalidates on a read-only replacement with identical array contents', async () => {
+    mockQueryTransactionPage.mockResolvedValueOnce(emptyResult).mockResolvedValueOnce({
+      ...emptyResult,
+      total: 7,
+      currencies: ['PHP'],
+      reviewCounts: { ...emptyResult.reviewCounts, all: 3, staged: 3 },
+    })
+    const { result } = renderHook(() => useTransactionPageQuery({ page: 1, pageSize: 25 }))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    act(() => useTransactionStore.setState({ transactions: [] }))
+    await waitFor(() => expect(result.current.total).toBe(7))
+    expect(result.current.rows).toEqual([])
+    expect(result.current.currencies).toEqual(['PHP'])
+    expect(result.current.reviewCounts).toEqual({
+      all: 3,
+      'needs-category': 0,
+      pending: 0,
+      placeholder: 0,
+      staged: 3,
+      unclassified: 0,
+    })
+  })
+
   it('ignores non-transaction store updates and unsubscribes on cleanup', async () => {
     mockQueryTransactionPage.mockResolvedValue(emptyResult)
 

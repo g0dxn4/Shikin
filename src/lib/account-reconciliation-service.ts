@@ -13,10 +13,7 @@ import {
   type SourceCoverageEvidence,
 } from '@shikin/finance-core/reconciliation'
 import { query, withTransaction, type TransactionClient } from '@/lib/database'
-import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 import { generateId } from '@/lib/ulid'
-import { useAccountStore } from '@/stores/account-store'
-import { useTransactionStore } from '@/stores/transaction-store'
 
 export type AccountMaintenanceAccount = {
   id: string
@@ -77,6 +74,14 @@ export type SupersessionInput = {
   bridgeId: string
   transactionIds: string[]
   coverageIds: string[]
+  source?: string
+  note?: string
+}
+
+export type StagedSettlementInput = {
+  accountId: string
+  transactionIds: string[]
+  status: 'posted' | 'cleared'
   source?: string
   note?: string
 }
@@ -207,14 +212,6 @@ async function digest(value: unknown): Promise<string> {
   return `sha256:${Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
 }
 
-async function refreshViews(): Promise<boolean> {
-  const results = await Promise.allSettled([
-    useAccountStore.getState().fetch(),
-    useTransactionStore.getState().fetch(),
-  ])
-  return results.some((result) => result.status === 'rejected')
-}
-
 async function insertObservation(
   tx: TransactionClient,
   input: {
@@ -334,15 +331,13 @@ export async function readAccountMaintenance(
   return { account, observations: history, coverage, transactions, corrections }
 }
 
-export async function setAccountSourceCoverage(
-  input: CoverageInput
-): Promise<{ coverage: SourceCoverageEvidence; refreshIncomplete: boolean }> {
+export function commitAccountSourceCoverage(input: CoverageInput): Promise<SourceCoverageEvidence> {
   assertDate(input.periodStart, 'Printed period start')
   assertDate(input.periodEnd, 'Printed period end')
   if (input.periodStart > input.periodEnd) throw new Error('Printed period start must precede end.')
   if (!input.sourceNamespace.trim()) throw new Error('Source namespace is required.')
   if (input.zeroRows && input.status === 'gap') throw new Error('A gap cannot certify zero rows.')
-  const result = await withTransaction(async (tx) => {
+  return withTransaction(async (tx) => {
     const account = await accountFor(tx, input.accountId)
     const before = input.coverageId
       ? (
@@ -411,18 +406,10 @@ export async function setAccountSourceCoverage(
     )
     return after
   })
-  invalidateTransactionPage('store-refresh')
-  return { coverage: result, refreshIncomplete: await refreshViews() }
 }
 
-export async function settleAccountStagedTransactions(input: {
-  accountId: string
-  transactionIds: string[]
-  status: 'posted' | 'cleared'
-  source?: string
-  note?: string
-}): Promise<{ transactionIds: string[]; refreshIncomplete: boolean }> {
-  const transactionIds = await withTransaction(async (tx) => {
+export function commitAccountStagedTransactions(input: StagedSettlementInput): Promise<string[]> {
+  return withTransaction(async (tx) => {
     const account = await accountFor(tx, input.accountId)
     const rows = selectStagedReconciliationRows({
       rows: await ledgerRows(tx, account.id),
@@ -453,8 +440,6 @@ export async function settleAccountStagedTransactions(input: {
     )
     return ids
   })
-  invalidateTransactionPage('store-refresh')
-  return { transactionIds, refreshIncomplete: await refreshViews() }
 }
 
 async function createFinalizationMaterial(
@@ -571,10 +556,10 @@ export async function previewAccountStatementFinalization(input: FinalizationInp
   })
 }
 
-export async function finalizeAccountStatementHistory(
+export function commitAccountStatementFinalization(
   input: FinalizationInput & { previewToken: string }
 ) {
-  const result = await withTransaction(async (tx) => {
+  return withTransaction(async (tx) => {
     const material = await createFinalizationMaterial(tx, input)
     const currentToken = await digest(finalizationTokenMaterial(input, material))
     if (!input.previewToken || input.previewToken !== currentToken)
@@ -637,8 +622,6 @@ export async function finalizeAccountStatementHistory(
     )
     return auditAfter
   })
-  invalidateTransactionPage('store-refresh')
-  return { ...result, refreshIncomplete: await refreshViews() }
 }
 
 async function createSupersessionMaterial(
@@ -726,10 +709,10 @@ export async function previewAccountBridgeSupersession(input: SupersessionInput)
   })
 }
 
-export async function supersedeAccountReconciliationBridge(
+export function commitAccountBridgeSupersession(
   input: SupersessionInput & { previewToken: string }
 ) {
-  const result = await withTransaction(async (tx) => {
+  return withTransaction(async (tx) => {
     const material = await createSupersessionMaterial(tx, input)
     const currentToken = await digest(supersessionTokenMaterial(input, material))
     if (!input.previewToken || input.previewToken !== currentToken)
@@ -821,6 +804,4 @@ export async function supersedeAccountReconciliationBridge(
     )
     return afterAudit
   })
-  invalidateTransactionPage('store-refresh')
-  return { ...result, refreshIncomplete: await refreshViews() }
 }

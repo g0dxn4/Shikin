@@ -42,7 +42,9 @@ vi.mock('@/stores/transaction-store', () => ({
 
 import { executeAtomicImport, type AtomicImportRequest } from './import-transactions.js'
 // @ts-expect-error CLI tsconfig has no '@' alias; Vitest root config resolves this import.
-import { importStatementFile, previewStatementFile } from '@/lib/statement-import'
+import { previewStatementFile } from '@/lib/statement-import'
+// @ts-expect-error CLI tsconfig has no '@' alias; Vitest root config resolves this import.
+import { importStatementFile } from '@/lib/statement-import-actions'
 
 type Client = 'cli' | 'statement'
 type SourceRow = { date: string; amount: number; description: string; externalId: string | null }

@@ -4,9 +4,7 @@ import {
   sha256Fingerprint,
 } from '@shikin/finance-core/imports'
 import { query, withTransaction, type TransactionClient } from '@/lib/database'
-import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 import { generateId } from '@/lib/ulid'
-import { useTransactionStore } from '@/stores/transaction-store'
 
 export type LegacyImportIdentityInput = {
   transactionId: string
@@ -210,10 +208,10 @@ export async function previewLegacyImportIdentity(
   return withTransaction(async (tx) => previewFromMaterial(await bindingMaterial(tx, input)))
 }
 
-export async function bindLegacyImportIdentity(
+export function commitLegacyImportIdentity(
   input: LegacyImportIdentityInput & { previewToken: string }
-): Promise<LegacyImportIdentityPreview & { refreshIncomplete: boolean }> {
-  const result = await withTransaction(async (tx) => {
+): Promise<LegacyImportIdentityPreview> {
+  return withTransaction(async (tx) => {
     const material = await bindingMaterial(tx, input)
     if (!input.previewToken || input.previewToken !== material.previewToken)
       throw new Error(
@@ -252,8 +250,4 @@ export async function bindLegacyImportIdentity(
     )
     return preview
   })
-
-  invalidateTransactionPage('import')
-  const refresh = await Promise.allSettled([useTransactionStore.getState().fetch()])
-  return { ...result, refreshIncomplete: refresh.some((item) => item.status === 'rejected') }
 }

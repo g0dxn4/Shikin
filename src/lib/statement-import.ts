@@ -12,8 +12,6 @@ import {
   sha256Fingerprint,
   type ImportReviewDecision,
 } from '@shikin/finance-core/imports'
-import { useAccountStore } from '@/stores/account-store'
-import { useTransactionStore } from '@/stores/transaction-store'
 
 export type StatementImportTreatment = 'posted' | 'staged_posted' | 'staged_pending'
 
@@ -26,13 +24,6 @@ export interface StatementImportTreatmentOptions {
 export interface StatementImportApplyOptions extends StatementImportTreatmentOptions {
   previewToken?: string
   decisions?: readonly ImportReviewDecision[]
-}
-
-export interface ImportResult {
-  imported: number
-  skipped: number
-  errors: string[]
-  mode?: 'reviewed_atomic' | 'unreviewed_atomic'
 }
 
 export interface StatementImportReviewCandidate {
@@ -617,7 +608,9 @@ async function writeImportAudit(
   )
 }
 
-async function parseFile(file: File): Promise<{ content: string; parsed: ParsedTransaction[] }> {
+export async function readStatementFile(
+  file: File
+): Promise<{ content: string; parsed: ParsedTransaction[] }> {
   const content = await readFileText(file)
   const parsed = parseStatement(content, file.name)
   if (!parsed.length) throw new Error('No transactions found in file')
@@ -631,7 +624,7 @@ export async function previewStatementFile(
   options: StatementImportTreatmentOptions = {}
 ): Promise<StatementImportPreview> {
   try {
-    const { content, parsed } = await parseFile(file)
+    const { content, parsed } = await readStatementFile(file)
     const plan = await withTransaction((tx) =>
       createPlan(tx, content, file.name, accountId, parsed, decisions, options)
     )
@@ -681,210 +674,190 @@ export async function previewStatementFile(
   }
 }
 
-export async function importStatementFile(
-  file: File,
+export function commitStatementFile(
+  fileName: string,
   accountId: string,
+  { content, parsed }: { content: string; parsed: ParsedTransaction[] },
   options: StatementImportApplyOptions = {}
-): Promise<ImportResult> {
-  try {
-    const { content, parsed } = await parseFile(file)
-    const counts = await withTransaction(async (tx) => {
-      const plan = await createPlan(
-        tx,
-        content,
-        file.name,
-        accountId,
-        parsed,
-        options.decisions ?? [],
-        options
+): Promise<{ imported: number; skipped: number }> {
+  return withTransaction(async (tx) => {
+    const plan = await createPlan(
+      tx,
+      content,
+      fileName,
+      accountId,
+      parsed,
+      options.decisions ?? [],
+      options
+    )
+    if (options.previewToken && options.previewToken !== plan.token) {
+      throw new Error(
+        'Statement preview is stale or does not match this file, account, decisions, or database revision'
       )
-      if (options.previewToken && options.previewToken !== plan.token) {
-        throw new Error(
-          'Statement preview is stale or does not match this file, account, decisions, or database revision'
-        )
-      }
-      if (plan.requiredDecisions.length) {
-        throw new Error(
-          'Statement has ambiguous existing candidates that require reviewed decisions'
-        )
-      }
-      const sourceNamespace = statementSourceNamespace(file.name)
-      const now = new Date().toISOString()
-      const balanceDelta = plannedBalanceDelta(plan)
-      let runningBalance = plan.accountBalance
-      let imported = 0
-      let skipped = 0
-      for (const row of plan.rows) {
-        if (row.action === 'skip' || row.action === 'keep_existing') {
-          skipped++
-        } else {
-          const transactionId = generateId()
-          const rowDelta =
-            row.transaction.type === 'income' ? row.amountCentavos : -row.amountCentavos
-          const rowBalanceDelta = plan.importTreatment.ledgerTreatment === 'normal' ? rowDelta : 0
-          const previousBalance = runningBalance
-          runningBalance += rowBalanceDelta
-          await tx.execute(
-            `INSERT INTO transactions (
+    }
+    if (plan.requiredDecisions.length) {
+      throw new Error('Statement has ambiguous existing candidates that require reviewed decisions')
+    }
+    const sourceNamespace = statementSourceNamespace(fileName)
+    const now = new Date().toISOString()
+    const balanceDelta = plannedBalanceDelta(plan)
+    let runningBalance = plan.accountBalance
+    let imported = 0
+    let skipped = 0
+    for (const row of plan.rows) {
+      if (row.action === 'skip' || row.action === 'keep_existing') {
+        skipped++
+      } else {
+        const transactionId = generateId()
+        const rowDelta =
+          row.transaction.type === 'income' ? row.amountCentavos : -row.amountCentavos
+        const rowBalanceDelta = plan.importTreatment.ledgerTreatment === 'normal' ? rowDelta : 0
+        const previousBalance = runningBalance
+        runningBalance += rowBalanceDelta
+        await tx.execute(
+          `INSERT INTO transactions (
                id, account_id, category_id, type, amount, currency, description, notes, date,
                status, ledger_treatment, staging_batch_id,
                import_source, import_external_id, import_fingerprint, import_content_fingerprint,
                created_at, updated_at
              ) VALUES (?, ?, NULL, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              transactionId,
+          [
+            transactionId,
+            accountId,
+            row.transaction.type,
+            row.amountCentavos,
+            plan.accountCurrency,
+            row.transaction.description,
+            row.transaction.date,
+            plan.importTreatment.status,
+            plan.importTreatment.ledgerTreatment,
+            plan.importTreatment.stagingBatchId,
+            sourceNamespace,
+            row.transaction.externalId ?? null,
+            row.importFingerprint,
+            row.contentFingerprint,
+            now,
+            now,
+          ]
+        )
+        await writeImportAudit(tx, {
+          entity: 'transaction',
+          entityId: transactionId,
+          action: 'create',
+          before: null,
+          after: {
+            transaction: {
+              id: transactionId,
               accountId,
-              row.transaction.type,
-              row.amountCentavos,
-              plan.accountCurrency,
-              row.transaction.description,
-              row.transaction.date,
-              plan.importTreatment.status,
-              plan.importTreatment.ledgerTreatment,
-              plan.importTreatment.stagingBatchId,
-              sourceNamespace,
-              row.transaction.externalId ?? null,
-              row.importFingerprint,
-              row.contentFingerprint,
-              now,
-              now,
-            ]
-          )
-          await writeImportAudit(tx, {
-            entity: 'transaction',
-            entityId: transactionId,
-            action: 'create',
-            before: null,
-            after: {
-              transaction: {
-                id: transactionId,
-                accountId,
-                categoryId: null,
-                type: row.transaction.type,
-                amountCentavos: row.amountCentavos,
-                currency: plan.accountCurrency,
-                description: row.transaction.description,
-                notes: null,
-                date: row.transaction.date,
-                status: plan.importTreatment.status,
-                source: null,
-                ledgerTreatment: plan.importTreatment.ledgerTreatment,
-                stagingBatchId: plan.importTreatment.stagingBatchId,
-                reportingTreatment: 'normal',
-                transactionKind: 'standard',
-                importSource: sourceNamespace,
-                importExternalId: row.transaction.externalId ?? null,
-                importFingerprint: row.importFingerprint,
-                importContentFingerprint: row.contentFingerprint,
-              },
-              balance: {
-                accountId,
-                previousBalanceCentavos: previousBalance,
-                newBalanceCentavos: runningBalance,
-                deltaCentavos: rowBalanceDelta,
-              },
+              categoryId: null,
+              type: row.transaction.type,
+              amountCentavos: row.amountCentavos,
+              currency: plan.accountCurrency,
+              description: row.transaction.description,
+              notes: null,
+              date: row.transaction.date,
+              status: plan.importTreatment.status,
+              source: null,
+              ledgerTreatment: plan.importTreatment.ledgerTreatment,
+              stagingBatchId: plan.importTreatment.stagingBatchId,
+              reportingTreatment: 'normal',
+              transactionKind: 'standard',
+              importSource: sourceNamespace,
+              importExternalId: row.transaction.externalId ?? null,
+              importFingerprint: row.importFingerprint,
+              importContentFingerprint: row.contentFingerprint,
             },
-            source: 'statement-import',
-            note: 'Created during atomic statement import',
-            createdAt: now,
-          })
-          imported++
-        }
-        for (const reviewedDecision of row.decisions ?? []) {
-          if (
-            !(options.decisions ?? []).some(
-              (decision) =>
-                matchesImportReviewDecision(
-                  decision,
-                  reviewedDecision.candidateIdentityKey,
-                  reviewedDecision.candidateContentFingerprint,
-                  reviewedDecision.existingTransactionId,
-                  reviewedDecision.existingEvidenceFingerprint
-                ) && decision.decision === reviewedDecision.decision
-            )
-          ) {
-            continue
-          }
-          const alreadyStored = (
-            await tx.query<{ id: string }>(
-              `SELECT id FROM duplicate_review_decisions
-               WHERE account_id=? AND candidate_identity_key=? AND candidate_content_fingerprint=?
-                 AND existing_transaction_id=? AND existing_evidence_fingerprint=? AND decision=?
-               LIMIT 1`,
-              [
-                accountId,
+            balance: {
+              accountId,
+              previousBalanceCentavos: previousBalance,
+              newBalanceCentavos: runningBalance,
+              deltaCentavos: rowBalanceDelta,
+            },
+          },
+          source: 'statement-import',
+          note: 'Created during atomic statement import',
+          createdAt: now,
+        })
+        imported++
+      }
+      for (const reviewedDecision of row.decisions ?? []) {
+        if (
+          !(options.decisions ?? []).some(
+            (decision) =>
+              matchesImportReviewDecision(
+                decision,
                 reviewedDecision.candidateIdentityKey,
                 reviewedDecision.candidateContentFingerprint,
                 reviewedDecision.existingTransactionId,
-                reviewedDecision.existingEvidenceFingerprint,
-                reviewedDecision.decision,
-              ]
-            )
-          )[0]
-          if (alreadyStored) continue
-          const decisionId = generateId()
-          const decisionSource = 'statement-import'
-          const decisionNote = 'Reviewed during atomic statement import'
-          await tx.execute(
-            `INSERT INTO duplicate_review_decisions (
+                reviewedDecision.existingEvidenceFingerprint
+              ) && decision.decision === reviewedDecision.decision
+          )
+        ) {
+          continue
+        }
+        const alreadyStored = (
+          await tx.query<{ id: string }>(
+            `SELECT id FROM duplicate_review_decisions
+               WHERE account_id=? AND candidate_identity_key=? AND candidate_content_fingerprint=?
+                 AND existing_transaction_id=? AND existing_evidence_fingerprint=? AND decision=?
+               LIMIT 1`,
+            [
+              accountId,
+              reviewedDecision.candidateIdentityKey,
+              reviewedDecision.candidateContentFingerprint,
+              reviewedDecision.existingTransactionId,
+              reviewedDecision.existingEvidenceFingerprint,
+              reviewedDecision.decision,
+            ]
+          )
+        )[0]
+        if (alreadyStored) continue
+        const decisionId = generateId()
+        const decisionSource = 'statement-import'
+        const decisionNote = 'Reviewed during atomic statement import'
+        await tx.execute(
+          `INSERT INTO duplicate_review_decisions (
                id, account_id, existing_transaction_id, candidate_identity_key,
                candidate_content_fingerprint, existing_evidence_fingerprint, decision, source, note
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              decisionId,
-              accountId,
-              reviewedDecision.existingTransactionId,
-              reviewedDecision.candidateIdentityKey,
-              reviewedDecision.candidateContentFingerprint,
-              reviewedDecision.existingEvidenceFingerprint,
-              reviewedDecision.decision,
-              decisionSource,
-              decisionNote,
-            ]
-          )
-          await writeImportAudit(tx, {
-            entity: 'duplicate_review_decision',
-            entityId: decisionId,
-            action: 'review-import-duplicate',
-            before: null,
-            after: {
-              id: decisionId,
-              accountId,
-              ...reviewedDecision,
-              source: decisionSource,
-              note: decisionNote,
-            },
+          [
+            decisionId,
+            accountId,
+            reviewedDecision.existingTransactionId,
+            reviewedDecision.candidateIdentityKey,
+            reviewedDecision.candidateContentFingerprint,
+            reviewedDecision.existingEvidenceFingerprint,
+            reviewedDecision.decision,
+            decisionSource,
+            decisionNote,
+          ]
+        )
+        await writeImportAudit(tx, {
+          entity: 'duplicate_review_decision',
+          entityId: decisionId,
+          action: 'review-import-duplicate',
+          before: null,
+          after: {
+            id: decisionId,
+            accountId,
+            ...reviewedDecision,
             source: decisionSource,
             note: decisionNote,
-            createdAt: now,
-          })
-        }
+          },
+          source: decisionSource,
+          note: decisionNote,
+          createdAt: now,
+        })
       }
-      if (imported && plan.importTreatment.ledgerTreatment === 'normal') {
-        const update = await tx.execute(
-          "UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ? AND is_archived = 0 AND COALESCE(account_mode, 'transactional') = 'transactional'",
-          [balanceDelta, now, accountId]
-        )
-        if (update.rowsAffected !== 1)
-          throw new Error(`account update affected ${update.rowsAffected} rows`)
-      }
-      return { imported, skipped }
-    })
-    await Promise.allSettled([
-      Promise.resolve().then(() => useTransactionStore.getState().fetch()),
-      Promise.resolve().then(() => useAccountStore.getState().fetch()),
-    ])
-    return {
-      ...counts,
-      errors: [],
-      mode: options.previewToken ? 'reviewed_atomic' : 'unreviewed_atomic',
     }
-  } catch (error) {
-    return {
-      imported: 0,
-      skipped: 0,
-      errors: [getErrorMessage(error)],
-      mode: options.previewToken ? 'reviewed_atomic' : 'unreviewed_atomic',
+    if (imported && plan.importTreatment.ledgerTreatment === 'normal') {
+      const update = await tx.execute(
+        "UPDATE accounts SET balance = balance + ?, updated_at = ? WHERE id = ? AND is_archived = 0 AND COALESCE(account_mode, 'transactional') = 'transactional'",
+        [balanceDelta, now, accountId]
+      )
+      if (update.rowsAffected !== 1)
+        throw new Error(`account update affected ${update.rowsAffected} rows`)
     }
-  }
+    return { imported, skipped }
+  })
 }

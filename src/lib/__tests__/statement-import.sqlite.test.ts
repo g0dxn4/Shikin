@@ -51,13 +51,14 @@ vi.mock('@/stores/transaction-store', () => ({
   useTransactionStore: { getState: () => ({ fetch: vi.fn() }) },
 }))
 
-import { importStatementFile, previewStatementFile } from '../statement-import'
+import { importStatementFile } from '../statement-import-actions'
+import { previewStatementFile } from '../statement-import'
+import { previewAccountStatementFinalization } from '../account-reconciliation-service'
 import {
   finalizeAccountStatementHistory,
-  previewAccountStatementFinalization,
   setAccountSourceCoverage,
   settleAccountStagedTransactions,
-} from '../account-reconciliation-service'
+} from '../account-maintenance-actions'
 
 const actualStatementParser = await vi.importActual<{
   parseStatement: (content: string, filename: string) => ParsedTransaction[]

@@ -48,14 +48,17 @@ vi.mock('@/lib/transaction-query-events', () => ({
 }))
 
 import {
-  finalizeAccountStatementHistory,
+  commitAccountSourceCoverage,
   previewAccountBridgeSupersession,
   previewAccountStatementFinalization,
   readAccountMaintenance,
+} from './account-reconciliation-service'
+import {
+  finalizeAccountStatementHistory,
   setAccountSourceCoverage,
   settleAccountStagedTransactions,
   supersedeAccountReconciliationBridge,
-} from './account-reconciliation-service'
+} from './account-maintenance-actions'
 
 function rows(table: string): Record<string, unknown>[] {
   return holder.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Record<
@@ -140,6 +143,22 @@ afterEach(() => {
 })
 
 describe('native/browser account reconciliation service on real schema 021 SQLite', () => {
+  it('commits coverage without publishing action completion effects', async () => {
+    const result = await commitAccountSourceCoverage({
+      accountId: 'a',
+      sourceNamespace: 'Bank',
+      periodStart: '2025-01-01',
+      periodEnd: '2025-01-31',
+      status: 'verified',
+      documentRef: 'synthetic statement',
+    })
+    expect(result).toEqual(rows('source_coverage')[0])
+    expect(result).not.toHaveProperty('refreshIncomplete')
+    expect(holder.invalidate).not.toHaveBeenCalled()
+    expect(holder.accountRefresh).not.toHaveBeenCalled()
+    expect(holder.transactionRefresh).not.toHaveBeenCalled()
+  })
+
   it('uses the local calendar day at the UTC/local midnight boundary', async () => {
     const previousTimezone = process.env.TZ
     process.env.TZ = 'America/Los_Angeles'

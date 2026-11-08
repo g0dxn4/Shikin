@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/import-identity-service', () => ({
   readLegacyImportIdentityTransaction: mocks.read,
   previewLegacyImportIdentity: mocks.preview,
+}))
+vi.mock('@/lib/import-identity-actions', () => ({
   bindLegacyImportIdentity: mocks.bind,
 }))
 vi.mock('react-i18next', () => ({

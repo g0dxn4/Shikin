@@ -51,8 +51,10 @@ vi.mock('@/lib/statement-parser', () => ({
 }))
 
 vi.mock('@/lib/statement-import', () => ({
-  importStatementFile: mockImportStatementFile,
   previewStatementFile: mockPreviewStatementFile,
+}))
+vi.mock('@/lib/statement-import-actions', () => ({
+  importStatementFile: mockImportStatementFile,
 }))
 
 vi.mock('@/lib/transaction-query-events', () => ({

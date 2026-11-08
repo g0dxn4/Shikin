@@ -3,12 +3,12 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { parseStatement, type ParsedTransaction } from '@/lib/statement-parser'
 import {
-  importStatementFile,
   previewStatementFile,
   type StatementImportPreview,
   type StatementImportTreatment,
   type StatementImportTreatmentOptions,
 } from '@/lib/statement-import'
+import { importStatementFile } from '@/lib/statement-import-actions'
 import type { ImportReviewDecision } from '@shikin/finance-core/imports'
 import { getErrorMessage } from '@/lib/errors'
 import { invalidateTransactionPage } from '@/lib/transaction-query-events'

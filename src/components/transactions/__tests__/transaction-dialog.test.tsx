@@ -51,6 +51,8 @@ const { mockReadIdentity, mockPreviewIdentity, mockBindIdentity } = vi.hoisted((
 vi.mock('@/lib/import-identity-service', () => ({
   readLegacyImportIdentityTransaction: mockReadIdentity,
   previewLegacyImportIdentity: mockPreviewIdentity,
+}))
+vi.mock('@/lib/import-identity-actions', () => ({
   bindLegacyImportIdentity: mockBindIdentity,
 }))
 const mockCloseTransactionDialog = vi.fn()

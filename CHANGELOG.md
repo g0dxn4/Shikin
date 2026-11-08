@@ -14,6 +14,7 @@ All notable changes to Shikin are documented in this file.
 - CLI CSV import and `add-transaction` share a typed internal transaction-preparation module (`cli/src/transaction-mutations.ts`) instead of the importer calling the public tool. Tool schemas, previews, and import results are unchanged.
 - CLI credit-card statement display amounts, effective status, and bill-entry reads come from one module (`cli/src/statement-read.ts`), used by card tools, automation context, and upcoming bills. Displayed statuses and amounts are unchanged.
 - The bulk consumption-classification dialog's session logic (context, preview, apply, receipt) lives in a feature hook (`use-consumption-bulk-session.ts`), separate from allocation rendering. Reviewed payloads and apply protections are unchanged.
+- The statement-import dialog's session state and actions live in a feature hook (`use-statement-import-session.ts`). Reviewed-input binding, draft recovery, and commit-after-close refresh are unchanged.
 
 ## [1.2.1] - 2026-10-17
 

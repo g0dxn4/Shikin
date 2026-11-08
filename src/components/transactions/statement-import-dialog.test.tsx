@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { StatementImportDialog } from './statement-import-dialog'
@@ -88,7 +88,20 @@ vi.mock('@/stores/account-store', () => ({
 }))
 
 vi.mock('@/components/ui/dialog', () => ({
-  Dialog: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Dialog: ({
+    children,
+    onOpenChange,
+  }: {
+    children: React.ReactNode
+    onOpenChange: (open: boolean) => void
+  }) => (
+    <div>
+      {children}
+      <button type="button" onClick={() => onOpenChange(false)}>
+        Dismiss import dialog
+      </button>
+    </div>
+  ),
   DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children: React.ReactNode }) => <h1>{children}</h1>,
@@ -448,6 +461,251 @@ describe('StatementImportDialog', () => {
     expect(screen.getByText('retry.ofx')).toBeVisible()
     expect(screen.getByRole('button', { name: 'import.preview' })).toBeEnabled()
     expect(mockInvalidate).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    {
+      changedInput: 'account',
+      account: 'account-2',
+      treatment: 'staged_pending',
+      acknowledgePending: true,
+    },
+    {
+      changedInput: 'treatment',
+      account: 'account-1',
+      treatment: 'staged_posted',
+      acknowledgePending: false,
+    },
+    {
+      changedInput: 'pending acknowledgement',
+      account: 'account-1',
+      treatment: 'staged_pending',
+      acknowledgePending: true,
+    },
+  ])(
+    'ignores an in-flight preview after changing only $changedInput',
+    async ({ changedInput, account, treatment, acknowledgePending }) => {
+      mockParseStatement.mockReturnValue([parsedTx({ description: 'Bound pending row' })])
+      let resolvePreview!: (value: unknown) => void
+      mockPreviewStatementFile.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolvePreview = resolve
+          })
+      )
+      mockPreviewStatementFile.mockResolvedValue(
+        previewResult({
+          previewToken: 'fresh-binding',
+          parsedTransactions: [parsedTx({ description: 'Fresh bound row' })],
+        })
+      )
+      mockImportStatementFile.mockResolvedValue({ imported: 1, skipped: 0, errors: [] })
+      const file = createStatementFile('bound.qfx')
+      const { input, user } = await renderDialog()
+      await chooseAccount(user)
+      await user.click(screen.getByRole('button', { name: 'import.treatments.stagedPending' }))
+      await user.click(screen.getByRole('checkbox'))
+      await chooseFile(input, file)
+      await user.click(screen.getByRole('button', { name: 'import.preview' }))
+      expect(mockPreviewStatementFile).toHaveBeenNthCalledWith(1, file, 'account-1', [], {
+        treatment: 'staged_pending',
+        stagingBatchId: undefined,
+        acknowledgePending: true,
+      })
+
+      if (changedInput === 'account') await chooseAccount(user, 'Euro Current')
+      if (changedInput === 'treatment') {
+        await user.click(screen.getByRole('button', { name: 'import.treatments.stagedPosted' }))
+      }
+      if (changedInput === 'pending acknowledgement') {
+        await user.click(screen.getByRole('checkbox'))
+      }
+      await act(async () => {
+        resolvePreview(
+          previewResult({
+            previewToken: 'obsolete-binding',
+            parsedTransactions: [parsedTx({ description: 'Obsolete bound row' })],
+          })
+        )
+      })
+
+      expect(screen.queryByText('Obsolete bound row')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'import.confirm' })).not.toBeInTheDocument()
+      expect(screen.getByText('bound.qfx')).toBeVisible()
+      if (changedInput === 'pending acknowledgement') {
+        expect(screen.getByRole('button', { name: 'import.preview' })).toBeDisabled()
+        expect(screen.getByRole('checkbox')).not.toBeChecked()
+        await user.click(screen.getByRole('checkbox'))
+      }
+      await user.click(screen.getByRole('button', { name: 'import.preview' }))
+      expect(await screen.findByText('Fresh bound row')).toBeVisible()
+      expect(mockPreviewStatementFile).toHaveBeenNthCalledWith(2, file, account, [], {
+        treatment,
+        stagingBatchId: undefined,
+        acknowledgePending,
+      })
+      await user.click(screen.getByRole('button', { name: 'import.confirm' }))
+      expect(mockImportStatementFile).toHaveBeenCalledWith(file, account, {
+        previewToken: 'fresh-binding',
+        decisions: [],
+        treatment,
+        stagingBatchId: undefined,
+        acknowledgePending,
+      })
+    }
+  )
+
+  it('ignores an old file read after close and reopen with the same file', async () => {
+    let resolveOldRead!: (content: string) => void
+    const file = createStatementFile('reopened.ofx')
+    vi.mocked(file.text)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOldRead = resolve
+          })
+      )
+      .mockResolvedValueOnce('reopened content')
+    mockParseStatement.mockReturnValue([parsedTx(), parsedTx({ description: 'Second row' })])
+    const { input, user, rerender, onOpenChange, container } = await renderDialog()
+    await chooseAccount(user)
+    await chooseFile(input, file)
+    await user.click(screen.getByRole('button', { name: 'import.cancel' }))
+    rerender(<StatementImportDialog open={false} onOpenChange={onOpenChange} />)
+    rerender(<StatementImportDialog open={true} onOpenChange={onOpenChange} />)
+    expect(screen.getByRole('button', { name: 'import.preview' })).toBeDisabled()
+    expect(screen.queryByText('reopened.ofx')).not.toBeInTheDocument()
+    await chooseAccount(user)
+    const reopenedInput = container.querySelector<HTMLInputElement>('input[type="file"]')!
+    await chooseFile(reopenedInput, file)
+    expect(await screen.findByText('import.previewCount count=2')).toBeVisible()
+
+    await act(async () => resolveOldRead('obsolete content'))
+
+    expect(mockParseStatement.mock.calls).toEqual([['reopened content', 'reopened.ofx']])
+    expect(screen.getByText('reopened.ofx')).toBeVisible()
+    expect(screen.getByText('import.previewCount count=2')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'import.preview' })).toBeEnabled()
+    expect(onOpenChange.mock.calls).toEqual([[false]])
+  })
+
+  it('keeps the reopened preview pending when the previous session preview settles', async () => {
+    mockParseStatement.mockReturnValue([parsedTx()])
+    let resolveOldPreview!: (value: unknown) => void
+    let resolveNewPreview!: (value: unknown) => void
+    mockPreviewStatementFile
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOldPreview = resolve
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveNewPreview = resolve
+          })
+      )
+    const file = createStatementFile('reopened-preview.ofx')
+    const { input, user, rerender, onOpenChange, container } = await renderDialog()
+    await chooseAccount(user)
+    await chooseFile(input, file)
+    await user.click(screen.getByRole('button', { name: 'import.preview' }))
+    await user.click(screen.getByRole('button', { name: 'Dismiss import dialog' }))
+    rerender(<StatementImportDialog open={false} onOpenChange={onOpenChange} />)
+    rerender(<StatementImportDialog open={true} onOpenChange={onOpenChange} />)
+    await chooseAccount(user)
+    await chooseFile(container.querySelector<HTMLInputElement>('input[type="file"]')!, file)
+    await user.click(screen.getByRole('button', { name: 'import.preview' }))
+
+    await act(async () => {
+      resolveOldPreview(
+        previewResult({ parsedTransactions: [parsedTx({ description: 'Obsolete session row' })] })
+      )
+    })
+    expect(screen.queryByText('Obsolete session row')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'import.confirm' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'import.preview' })).toBeDisabled()
+    await act(async () => {
+      resolveNewPreview(
+        previewResult({
+          previewToken: 'reopened-token',
+          parsedTransactions: [parsedTx({ description: 'Reopened preview row' })],
+        })
+      )
+    })
+    expect(screen.getByText('Reopened preview row')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'import.confirm' })).toBeEnabled()
+    expect(mockPreviewStatementFile.mock.calls).toEqual([
+      [file, 'account-1', []],
+      [file, 'account-1', []],
+    ])
+    expect(mockToastError).not.toHaveBeenCalled()
+    expect(onOpenChange.mock.calls).toEqual([[false]])
+  })
+
+  it('invalidates an old committed import without disturbing a reopened import or emitting its toast', async () => {
+    mockParseStatement.mockReturnValue([parsedTx()])
+    mockPreviewStatementFile
+      .mockResolvedValueOnce(previewResult({ previewToken: 'old-token' }))
+      .mockResolvedValueOnce(previewResult({ previewToken: 'reopened-token' }))
+    let resolveOldImport!: (value: unknown) => void
+    let resolveNewImport!: (value: unknown) => void
+    mockImportStatementFile
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveOldImport = resolve
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveNewImport = resolve
+          })
+      )
+    const file = createStatementFile('reopened-import.ofx')
+    const { input, user, rerender, onOpenChange, container } = await renderDialog()
+    await chooseAccount(user)
+    await chooseFile(input, file)
+    await user.click(screen.getByRole('button', { name: 'import.preview' }))
+    await user.click(await screen.findByRole('button', { name: 'import.confirm' }))
+    await user.click(screen.getByRole('button', { name: 'Dismiss import dialog' }))
+    rerender(<StatementImportDialog open={false} onOpenChange={onOpenChange} />)
+    rerender(<StatementImportDialog open={true} onOpenChange={onOpenChange} />)
+    await chooseAccount(user)
+    await chooseFile(container.querySelector<HTMLInputElement>('input[type="file"]')!, file)
+    await user.click(screen.getByRole('button', { name: 'import.preview' }))
+    await user.click(await screen.findByRole('button', { name: 'import.confirm' }))
+
+    await act(async () => {
+      resolveOldImport({ imported: 2, skipped: 0, errors: ['Late committed warning'] })
+    })
+    expect(mockInvalidate.mock.calls).toEqual([['import']])
+    expect(screen.getByText('import.importing')).toBeVisible()
+    expect(mockToastSuccess).not.toHaveBeenCalled()
+    expect(mockToastWarning).not.toHaveBeenCalled()
+    expect(mockToastError).not.toHaveBeenCalled()
+    expect(onOpenChange.mock.calls).toEqual([[false]])
+    expect(mockImportStatementFile.mock.calls).toEqual([
+      [file, 'account-1', { previewToken: 'old-token', decisions: [] }],
+      [file, 'account-1', { previewToken: 'reopened-token', decisions: [] }],
+    ])
+
+    await act(async () => {
+      resolveNewImport({ imported: 1, skipped: 1, errors: [] })
+    })
+    expect(mockInvalidate.mock.calls).toEqual([['import'], ['import']])
+    expect(mockToastSuccess.mock.calls).toEqual([['import.success imported=1 skipped=1']])
+    expect(mockToastWarning).not.toHaveBeenCalled()
+    expect(mockToastError).not.toHaveBeenCalled()
+    expect(onOpenChange.mock.calls).toEqual([[false], [false]])
+    expect(mockInvalidate.mock.invocationCallOrder[1]).toBeLessThan(
+      mockToastSuccess.mock.invocationCallOrder[0]
+    )
+    expect(mockToastSuccess.mock.invocationCallOrder[0]).toBeLessThan(
+      onOpenChange.mock.invocationCallOrder[1]
+    )
   })
 
   it('invalidates the page query after imported rows commit', async () => {

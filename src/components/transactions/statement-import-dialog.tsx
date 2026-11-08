@@ -1,7 +1,6 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Upload, FileText, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react'
-import { toast } from 'sonner'
 import {
   Dialog,
   DialogContent,
@@ -21,77 +20,14 @@ import {
 } from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useAccountStore } from '@/stores/account-store'
-import { parseStatement, type ParsedTransaction } from '@/lib/statement-parser'
-import {
-  importStatementFile,
-  previewStatementFile,
-  type StatementImportPreview,
-  type StatementImportTreatment,
-  type StatementImportTreatmentOptions,
-} from '@/lib/statement-import'
 import type { ImportReviewDecision } from '@shikin/finance-core/imports'
 import { cn } from '@/lib/utils'
-import { getErrorMessage } from '@/lib/errors'
-import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 import { formatMoney, toCentavos } from '@/lib/money'
+import { useStatementImportSession } from './use-statement-import-session'
 
 interface StatementImportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-}
-
-type ImportStep = 'select' | 'preview' | 'importing' | 'done'
-
-type StatementImportReviewCandidate = StatementImportPreview['reviewCandidates'][number]
-
-function uniqueStrings(...groups: Array<readonly string[] | undefined>): string[] {
-  const seen = new Set<string>()
-  const result: string[] = []
-  for (const group of groups) {
-    if (!group) continue
-    for (const value of group) {
-      if (seen.has(value)) continue
-      seen.add(value)
-      result.push(value)
-    }
-  }
-  return result
-}
-
-function candidateKey(
-  candidate: Pick<ImportReviewDecision, 'candidateIdentityKey' | 'existingTransactionId'>
-): string {
-  return `${candidate.candidateIdentityKey}:${candidate.existingTransactionId}`
-}
-
-function isSameCandidate(
-  left: Pick<ImportReviewDecision, 'candidateIdentityKey' | 'existingTransactionId'>,
-  right: Pick<ImportReviewDecision, 'candidateIdentityKey' | 'existingTransactionId'>
-): boolean {
-  return candidateKey(left) === candidateKey(right)
-}
-
-function reviewDecisionPayload(
-  candidate: ImportReviewDecision,
-  decision: ImportReviewDecision['decision']
-): ImportReviewDecision {
-  return {
-    candidateIdentityKey: candidate.candidateIdentityKey,
-    candidateContentFingerprint: candidate.candidateContentFingerprint,
-    existingTransactionId: candidate.existingTransactionId,
-    existingEvidenceFingerprint: candidate.existingEvidenceFingerprint,
-    decision,
-  }
-}
-
-function isStalePreviewError(errors: readonly string[]): boolean {
-  return errors.some((error) => /stale/i.test(error))
-}
-
-function isStaleDecisionBindingError(errors: readonly string[]): boolean {
-  return errors.some((error) =>
-    /duplicate decisions are stale|stale binding|do not belong to this statement plan/i.test(error)
-  )
 }
 
 function signedMoney(type: string, centavos: number, currency: string): string {
@@ -103,416 +39,41 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
   const { accounts, fetch, fetchError } = useAccountStore()
 
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const fileRequestIdRef = useRef(0)
-  const previewRequestIdRef = useRef(0)
-  const importRequestIdRef = useRef(0)
-  const selectionRef = useRef({
-    open,
-    selectedFile: null as File | null,
-    accountId: '',
-    decisions: [] as ImportReviewDecision[],
-    treatment: 'posted' as StatementImportTreatment,
-    stagingBatchId: '',
-    acknowledgePending: false,
-  })
-
-  const [step, setStep] = useState<ImportStep>('select')
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [accountId, setAccountId] = useState<string>('')
-  const [treatment, setTreatment] = useState<StatementImportTreatment>('posted')
-  const [stagingBatchId, setStagingBatchId] = useState('')
-  const [acknowledgePending, setAcknowledgePending] = useState(false)
-  const [parsedTransactions, setParsedTransactions] = useState<ParsedTransaction[]>([])
-  const [parseError, setParseError] = useState<string | null>(null)
-  const [previewError, setPreviewError] = useState<string | null>(null)
-  const [isImporting, setIsImporting] = useState(false)
-  const [previewToken, setPreviewToken] = useState<string | null>(null)
-  const [requiredDecisions, setRequiredDecisions] = useState<ImportReviewDecision[]>([])
-  const [reviewCandidates, setReviewCandidates] = useState<StatementImportReviewCandidate[]>([])
-  const [decisions, setDecisions] = useState<ImportReviewDecision[]>([])
-  const [plannedImported, setPlannedImported] = useState(0)
-  const [plannedSkipped, setPlannedSkipped] = useState(0)
-  const [limitations, setLimitations] = useState<string[]>([])
-  const [resolvedTreatment, setResolvedTreatment] = useState<StatementImportTreatment>('posted')
-  const [resolvedStagingBatchId, setResolvedStagingBatchId] = useState<string | null>(null)
-  const [plannedStaged, setPlannedStaged] = useState(0)
-  const [plannedPending, setPlannedPending] = useState(0)
-  const [balanceImpactCentavos, setBalanceImpactCentavos] = useState(0)
-  const [previewCurrency, setPreviewCurrency] = useState<string | null>(null)
-
-  selectionRef.current = {
-    open,
-    selectedFile,
-    accountId,
-    decisions,
-    treatment,
-    stagingBatchId,
-    acknowledgePending,
-  }
-
-  const clearPreviewBinding = useCallback(() => {
-    setPreviewToken(null)
-    setRequiredDecisions([])
-    setReviewCandidates([])
-    setPlannedImported(0)
-    setPlannedSkipped(0)
-    setLimitations([])
-    setResolvedTreatment('posted')
-    setResolvedStagingBatchId(null)
-    setPlannedStaged(0)
-    setPlannedPending(0)
-    setBalanceImpactCentavos(0)
-    setPreviewCurrency(null)
-  }, [])
-
-  const invalidateInFlightPreview = useCallback(() => {
-    previewRequestIdRef.current += 1
-    importRequestIdRef.current += 1
-    setIsImporting(false)
-  }, [])
-
-  const resetState = useCallback(() => {
-    fileRequestIdRef.current += 1
-    previewRequestIdRef.current += 1
-    importRequestIdRef.current += 1
-    setStep('select')
-    setSelectedFile(null)
-    setAccountId('')
-    setTreatment('posted')
-    setStagingBatchId('')
-    setAcknowledgePending(false)
-    setParsedTransactions([])
-    setParseError(null)
-    setPreviewError(null)
-    setIsImporting(false)
-    setPreviewToken(null)
-    setRequiredDecisions([])
-    setReviewCandidates([])
-    setDecisions([])
-    setPlannedImported(0)
-    setPlannedSkipped(0)
-    setLimitations([])
-    setResolvedTreatment('posted')
-    setResolvedStagingBatchId(null)
-    setPlannedStaged(0)
-    setPlannedPending(0)
-    setBalanceImpactCentavos(0)
-    setPreviewCurrency(null)
-  }, [])
-
-  const handleOpenChange = useCallback(
-    (nextOpen: boolean) => {
-      if (!nextOpen) resetState()
-      onOpenChange(nextOpen)
+  const {
+    selection: { selectedFile, accountId, treatment, stagingBatchId, acknowledgePending },
+    preview: {
+      plannedImported,
+      plannedSkipped,
+      limitations,
+      resolvedTreatment,
+      resolvedStagingBatchId,
+      plannedStaged,
+      plannedPending,
+      balanceImpactCentavos,
+      previewCurrency,
     },
-    [onOpenChange, resetState]
-  )
-
-  const handleAccountChange = useCallback(
-    (value: string) => {
-      invalidateInFlightPreview()
-      setAccountId(value)
-      setPreviewError(null)
-      setDecisions([])
-      clearPreviewBinding()
-    },
-    [clearPreviewBinding, invalidateInFlightPreview]
-  )
-
-  const clearTreatmentPreview = useCallback(() => {
-    invalidateInFlightPreview()
-    setPreviewError(null)
-    setDecisions([])
-    clearPreviewBinding()
-  }, [clearPreviewBinding, invalidateInFlightPreview])
-
-  const handleTreatmentChange = useCallback(
-    (value: string) => {
-      clearTreatmentPreview()
-      setTreatment(value as StatementImportTreatment)
-      setAcknowledgePending(false)
-      if (value === 'posted') setStagingBatchId('')
-    },
-    [clearTreatmentPreview]
-  )
-
-  const handleBatchChange = useCallback(
-    (value: string) => {
-      clearTreatmentPreview()
-      setStagingBatchId(value)
-    },
-    [clearTreatmentPreview]
-  )
-
-  const handlePendingAcknowledgement = useCallback(
-    (checked: boolean) => {
-      clearTreatmentPreview()
-      setAcknowledgePending(checked)
-    },
-    [clearTreatmentPreview]
-  )
-
-  const handleFileSelect = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const input = e.currentTarget
-      const file = input.files?.[0]
-      input.value = ''
-      if (!file) return
-
-      const requestId = ++fileRequestIdRef.current
-      invalidateInFlightPreview()
-      setSelectedFile(file)
-      setParseError(null)
-      setPreviewError(null)
-      setDecisions([])
-      setParsedTransactions([])
-      clearPreviewBinding()
-
-      try {
-        const content = await file.text()
-        if (requestId !== fileRequestIdRef.current) return
-        if (!selectionRef.current.open) return
-        if (selectionRef.current.selectedFile !== file) return
-        const parsed = parseStatement(content, file.name)
-        if (requestId !== fileRequestIdRef.current) return
-        if (!selectionRef.current.open) return
-        if (selectionRef.current.selectedFile !== file) return
-        setParsedTransactions(parsed)
-        if (parsed.length === 0) {
-          setParseError('No transactions found in file.')
-        }
-      } catch (err) {
-        if (requestId !== fileRequestIdRef.current) return
-        if (!selectionRef.current.open) return
-        if (selectionRef.current.selectedFile !== file) return
-        setParseError(err instanceof Error ? err.message : 'Failed to parse file')
-        setParsedTransactions([])
-      }
-    },
-    [clearPreviewBinding, invalidateInFlightPreview]
-  )
-
-  const canPreview = Boolean(
-    selectedFile &&
-    parsedTransactions.length > 0 &&
-    accountId &&
-    (treatment !== 'staged_pending' || acknowledgePending)
-  )
-  const reviewCandidateByKey = new Map(
-    reviewCandidates.map((candidate) => [candidateKey(candidate), candidate])
-  )
-  const actionableReviews = requiredDecisions.flatMap((candidate) => {
-    const details = reviewCandidateByKey.get(candidateKey(candidate))
-    return details ? [{ candidate, details }] : []
-  })
-  const candidatesMissingDetails =
-    requiredDecisions.length > 0 && actionableReviews.length !== requiredDecisions.length
-  const hasUnresolvedDecisions = requiredDecisions.some(
-    (candidate) => !decisions.some((decision) => isSameCandidate(decision, candidate))
-  )
-  const canImport = Boolean(
-    canPreview &&
-    previewToken &&
-    requiredDecisions.length === 0 &&
-    !candidatesMissingDetails &&
-    !previewError &&
-    !isImporting
-  )
-
-  const handlePreview = useCallback(async () => {
-    if (!selectedFile || !accountId) return
-    const requestId = ++previewRequestIdRef.current
-    const requestedFile = selectedFile
-    const requestedAccountId = accountId
-    const requestedDecisions = decisions.map((item) => reviewDecisionPayload(item, item.decision))
-    const requestedTreatment = treatment
-    const requestedStagingBatchId = stagingBatchId
-    const requestedAcknowledgePending = acknowledgePending
-    const treatmentOptions: StatementImportTreatmentOptions = {
-      treatment: requestedTreatment,
-      stagingBatchId: requestedStagingBatchId.trim() || undefined,
-      acknowledgePending: requestedAcknowledgePending,
-    }
-    setIsImporting(true)
-    setPreviewError(null)
-    try {
-      const preview =
-        requestedTreatment === 'posted'
-          ? await previewStatementFile(requestedFile, requestedAccountId, requestedDecisions)
-          : await previewStatementFile(
-              requestedFile,
-              requestedAccountId,
-              requestedDecisions,
-              treatmentOptions
-            )
-      if (requestId !== previewRequestIdRef.current) return
-      if (!selectionRef.current.open) return
-      if (selectionRef.current.selectedFile !== requestedFile) return
-      if (selectionRef.current.accountId !== requestedAccountId) return
-      if (selectionRef.current.decisions !== decisions) return
-      if (selectionRef.current.treatment !== requestedTreatment) return
-      if (selectionRef.current.stagingBatchId !== requestedStagingBatchId) return
-      if (selectionRef.current.acknowledgePending !== requestedAcknowledgePending) return
-
-      if (preview.errors.length) {
-        setPreviewError(preview.errors[0])
-        setPreviewToken(null)
-        if (isStaleDecisionBindingError(preview.errors)) {
-          setDecisions([])
-          setRequiredDecisions([])
-          setReviewCandidates([])
-        }
-        return
-      }
-
-      setParsedTransactions(preview.parsedTransactions)
-      setPreviewToken(preview.success ? preview.previewToken : null)
-      setRequiredDecisions(preview.requiredDecisions)
-      setReviewCandidates(preview.reviewCandidates)
-      setPlannedImported(preview.imported)
-      setPlannedSkipped(preview.skipped)
-      setLimitations(uniqueStrings(preview.limitations, preview.legacyEvidenceLimitations))
-      setResolvedTreatment(preview.treatment)
-      setResolvedStagingBatchId(preview.stagingBatchId)
-      setPlannedStaged(preview.stagedCount)
-      setPlannedPending(preview.pendingCount)
-      setBalanceImpactCentavos(preview.balanceImpactCentavos)
-      setPreviewCurrency(preview.accountCurrency)
-      setStep('preview')
-    } finally {
-      if (requestId === previewRequestIdRef.current) {
-        setIsImporting(false)
-      }
-    }
-  }, [selectedFile, accountId, decisions, treatment, stagingBatchId, acknowledgePending])
-
-  const setCandidateDecision = useCallback(
-    (candidate: ImportReviewDecision, decision: ImportReviewDecision['decision']) => {
-      invalidateInFlightPreview()
-      setDecisions((current) => [
-        ...current.filter((item) => !isSameCandidate(item, candidate)),
-        reviewDecisionPayload(candidate, decision),
-      ])
-      setPreviewToken(null)
-    },
-    [invalidateInFlightPreview]
-  )
-
-  const handleImport = useCallback(async () => {
-    if (
-      !selectedFile ||
-      !accountId ||
-      !previewToken ||
-      requiredDecisions.length > 0 ||
-      candidatesMissingDetails
-    ) {
-      return
-    }
-
-    const requestId = ++importRequestIdRef.current
-    const requestedFile = selectedFile
-    const requestedAccountId = accountId
-    const requestedToken = previewToken
-    const requestedDecisions = decisions.map((item) => reviewDecisionPayload(item, item.decision))
-    const requestedTreatment = treatment
-    const requestedStagingBatchId = stagingBatchId
-    const requestedAcknowledgePending = acknowledgePending
-
-    setIsImporting(true)
-    setStep('importing')
-    setPreviewError(null)
-
-    try {
-      const result = await importStatementFile(requestedFile, requestedAccountId, {
-        previewToken: requestedToken,
-        decisions: requestedDecisions,
-        ...(requestedTreatment === 'posted'
-          ? {}
-          : {
-              treatment: requestedTreatment,
-              stagingBatchId: requestedStagingBatchId.trim() || undefined,
-              acknowledgePending: requestedAcknowledgePending,
-            }),
-      })
-
-      if (result.imported > 0) invalidateTransactionPage('import')
-
-      const isStaleResult =
-        requestId !== importRequestIdRef.current ||
-        !selectionRef.current.open ||
-        selectionRef.current.selectedFile !== requestedFile ||
-        selectionRef.current.accountId !== requestedAccountId ||
-        selectionRef.current.treatment !== requestedTreatment ||
-        selectionRef.current.stagingBatchId !== requestedStagingBatchId ||
-        selectionRef.current.acknowledgePending !== requestedAcknowledgePending
-      if (isStaleResult) return
-
-      if (result.errors.length > 0) {
-        if (result.imported === 0) {
-          toast.error(t('import.error'), {
-            description: result.errors[0],
-          })
-        } else {
-          toast.warning(
-            t('import.partialError', {
-              imported: result.imported,
-              errorCount: result.errors.length,
-            })
-          )
-        }
-        if (isStalePreviewError(result.errors)) {
-          setPreviewToken(null)
-          setPreviewError(t('import.stalePreview'))
-        }
-        if (isStaleDecisionBindingError(result.errors)) {
-          setDecisions([])
-          setRequiredDecisions([])
-          setReviewCandidates([])
-        }
-        setStep('preview')
-        return
-      }
-
-      if (result.skipped > 0) {
-        toast.success(
-          t('import.success', {
-            imported: result.imported,
-            skipped: result.skipped,
-          })
-        )
-      } else {
-        toast.success(
-          t('import.successNoSkip', {
-            imported: result.imported,
-          })
-        )
-      }
-
-      handleOpenChange(false)
-    } catch (error) {
-      if (requestId !== importRequestIdRef.current) return
-      if (!selectionRef.current.open) return
-      toast.error(getErrorMessage(error, t('import.error')))
-      setPreviewError(getErrorMessage(error, t('import.error')))
-      setStep('preview')
-    } finally {
-      if (requestId === importRequestIdRef.current) {
-        setIsImporting(false)
-      }
-    }
-  }, [
-    selectedFile,
-    accountId,
-    previewToken,
-    requiredDecisions.length,
+    step,
+    parsedTransactions,
+    parseError,
+    previewError,
+    isImporting,
+    canPreview,
+    canImport,
+    actionableReviews,
     candidatesMissingDetails,
-    decisions,
-    treatment,
-    stagingBatchId,
-    acknowledgePending,
-    t,
+    hasUnresolvedDecisions,
+    showReviewActions,
     handleOpenChange,
-  ])
+    handleAccountChange,
+    handleTreatmentChange,
+    handleBatchChange,
+    handlePendingAcknowledgement,
+    handleFileSelect,
+    handlePreview,
+    setCandidateDecision,
+    handleImport,
+    handleBackToSelection,
+  } = useStatementImportSession({ open, onOpenChange })
 
   useEffect(() => {
     if (!open || accounts.length > 0) {
@@ -525,7 +86,6 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
   const activeAccounts = accounts.filter((a) => !a.is_archived)
   const selectedAccount = activeAccounts.find((account) => account.id === accountId)
   const accountCurrency = selectedAccount?.currency || 'USD'
-  const showReviewActions = requiredDecisions.length > 0 && !candidatesMissingDetails
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -751,14 +311,13 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
                   {t('import.reviewCandidatesDescription')}
                 </p>
                 <div className="max-h-64 space-y-3 overflow-y-auto">
-                  {actionableReviews.map(({ candidate, details }) => {
-                    const selected = decisions.find((item) => isSameCandidate(item, candidate))
+                  {actionableReviews.map(({ key, candidate, details, decision }) => {
                     const incomingLabel = t('import.chooseDecisionFor', {
                       number: details.incoming.rowIndex + 1,
                     })
                     return (
                       <div
-                        key={candidateKey(candidate)}
+                        key={key}
                         className="border-border/70 bg-surface/80 space-y-3 rounded-lg border p-3"
                       >
                         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -819,7 +378,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
                           </div>
                         </div>
                         <Select
-                          value={selected?.decision ?? ''}
+                          value={decision ?? ''}
                           onValueChange={(value) =>
                             setCandidateDecision(
                               candidate,
@@ -920,7 +479,7 @@ export function StatementImportDialog({ open, onOpenChange }: StatementImportDia
                 variant="ghost"
                 className="min-h-11"
                 disabled={isImporting}
-                onClick={() => setStep('select')}
+                onClick={handleBackToSelection}
               >
                 {t('import.cancel')}
               </Button>

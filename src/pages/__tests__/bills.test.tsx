@@ -1,11 +1,25 @@
 import { act } from '@testing-library/react'
 import { useCurrencyStore } from '@/stores/currency-store'
+import type * as Database from '@/lib/database'
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import dayjs from 'dayjs'
 import { MemoryRouter } from 'react-router'
 import { BillsPage } from '../bills'
+
+const ledgerWrites = vi.hoisted(() => ({
+  execute: vi.fn(),
+  withTransaction: vi.fn(),
+  materializeRecurringTransactionsBrowser: vi.fn(),
+}))
+
+vi.mock('@/lib/database', async (importOriginal) => ({
+  ...(await importOriginal<typeof Database>()),
+  ...ledgerWrites,
+}))
+
+const convertMonthlyEstimate = useCurrencyStore.getState().convertCurrentToPreferred
 
 const recurringStoreMock = vi.hoisted(() => ({
   fetch: vi.fn().mockResolvedValue(undefined),
@@ -38,8 +52,12 @@ const recurringStoreMock = vi.hoisted(() => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, params?: { count?: number }) =>
-      typeof params?.count === 'number' ? `${key} ${params.count}` : key,
+    t: (key: string, params?: { count?: number; rules?: string }) =>
+      params?.rules
+        ? `${key} ${params.rules}`
+        : typeof params?.count === 'number'
+          ? `${key} ${params.count}`
+          : key,
     i18n: { language: 'en', changeLanguage: vi.fn() },
   }),
 }))
@@ -65,7 +83,13 @@ const fxRate = (fromCurrency: string, toCurrency: string, rateDecimal: string) =
 
 describe('BillsPage', () => {
   beforeEach(() => {
-    useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
+    useCurrencyStore.setState({
+      mainCurrency: 'USD',
+      preferredCurrency: 'USD',
+      manualRates: [],
+      convertCurrentToPreferred: convertMonthlyEstimate,
+    })
+    Object.values(ledgerWrites).forEach((write) => write.mockClear())
     recurringStoreMock.fetch.mockClear()
     recurringStoreMock.rules = [
       {
@@ -200,6 +224,268 @@ describe('BillsPage', () => {
 
     expect(screen.getByText('Bill 20')).toBeInTheDocument()
   })
+
+  it.each([
+    { amount: 3700, frequency: 'weekly', monthlyCentavos: 16077, runRate: '$160.77' },
+    { amount: 7400, frequency: 'biweekly', monthlyCentavos: 16077, runRate: '$160.77' },
+    {
+      amount: 172750273393471,
+      frequency: 'weekly',
+      monthlyCentavos: 750599937894631,
+      runRate: '$7,505,999,378,946.31',
+    },
+    {
+      amount: 345500546786971,
+      frequency: 'biweekly',
+      monthlyCentavos: 750599937894694,
+      runRate: '$7,505,999,378,946.94',
+    },
+    { amount: 120000, frequency: 'monthly', monthlyCentavos: 120000, runRate: '$1,200.00' },
+    { amount: 100, frequency: 'daily', monthlyCentavos: 3000, runRate: '$30.00' },
+    { amount: 100, frequency: 'quarterly', monthlyCentavos: 33, runRate: '$0.33' },
+    { amount: 100, frequency: 'yearly', monthlyCentavos: 8, runRate: '$0.08' },
+    { amount: -0, frequency: 'monthly', monthlyCentavos: 0, runRate: '$0.00' },
+  ])(
+    'pins the monthly equivalent for $amount centavos / $frequency',
+    ({ amount, frequency, monthlyCentavos, runRate }) => {
+      Object.assign(recurringStoreMock.rules[0], { amount, frequency })
+      const convert = vi.fn(convertMonthlyEstimate)
+      useCurrencyStore.setState({ convertCurrentToPreferred: convert })
+
+      render(
+        <MemoryRouter>
+          <BillsPage />
+        </MemoryRouter>
+      )
+
+      expect(convert).toHaveBeenCalledExactlyOnceWith(monthlyCentavos, 'USD')
+      const total = within(screen.getByText('monthlyRunRate').parentElement!)
+      expect(total.getByText(runRate)).toBeInTheDocument()
+      expect(total.getByText('currency.estimate')).toBeInTheDocument()
+    }
+  )
+
+  it.each([
+    {
+      amount: 100,
+      frequency: 'bogus',
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: 100,
+      frequency: '',
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: 100,
+      frequency: null,
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: 100,
+      frequency: undefined,
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: 100,
+      frequency: 'toString',
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: 100,
+      frequency: 'constructor',
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: 100,
+      frequency: '__proto__',
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: -1,
+      frequency: 'weekly',
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: 0.5,
+      frequency: 'weekly',
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: 0.5,
+      frequency: 'monthly',
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: NaN,
+      frequency: 'monthly',
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: Infinity,
+      frequency: 'daily',
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: Number.MAX_SAFE_INTEGER + 1,
+      frequency: 'monthly',
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: Number.MAX_SAFE_INTEGER,
+      frequency: 'daily',
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+    {
+      amount: Number.MAX_SAFE_INTEGER,
+      frequency: 'monthly',
+      monthlyCentavos: null,
+      runRate: 'currency.unavailable',
+      reason: 'estimate.invalidRules Rent',
+    },
+  ])(
+    'pins invalid or oversized $amount centavos / $frequency',
+    ({ amount, frequency, monthlyCentavos, runRate, reason }) => {
+      Object.assign(recurringStoreMock.rules[0], { amount, frequency })
+      const convert = vi.fn(convertMonthlyEstimate)
+      useCurrencyStore.setState({ convertCurrentToPreferred: convert })
+
+      render(
+        <MemoryRouter>
+          <BillsPage />
+        </MemoryRouter>
+      )
+
+      if (monthlyCentavos === null) expect(convert).not.toHaveBeenCalled()
+      else expect(convert).toHaveBeenCalledExactlyOnceWith(monthlyCentavos, 'USD')
+      const total = within(screen.getByText('monthlyRunRate').parentElement!)
+      expect(total.getByText(runRate)).toBeInTheDocument()
+      if (reason) expect(screen.getByRole('status')).toHaveTextContent(reason)
+      else expect(screen.queryByRole('status')).not.toBeInTheDocument()
+      expect(total.queryByText('currency.estimate')).not.toBeInTheDocument()
+      Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
+      expect(screen.getByText('Rent')).toBeInTheDocument()
+      expect(screen.getByText('horizon.activeCount 1')).toBeInTheDocument()
+    }
+  )
+
+  it('keeps mixed valid and invalid bills visible without writing or materializing', () => {
+    recurringStoreMock.rules.push({
+      ...recurringStoreMock.rules[0],
+      id: 'invalid',
+      description: 'Invalid bill',
+      amount: 100,
+      frequency: 'bogus',
+    })
+    const before = JSON.stringify(recurringStoreMock.rules)
+
+    render(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
+
+    const total = within(screen.getByText('monthlyRunRate').parentElement!)
+    expect(total.getByText('currency.unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('estimate.invalidRules Invalid bill')
+    expect(total.queryByText('$1,200.00')).not.toBeInTheDocument()
+    expect(total.queryByText('$1,201.00')).not.toBeInTheDocument()
+    expect(screen.getByText('Rent')).toBeInTheDocument()
+    expect(screen.getByText('Invalid bill')).toBeInTheDocument()
+    expect(screen.getByText('horizon.activeCount 2')).toBeInTheDocument()
+    expect(JSON.stringify(recurringStoreMock.rules)).toBe(before)
+    Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
+  })
+
+  it('keeps currency and invalid-estimate reasons together when the list is filtered', async () => {
+    Object.assign(recurringStoreMock.rules[0], { currency: 'EUR' })
+    recurringStoreMock.rules.push({
+      ...recurringStoreMock.rules[0],
+      id: 'invalid',
+      description: 'Invalid bill',
+      frequency: 'bogus',
+      next_date: '2020-01-01',
+    })
+    render(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'currency.missing estimate.invalidRules Invalid bill'
+    )
+    await userEvent.setup().selectOptions(screen.getByRole('combobox'), 'overdue')
+    expect(screen.queryByText('Rent')).not.toBeInTheDocument()
+    expect(screen.getByText('Invalid bill')).toBeInTheDocument()
+    expect(screen.getByText('currency.unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'currency.missing estimate.invalidRules Invalid bill'
+    )
+    Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
+  })
+
+  it('rounds before conversion and keeps the existing rule/account/USD currency boundary', () => {
+    Object.assign(recurringStoreMock.rules[0], {
+      amount: 1,
+      frequency: 'quarterly',
+      currency: null,
+      account_currency: 'EUR',
+    })
+    useCurrencyStore.setState({ manualRates: [fxRate('EUR', 'USD', '2')] })
+    const convert = vi.fn(convertMonthlyEstimate)
+    useCurrencyStore.setState({ convertCurrentToPreferred: convert })
+    const page = render(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
+
+    expect(convert).toHaveBeenCalledExactlyOnceWith(0, 'EUR')
+    expect(
+      within(screen.getByText('monthlyRunRate').parentElement!).getByText('$0.00')
+    ).toBeInTheDocument()
+
+    Object.assign(recurringStoreMock.rules[0], { account_currency: null })
+    recurringStoreMock.rules = [...recurringStoreMock.rules]
+    convert.mockClear()
+    page.rerender(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
+    expect(convert).toHaveBeenCalledExactlyOnceWith(0, 'USD')
+    Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
+  })
+
   it('converts mixed-currency run rates and withholds totals when a rate disappears', () => {
     recurringStoreMock.rules.push({
       ...recurringStoreMock.rules[0],

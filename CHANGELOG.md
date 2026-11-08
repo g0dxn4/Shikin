@@ -7,6 +7,7 @@ All notable changes to Shikin are documented in this file.
 ### Changed
 
 - Removed the unused undated currency-conversion API (`convertCurrencyTotals` and its types) from `@shikin/finance-core`. Ledger conversions use only exact, dated manual exchange-rate evidence.
+- Bills calculates monthly equivalents with exact core arithmetic: a weekly 37.00 bill is now 160.77/month (was 160.76), and a few near-limit amounts move by one cent. Rules with an unknown frequency, an invalid amount, or an oversized amount show an unavailable estimate with a reason instead of an invented number. Their rows still appear.
 
 ### Internal structure
 

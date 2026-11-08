@@ -147,6 +147,43 @@ describe('separate read-only current-definition recurring estimates', () => {
       recurringEquivalentCentavos(Number.MAX_SAFE_INTEGER, 'weekly', 'subscription')
     ).toThrow('safe integer')
   })
+  it.each([
+    [3700, 'weekly', 16077, 192918],
+    [7400, 'biweekly', 16077, 192918],
+    [172750273393471, 'weekly', 750599937894631, 9007199254735578],
+    [345500546786971, 'biweekly', 750599937894694, 9007199254736334],
+    [120000, 'monthly', 120000, 1440000],
+    [-0, 'monthly', 0, 0],
+  ] as const)(
+    'pins exact rule equivalents for %s centavos / %s',
+    (amount, frequency, monthlyCentavos, yearlyCentavos) => {
+      expect(recurringEquivalentCentavos(amount, frequency, 'recurring_rule')).toEqual({
+        monthlyCentavos,
+        yearlyCentavos,
+      })
+    }
+  )
+  it.each([-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects invalid rule amount %s',
+    (amount) => {
+      expect(() => recurringEquivalentCentavos(amount, 'monthly', 'recurring_rule')).toThrow(
+        'Estimate amounts require non-negative safe integer centavos.'
+      )
+    }
+  )
+  it('rejects an unsupported rule frequency instead of treating it as monthly', () => {
+    expect(() => recurringEquivalentCentavos(100, 'bogus' as 'monthly', 'recurring_rule')).toThrow(
+      'Unsupported recurring frequency.'
+    )
+  })
+  it('keeps the yearly overflow guard even when the monthly equivalent would be safe', () => {
+    expect(() =>
+      recurringEquivalentCentavos(Number.MAX_SAFE_INTEGER, 'monthly', 'recurring_rule')
+    ).toThrow('Estimate exceeds safe integer centavos.')
+    expect(() =>
+      recurringEquivalentCentavos(Number.MAX_SAFE_INTEGER, 'daily', 'recurring_rule')
+    ).toThrow('Estimate exceeds safe integer centavos.')
+  })
   it('exposes unresolved scope and limits FX authority to direct manual asOf rates', () => {
     expect(project(dataset(), { categoryIds: ['gone'] }).recurringRules).toMatchObject({
       complete: false,

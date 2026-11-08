@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router'
 import { CalendarClock, CheckCircle, Info, Pencil, Plus, Receipt } from 'lucide-react'
 import dayjs from 'dayjs'
+import { recurringEquivalentCentavos } from '@shikin/finance-core'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ShowMorePagination } from '@/components/shared/show-more-pagination'
@@ -14,25 +15,6 @@ import { formatMoney } from '@/lib/money'
 import { useRecurringStore, type RecurringRuleWithDetails } from '@/stores/recurring-store'
 import { useUIStore } from '@/stores/ui-store'
 import { cn } from '@/lib/utils'
-
-function monthlyEquivalent(rule: RecurringRuleWithDetails) {
-  const amount = rule.amount
-  switch (rule.frequency) {
-    case 'daily':
-      return Math.round(amount * 30)
-    case 'weekly':
-      return Math.round(amount * 4.345)
-    case 'biweekly':
-      return Math.round(amount * 2.1725)
-    case 'quarterly':
-      return Math.round(amount / 3)
-    case 'yearly':
-      return Math.round(amount / 12)
-    case 'monthly':
-    default:
-      return amount
-  }
-}
 
 function daysUntil(date: string) {
   return dayjs(date).startOf('day').diff(dayjs().startOf('day'), 'day')
@@ -148,7 +130,8 @@ export function BillsPage() {
     later,
     monthlyTotal,
     missingCurrencies,
-    complete,
+    currencyComplete,
+    invalidEstimates,
   } = useMemo(() => {
     const today = dayjs()
     const todayStart = today.startOf('day')
@@ -161,6 +144,7 @@ export function BillsPage() {
     let total = 0
     let conversionComplete = true
     const missing = new Set<string>()
+    const invalid: string[] = []
 
     for (const rule of rules) {
       if (
@@ -172,14 +156,26 @@ export function BillsPage() {
         continue
 
       activeBills.push(rule)
-      const result = convertCurrentToPreferred(
-        monthlyEquivalent(rule),
-        rule.currency ?? rule.account_currency ?? 'USD'
-      )
-      if (result.complete) total += result.amountCentavos
-      else {
-        conversionComplete = false
-        result.missingCurrencies.forEach((currency) => missing.add(currency))
+      let monthlyCentavos: number | null = null
+      try {
+        monthlyCentavos = recurringEquivalentCentavos(
+          rule.amount,
+          rule.frequency,
+          'recurring_rule'
+        ).monthlyCentavos
+      } catch {
+        invalid.push(rule.description)
+      }
+      if (monthlyCentavos !== null) {
+        const result = convertCurrentToPreferred(
+          monthlyCentavos,
+          rule.currency ?? rule.account_currency ?? 'USD'
+        )
+        if (result.complete) total += result.amountCentavos
+        else {
+          conversionComplete = false
+          result.missingCurrencies.forEach((currency) => missing.add(currency))
+        }
       }
 
       const dueDate = dayjs(rule.next_date)
@@ -201,13 +197,15 @@ export function BillsPage() {
       next7: within7,
       later: after7,
       monthlyTotal: total,
-      complete: conversionComplete,
+      currencyComplete: conversionComplete,
+      invalidEstimates: invalid,
       missingCurrencies: [...missing],
     }
     // Manual authority is read by the stable store converter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rules, convertCurrentToPreferred, manualRates, mainCurrency, preferredCurrency])
 
+  const complete = currencyComplete && invalidEstimates.length === 0
   const filteredBills = status === 'overdue' ? overdue : status === 'soon' ? dueSoon : bills
   const visibleBills = filteredBills.slice(0, visibleBillCount)
   const runRateValue = isLoading
@@ -218,7 +216,16 @@ export function BillsPage() {
   const runRateDetail = isLoading
     ? null
     : !complete
-      ? t('currency.missing', { currencies: missingCurrencies.join(', ') })
+      ? [
+          !currencyComplete
+            ? t('currency.missing', { currencies: missingCurrencies.join(', ') })
+            : null,
+          invalidEstimates.length
+            ? t('estimate.invalidRules', { rules: invalidEstimates.join(', ') })
+            : null,
+        ]
+          .filter(Boolean)
+          .join(' ')
       : t('currency.estimateToday', { currency: preferredCurrency })
 
   return (

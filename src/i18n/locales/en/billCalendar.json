@@ -91,6 +91,9 @@
     "estimateToday": "{{currency}} · planning estimate using today’s rate",
     "actualAndEstimate": "{{currency}} · paid at transaction date; estimates use today’s rate"
   },
+  "estimate": {
+    "invalidRules": "Total unavailable: invalid amounts, unsupported frequencies, or oversized monthly or yearly equivalents ({{rules}})."
+  },
   "schedule": {
     "allDays": "Whole month",
     "about": "Payment basis",

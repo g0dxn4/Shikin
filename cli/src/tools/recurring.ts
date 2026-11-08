@@ -1,6 +1,10 @@
 import {
   advanceAnchoredRecurrence,
   advanceLegacyRecurrence,
+  planRecurringOccurrence,
+  RecurringAnchorRequiredError,
+  recurringOccurrenceFailureMessage,
+  validateRecurringOccurrences,
   type RecurrenceAnchor,
 } from '@shikin/finance-core'
 import {
@@ -37,6 +41,8 @@ type RecurringRuleRow = {
   account_id: string
   category_id: string | null
   subcategory_id: string | null
+  tags?: string | null
+  to_account_id?: string | null
   notes: string | null
   active: number
   currency: string | null
@@ -987,142 +993,97 @@ const manageRecurringTransaction: ToolDefinition = {
 // ---------------------------------------------------------------------------
 async function materializeDueRecurringRules() {
   const today = dayjs().format('YYYY-MM-DD')
-
-  // Find due recurring rules
-  const dueRules = await query<RecurringRuleRow>(
-    `SELECT r.*, a.name as account_name, a.currency as account_currency,
-            a.is_archived as account_is_archived, a.account_mode
-     FROM recurring_rules r
-     LEFT JOIN accounts a ON r.account_id = a.id
-     WHERE r.active = 1 AND r.next_date <= $1`,
-    [today]
-  )
-
-  if (dueRules.length === 0) {
-    return {
-      success: true,
-      created: 0,
-      message: 'No recurring transactions were due.',
-    }
-  }
-
-  const unsupportedTransferRule = dueRules.find((rule) => rule.type === 'transfer')
-  if (unsupportedTransferRule) {
-    return unsupportedRecurringTransferFailure()
-  }
-
-  const archivedAccountRule = dueRules.find((rule) => rule.account_is_archived !== 0)
-  if (archivedAccountRule) {
-    return {
-      success: false,
-      reason: 'account_archived',
-      message: `Recurring rule "${archivedAccountRule.description}" points at archived account ${archivedAccountRule.account_id}. Unarchive the account or pause the rule before materializing it.`,
-    }
-  }
-
-  const snapshotAccountRule = dueRules.find(
-    (rule) => (rule.account_mode ?? 'transactional') === 'snapshot_only'
-  )
-  if (snapshotAccountRule) {
-    return {
-      success: false,
-      reason: 'snapshot_only_account',
-      message: `Recurring rule "${snapshotAccountRule.description}" points at snapshot-only account ${snapshotAccountRule.account_id}. Snapshot-only accounts do not accept transaction ledger writes.`,
-    }
-  }
-
-  const unknownCurrencyRule = dueRules.find((rule) => normalizeCurrencyCode(rule.currency) === '')
-  if (unknownCurrencyRule) {
-    return unknownRecurringRuleCurrencyFailure(unknownCurrencyRule)
-  }
-
-  const accountCurrencyMismatchRule = dueRules.find((rule) => {
-    const ruleCurrency = normalizeCurrencyCode(rule.currency)
-    const accountCurrency = normalizeCurrencyCode(rule.account_currency)
-    return ruleCurrency !== '' && (accountCurrency === '' || ruleCurrency !== accountCurrency)
-  })
-  if (accountCurrencyMismatchRule) {
-    return {
-      success: false,
-      reason: 'rule_account_currency_mismatch',
-      message: `Recurring rule "${accountCurrencyMismatchRule.description}" has stored currency ${accountCurrencyMismatchRule.currency} but the linked account is now ${accountCurrencyMismatchRule.account_currency}. Repair or recreate the rule before materializing it.`,
-    }
-  }
-
-  let created = 0
-
-  for (const rule of dueRules) {
-    const createdForRule = transaction(() => {
-      let occurrenceDate = rule.next_date
-      let createdWithinRule = 0
-
-      while (occurrenceDate <= today) {
-        if (rule.end_date && occurrenceDate > rule.end_date) {
-          const deactivateResult = execute(
-            "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $1 AND active = 1 AND next_date = $2",
-            [rule.id, occurrenceDate]
-          )
-          if (deactivateResult.rowsAffected !== 1) {
-            return createdWithinRule
-          }
-          return createdWithinRule
-        }
-
-        const newNextDate = advanceRecurringDate(occurrenceDate, rule.frequency, rule)
-        const shouldDeactivate = Boolean(rule.end_date && newNextDate > rule.end_date)
-        const claimResult = execute(
-          "UPDATE recurring_rules SET active = $1, next_date = $2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $3 AND active = 1 AND next_date = $4",
-          [shouldDeactivate ? 0 : 1, newNextDate, rule.id, occurrenceDate]
-        )
-        if (claimResult.rowsAffected !== 1) {
-          return createdWithinRule
-        }
-
-        const txId = generateId()
-
-        execute(
-          `INSERT INTO transactions (id, account_id, category_id, type, amount, currency, description, notes, date, is_recurring, status, recurring_rule_id)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, 'posted', $10)`,
-          [
-            txId,
-            rule.account_id,
-            rule.category_id,
-            rule.type,
-            rule.amount,
-            normalizeCurrencyCode(rule.currency),
-            rule.description,
-            rule.notes,
-            occurrenceDate,
-            rule.id,
-          ]
-        )
-
-        const balanceChange = rule.type === 'income' ? rule.amount : -rule.amount
-        execute(
-          "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2 AND COALESCE(account_mode, 'transactional') = 'transactional'",
-          [balanceChange, rule.account_id]
-        )
-
-        createdWithinRule += 1
-        occurrenceDate = newNextDate
-        if (shouldDeactivate) {
-          return createdWithinRule
+  try {
+    return transaction(() => {
+      const dueRules = query<RecurringRuleRow>(
+        `SELECT r.*, a.name as account_name, a.currency as account_currency,
+                a.is_archived as account_is_archived, a.account_mode
+         FROM recurring_rules r
+         LEFT JOIN accounts a ON r.account_id = a.id
+         WHERE r.active = 1 AND r.next_date <= $1`,
+        [today]
+      )
+      const failure = validateRecurringOccurrences(dueRules)
+      if (failure) {
+        const { rule } = failure
+        return {
+          success: false,
+          reason: failure.reason,
+          message:
+            failure.reason === 'rule_account_currency_mismatch'
+              ? `Recurring rule "${rule.description}" has stored currency ${rule.currency} but the linked account is now ${rule.account_currency}. Repair or recreate the rule before materializing it.`
+              : recurringOccurrenceFailureMessage(failure),
         }
       }
 
-      return createdWithinRule
+      let created = 0
+      for (const rule of dueRules) {
+        let date = rule.next_date
+        while (date <= today) {
+          const advancedDate =
+            rule.frequency === 'daily' ||
+            rule.frequency === 'weekly' ||
+            rule.frequency === 'biweekly'
+              ? advanceDate(date, rule.frequency)
+              : undefined
+          const plan = planRecurringOccurrence(rule, date, today, advancedDate)
+          if (!plan) break
+          if (plan.kind === 'deactivate') {
+            execute(
+              "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $1 AND active = 1 AND next_date = $2",
+              [rule.id, plan.date]
+            )
+            break
+          }
+          const claimResult = execute(
+            "UPDATE recurring_rules SET active = $1, next_date = $2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $3 AND active = 1 AND next_date = $4",
+            [plan.active, plan.nextDate, rule.id, plan.date]
+          )
+          if (claimResult.rowsAffected !== 1) break
+
+          const occurrence = plan.transaction
+          execute(
+            `INSERT INTO transactions (id, account_id, category_id, subcategory_id, type, amount, currency, description, notes, date, tags, is_recurring, transfer_to_account_id, status, recurring_rule_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, $12, 'posted', $13)`,
+            [
+              generateId(),
+              occurrence.account_id,
+              occurrence.category_id,
+              occurrence.subcategory_id,
+              occurrence.type,
+              occurrence.amount,
+              occurrence.currency,
+              occurrence.description,
+              occurrence.notes,
+              occurrence.date,
+              occurrence.tags,
+              occurrence.transfer_to_account_id,
+              occurrence.recurring_rule_id,
+            ]
+          )
+          execute(
+            "UPDATE accounts SET balance = balance + $1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = $2 AND COALESCE(account_mode, 'transactional') = 'transactional'",
+            [plan.balanceDelta, occurrence.account_id]
+          )
+          created += 1
+          if (plan.active === 0) break
+          date = plan.nextDate
+        }
+      }
+      return {
+        success: true,
+        created,
+        message:
+          created > 0
+            ? `Created ${created} transaction(s) from recurring rules.`
+            : 'No recurring transactions were due.',
+      }
     })
-
-    created += createdForRule
-  }
-
-  return {
-    success: true,
-    created,
-    message:
-      created > 0
-        ? `Created ${created} transaction(s) from recurring rules.`
-        : 'No recurring transactions were due.',
+  } catch (error) {
+    if (error instanceof RecurringAnchorRequiredError) {
+      error.message = `Recurring date ${error.date} needs an explicit fixed-day or end-of-month anchor. Update and save the rule before materializing it.`
+    }
+    throw error
   }
 }
 

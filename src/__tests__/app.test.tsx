@@ -7,6 +7,7 @@ import type { installUpdate } from '@/lib/updater'
 
 const {
   mockMaterializeTransactions,
+  mockRecurringState,
   mockLoadRates,
   mockCurrencyState,
   mockFetchAccounts,
@@ -19,6 +20,7 @@ const {
   mockRelaunchToApplyUpdate,
 } = vi.hoisted(() => ({
   mockMaterializeTransactions: vi.fn(),
+  mockRecurringState: { refreshWarning: null as string | null },
   mockLoadRates: vi.fn(),
   mockCurrencyState: { mainCurrency: null as string | null },
   mockFetchAccounts: vi.fn(),
@@ -61,8 +63,11 @@ vi.mock('@/components/ui/loading-spinner', () => ({
 
 vi.mock('@/stores/recurring-store', () => ({
   useRecurringStore: (
-    selector: (state: { materializeTransactions: typeof mockMaterializeTransactions }) => unknown
-  ) => selector({ materializeTransactions: mockMaterializeTransactions }),
+    selector: (state: {
+      materializeTransactions: typeof mockMaterializeTransactions
+      refreshWarning: string | null
+    }) => unknown
+  ) => selector({ materializeTransactions: mockMaterializeTransactions, ...mockRecurringState }),
 }))
 
 vi.mock('@/stores/currency-store', () => ({
@@ -124,6 +129,7 @@ describe('App startup orchestration', () => {
     consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     mockMaterializeTransactions.mockResolvedValue(undefined)
+    mockRecurringState.refreshWarning = null
     mockLoadRates.mockResolvedValue(undefined)
     mockCurrencyState.mainCurrency = 'USD'
     mockFetchAccounts.mockResolvedValue(undefined)
@@ -160,6 +166,31 @@ describe('App startup orchestration', () => {
     await waitFor(() => {
       expect(startupRoot).toHaveAttribute('data-startup-state', 'ready')
     })
+  })
+
+  it('reports committed recurring entries with a refresh warning, not a startup failure or retry-save prompt', async () => {
+    mockMaterializeTransactions.mockResolvedValueOnce(1)
+    mockRecurringState.refreshWarning = 'Transaction read unavailable'
+    const { container } = render(<App />)
+
+    expect(await screen.findByText('Recurring entries saved')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Your recurring entries were saved, but some views could not be refreshed. Reload the app to refresh them. Transaction read unavailable'
+      )
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Startup tasks need attention')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry startup' })).not.toBeInTheDocument()
+    expect(container.querySelector('[data-startup-state]')).toHaveAttribute(
+      'data-startup-state',
+      'ready'
+    )
+    expect(container.querySelector('[data-recurring-refresh-warning]')).toHaveAttribute(
+      'role',
+      'status'
+    )
+    expect(mockSnapshotBalances).toHaveBeenCalledTimes(1)
+    expect(mockMaterializeTransactions).toHaveBeenCalledTimes(1)
   })
 
   it('loads manual FX offline and gives unconfigured users a localized Settings CTA', async () => {

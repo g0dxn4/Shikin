@@ -9466,12 +9466,15 @@ describe('CLI tool validation regressions', () => {
         'tx_test_123',
         'acct-1',
         'cat-1',
+        null,
         'expense',
         1250,
         'CAD',
         'Coffee subscription',
         'monthly',
         dueDate,
+        '[]',
+        null,
         'rule-1',
       ]
     )
@@ -9553,12 +9556,15 @@ describe('CLI tool validation regressions', () => {
         'tx_test_123',
         'acct-1',
         'cat-1',
+        null,
         'expense',
         1250,
         'CAD',
         'Coffee subscription',
         'monthly',
         dueDate,
+        '[]',
+        null,
         'rule-1',
       ]
     )
@@ -9696,7 +9702,7 @@ describe('CLI tool validation regressions', () => {
       message:
         'Recurring transfers are not supported yet. Create separate recurring income/expense rules until destination-account support is fully implemented.',
     })
-    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
@@ -9727,7 +9733,7 @@ describe('CLI tool validation regressions', () => {
       message:
         'Recurring rule "Coffee subscription" has stored currency USD but the linked account is now EUR. Repair or recreate the rule before materializing it.',
     })
-    expect(mockTransaction).not.toHaveBeenCalled()
+    expect(mockTransaction).toHaveBeenCalledTimes(1)
     expect(mockExecute).not.toHaveBeenCalled()
   })
 
@@ -9803,12 +9809,15 @@ describe('CLI tool validation regressions', () => {
         'tx_test_123',
         'acct-1',
         'cat-1',
+        null,
         'expense',
         1250,
         'USD',
         'Coffee subscription',
         'monthly',
         dueDate,
+        '[]',
+        null,
         'rule-1',
       ]
     )

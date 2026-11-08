@@ -9,7 +9,12 @@ import { getErrorMessage } from '@/lib/errors'
 import { isTauri } from '@/lib/runtime'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
-import { advanceAnchoredRecurrence, advanceLegacyRecurrence } from '@shikin/finance-core'
+import {
+  planRecurringOccurrence,
+  recurringOccurrenceFailureMessage,
+  validateRecurringOccurrences,
+  type RecurringOccurrenceRule,
+} from '@shikin/finance-core'
 import { useAccountStore } from './account-store'
 import { useTransactionStore } from './transaction-store'
 import type { RecurringRule } from '@/types/database'
@@ -45,6 +50,7 @@ interface RecurringState {
   isLoading: boolean
   fetchError: string | null
   error: string | null
+  refreshWarning: string | null
   fetch: () => Promise<void>
   create: (data: RecurringRuleFormData) => Promise<void>
   update: (id: string, data: RecurringRuleFormData) => Promise<void>
@@ -55,6 +61,18 @@ interface RecurringState {
 }
 
 type StoredRecurrenceAnchor = Pick<RecurringRule, 'anchor_kind' | 'anchor_day'>
+
+function advanceShortRecurringDate(date: string, frequency: string): string | undefined {
+  const d = dayjs(date)
+  switch (frequency) {
+    case 'daily':
+      return d.add(1, 'day').format('YYYY-MM-DD')
+    case 'weekly':
+      return d.add(7, 'day').format('YYYY-MM-DD')
+    case 'biweekly':
+      return d.add(14, 'day').format('YYYY-MM-DD')
+  }
+}
 
 function deriveRecurrenceAnchor(
   date: string,
@@ -68,42 +86,6 @@ function deriveRecurrenceAnchor(
     return { anchor_kind: 'end_of_month', anchor_day: null }
   }
   return { anchor_kind: 'fixed_day', anchor_day: dayjs(date).date() }
-}
-
-function advanceDate(
-  date: string,
-  frequency: RecurringFrequency,
-  anchor: StoredRecurrenceAnchor
-): string {
-  const d = dayjs(date)
-  switch (frequency) {
-    case 'daily':
-      return d.add(1, 'day').format('YYYY-MM-DD')
-    case 'weekly':
-      return d.add(7, 'day').format('YYYY-MM-DD')
-    case 'biweekly':
-      return d.add(14, 'day').format('YYYY-MM-DD')
-    case 'monthly':
-    case 'quarterly':
-    case 'yearly': {
-      if (anchor.anchor_kind === 'end_of_month') {
-        return advanceAnchoredRecurrence(date, frequency, { kind: 'end_of_month' }).date
-      }
-      if (anchor.anchor_kind === 'fixed_day' && anchor.anchor_day !== null) {
-        return advanceAnchoredRecurrence(date, frequency, {
-          kind: 'day_of_month',
-          day: anchor.anchor_day,
-        }).date
-      }
-      const legacy = advanceLegacyRecurrence(date, frequency)
-      if (legacy.status === 'unresolved') {
-        throw new Error(
-          `Recurring date ${date} needs an explicit fixed-day or end-of-month anchor. Edit and save the rule before materializing it.`
-        )
-      }
-      return legacy.date
-    }
-  }
 }
 
 async function resolveAccountCurrency(accountId: string): Promise<CurrencyCode> {
@@ -147,14 +129,6 @@ function crossCurrencyRecurringRuleMoveMessage(from: string, to: string) {
   return `Cannot move this recurring rule from ${from} to ${to}. Cross-currency moves are not supported because they would change amount semantics without FX conversion.`
 }
 
-function recurringRuleAccountCurrencyMismatchMessage(rule: {
-  description?: string | null
-  currency: string | null
-  account_currency?: string
-}) {
-  return `Recurring rule "${rule.description ?? 'Unknown rule'}" has stored currency ${rule.currency ?? 'unknown'} but the linked account is now ${rule.account_currency ?? 'unknown'}. Repair or recreate the rule before materializing it.`
-}
-
 function unsupportedRecurringTransferMessage() {
   return 'Recurring transfers are not supported yet. Create separate recurring income/expense rules until destination-account support is fully implemented.'
 }
@@ -164,6 +138,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
   isLoading: false,
   fetchError: null,
   error: null,
+  refreshWarning: null,
 
   fetch: async () => {
     set({ isLoading: true, fetchError: null })
@@ -376,154 +351,101 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
   },
 
   materializeTransactions: async () => {
-    set({ error: null })
+    set({ error: null, refreshWarning: null })
+    let created: number
     try {
       if (!isTauri) {
-        const result = await materializeRecurringTransactionsBrowser()
+        created = (await materializeRecurringTransactionsBrowser()).created
+      } else {
+        const today = dayjs().format('YYYY-MM-DD')
+        created = await withTransaction(async (tx) => {
+          const dueRules = await tx.query<RecurringOccurrenceRule>(
+            `SELECT r.*, a.currency as account_currency, a.is_archived as account_is_archived,
+                    a.account_mode
+             FROM recurring_rules r
+             LEFT JOIN accounts a ON r.account_id = a.id
+             WHERE r.active = 1 AND r.next_date <= ?`,
+            [today]
+          )
+          const failure = validateRecurringOccurrences(dueRules)
+          if (failure) throw new Error(recurringOccurrenceFailureMessage(failure))
 
-        if (result.created > 0) {
-          await useTransactionStore.getState().fetch()
-          await useAccountStore.getState().fetch()
-          await get().fetch()
-        }
-
-        return result.created
-      }
-
-      const today = dayjs().format('YYYY-MM-DD')
-
-      // Get all active rules where next_date <= today
-      const dueRules = await query<
-        RecurringRuleWithDetails & { account_mode?: 'transactional' | 'snapshot_only' | null }
-      >(
-        `SELECT r.*, a.currency as account_currency, a.is_archived as account_is_archived,
-                a.account_mode
-         FROM recurring_rules r
-         LEFT JOIN accounts a ON r.account_id = a.id
-         WHERE r.active = 1 AND r.next_date <= ?`,
-        [today]
-      )
-
-      let created = 0
-
-      const unsupportedTransferRule = dueRules.find((rule) => rule.type === 'transfer')
-      if (unsupportedTransferRule) {
-        throw new Error(unsupportedRecurringTransferMessage())
-      }
-
-      const archivedAccountRule = dueRules.find((rule) => rule.account_is_archived !== 0)
-      if (archivedAccountRule) {
-        throw new Error(
-          `Recurring rule "${archivedAccountRule.description}" points at archived account ${archivedAccountRule.account_id}. Unarchive the account or pause the rule before materializing it.`
-        )
-      }
-
-      const snapshotAccountRule = dueRules.find(
-        (rule) => (rule.account_mode ?? 'transactional') === 'snapshot_only'
-      )
-      if (snapshotAccountRule) {
-        throw new Error(
-          `Recurring rule "${snapshotAccountRule.description}" points at snapshot-only account ${snapshotAccountRule.account_id}. Snapshot-only accounts do not accept transaction ledger writes.`
-        )
-      }
-
-      const unknownCurrencyRule = dueRules.find(
-        (rule) => normalizeRecurringCurrency(rule.currency) === ''
-      )
-      if (unknownCurrencyRule) {
-        throw new Error(unknownRecurringRuleCurrencyMessage(unknownCurrencyRule))
-      }
-
-      const accountCurrencyMismatchRule = dueRules.find((rule) => {
-        const ruleCurrency = normalizeRecurringCurrency(rule.currency)
-        const accountCurrency = normalizeRecurringCurrency(rule.account_currency)
-        return ruleCurrency !== '' && (accountCurrency === '' || ruleCurrency !== accountCurrency)
-      })
-      if (accountCurrencyMismatchRule) {
-        throw new Error(recurringRuleAccountCurrencyMismatchMessage(accountCurrencyMismatchRule))
-      }
-
-      for (const rule of dueRules) {
-        const createdForRule = await withTransaction(async (tx) => {
-          let nextDate = rule.next_date
-          let ruleCreated = 0
-
-          // Create transactions for all due dates (handle missed dates)
-          while (nextDate <= today) {
-            // Check end_date
-            if (rule.end_date && nextDate > rule.end_date) {
-              const deactivateResult = await tx.execute(
-                "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND active = 1 AND next_date = ?",
-                [rule.id, nextDate]
+          let count = 0
+          for (const rule of dueRules) {
+            let date = rule.next_date
+            while (date <= today) {
+              const plan = planRecurringOccurrence(
+                rule,
+                date,
+                today,
+                advanceShortRecurringDate(date, rule.frequency)
               )
-              if (deactivateResult.rowsAffected !== 1) {
-                return ruleCreated
+              if (!plan) break
+              if (plan.kind === 'deactivate') {
+                await tx.execute(
+                  "UPDATE recurring_rules SET active = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND active = 1 AND next_date = ?",
+                  [rule.id, plan.date]
+                )
+                break
               }
-              break
-            }
+              const claimResult = await tx.execute(
+                "UPDATE recurring_rules SET active = ?, next_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND active = 1 AND next_date = ?",
+                [plan.active, plan.nextDate, rule.id, plan.date]
+              )
+              if (claimResult.rowsAffected !== 1) break
 
-            const newNextDate = advanceDate(nextDate, rule.frequency as RecurringFrequency, rule)
-            const shouldDeactivate = !!rule.end_date && newNextDate > rule.end_date
-            const claimResult = await tx.execute(
-              "UPDATE recurring_rules SET active = ?, next_date = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND active = 1 AND next_date = ?",
-              [shouldDeactivate ? 0 : 1, newNextDate, rule.id, nextDate]
-            )
-            if (claimResult.rowsAffected !== 1) {
-              return ruleCreated
-            }
-
-            const txId = generateId()
-            await tx.execute(
-              `INSERT INTO transactions (id, account_id, category_id, subcategory_id, type, amount, currency, description, notes, date, tags, is_recurring, transfer_to_account_id, status, recurring_rule_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'posted', ?)`,
-              [
-                txId,
-                rule.account_id,
-                rule.category_id,
-                rule.subcategory_id,
-                rule.type,
-                rule.amount,
-                normalizeRecurringCurrency(rule.currency),
-                rule.description,
-                rule.notes,
-                nextDate,
-                rule.tags || '[]',
-                rule.to_account_id,
-                rule.id,
-              ]
-            )
-
-            // Update account balance
-            const balanceDelta = rule.type === 'income' ? rule.amount : -rule.amount
-            await tx.execute(
-              "UPDATE accounts SET balance = balance + ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND COALESCE(account_mode, 'transactional') = 'transactional'",
-              [balanceDelta, rule.account_id]
-            )
-
-            ruleCreated++
-            nextDate = newNextDate
-            if (shouldDeactivate) {
-              break
+              const occurrence = plan.transaction
+              await tx.execute(
+                `INSERT INTO transactions (id, account_id, category_id, subcategory_id, type, amount, currency, description, notes, date, tags, is_recurring, transfer_to_account_id, status, recurring_rule_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 'posted', ?)`,
+                [
+                  generateId(),
+                  occurrence.account_id,
+                  occurrence.category_id,
+                  occurrence.subcategory_id,
+                  occurrence.type,
+                  occurrence.amount,
+                  occurrence.currency,
+                  occurrence.description,
+                  occurrence.notes,
+                  occurrence.date,
+                  occurrence.tags,
+                  occurrence.transfer_to_account_id,
+                  occurrence.recurring_rule_id,
+                ]
+              )
+              await tx.execute(
+                "UPDATE accounts SET balance = balance + ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? AND COALESCE(account_mode, 'transactional') = 'transactional'",
+                [plan.balanceDelta, occurrence.account_id]
+              )
+              count += 1
+              if (plan.active === 0) break
+              date = plan.nextDate
             }
           }
-
-          return ruleCreated
+          return count
         })
-
-        created += createdForRule
       }
-
-      if (created > 0) {
-        // Refresh related stores
-        await useTransactionStore.getState().fetch()
-        await useAccountStore.getState().fetch()
-        await get().fetch()
-      }
-
-      return created
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error
     }
+
+    if (created > 0) {
+      const warnings: string[] = []
+      for (const refresh of [
+        () => useTransactionStore.getState().fetch(),
+        () => useAccountStore.getState().fetch(),
+        () => get().fetch(),
+      ]) {
+        try {
+          await refresh()
+        } catch (error) {
+          warnings.push(getErrorMessage(error))
+        }
+      }
+      set({ refreshWarning: warnings.length > 0 ? warnings.join('; ') : null })
+    }
+    return created
   },
 }))

@@ -455,6 +455,88 @@ describe('data-server authenticated contract', () => {
     ])
   })
 
+  it('rolls back both due rules and their revisions when the second occurrence fails over HTTP', async () => {
+    await withObservedServer(async ({ request }) => {
+      for (const [id, sql] of [
+        [
+          'accounts',
+          "INSERT INTO accounts (id, name, type, currency, balance) VALUES ('a', 'A', 'checking', 'USD', 1000)",
+        ],
+        [
+          'rules',
+          "INSERT INTO recurring_rules (id, description, amount, currency, type, frequency, next_date, account_id, active, anchor_kind, anchor_day, end_date) VALUES ('r1', 'R1', 100, 'USD', 'expense', 'monthly', '2026-11-08', 'a', 1, 'fixed_day', 8, '2026-11-08'), ('r2', 'R2', 100, 'USD', 'expense', 'monthly', '2026-11-08', 'a', 1, 'fixed_day', 8, '2026-11-08')",
+        ],
+        [
+          'fault',
+          "CREATE TRIGGER fail_second BEFORE INSERT ON transactions WHEN NEW.recurring_rule_id = 'r2' BEGIN SELECT RAISE(ABORT, 'second occurrence failed'); END",
+        ],
+      ]) {
+        expect((await request(id, 'db/execute', { sql })).status).toBe(200)
+      }
+      const before = await (
+        await request('before', 'db/query', { sql: 'SELECT * FROM app_data_state' })
+      ).json()
+      const response = await request('materialize', 'recurring/materialize', {})
+      expect(response.status).toBe(500)
+      expect(await response.json()).toEqual({ error: 'second occurrence failed' })
+      expect(
+        await (
+          await request('state', 'db/query', {
+            sql: 'SELECT a.balance, r.id, r.next_date, r.active, (SELECT COUNT(*) FROM transactions) AS count FROM accounts a JOIN recurring_rules r ON r.account_id = a.id ORDER BY r.id',
+          })
+        ).json()
+      ).toEqual([
+        { balance: 1000, id: 'r1', next_date: '2026-11-08', active: 1, count: 0 },
+        { balance: 1000, id: 'r2', next_date: '2026-11-08', active: 1, count: 0 },
+      ])
+      expect(
+        await (await request('after', 'db/query', { sql: 'SELECT * FROM app_data_state' })).json()
+      ).toEqual(before)
+    })
+  })
+
+  it.each(['archive-two', 'fractional-anchor'])(
+    'pins legacy recurring %s handling at the HTTP boundary',
+    async (scenario) => {
+      await withObservedServer(async ({ request }) => {
+        expect(
+          (
+            await request('account', 'db/execute', {
+              sql: "INSERT INTO accounts (id, name, type, currency, balance, is_archived) VALUES ('a', 'A', 'checking', 'USD', 1000, $1)",
+              params: [scenario === 'archive-two' ? 2 : 0],
+            })
+          ).status
+        ).toBe(200)
+        expect(
+          (
+            await request('rule', 'db/execute', {
+              sql: "INSERT INTO recurring_rules (id, description, amount, currency, type, frequency, next_date, account_id, active, anchor_kind, anchor_day, end_date) VALUES ('r', 'R', 100, 'USD', 'expense', 'monthly', '2026-11-08', 'a', 1, 'fixed_day', $1, '2026-11-08')",
+              params: [scenario === 'fractional-anchor' ? 8.5 : 8],
+            })
+          ).status
+        ).toBe(200)
+        const response = await request('materialize', 'recurring/materialize', {})
+        expect(response.status).toBe(scenario === 'archive-two' ? 200 : 500)
+        expect(await response.json()).toEqual(
+          scenario === 'archive-two'
+            ? {
+                success: false,
+                reason: 'account_archived',
+                message:
+                  'Recurring rule "R" points at archived account a. Unarchive the account or pause the rule before materializing it.',
+              }
+            : { error: 'day-of-month recurrence anchor must be an integer from 1 through 31' }
+        )
+        const state = await request('state', 'db/query', {
+          sql: 'SELECT a.balance, r.next_date, r.active, (SELECT COUNT(*) FROM transactions) AS count FROM accounts a JOIN recurring_rules r ON r.account_id = a.id',
+        })
+        expect(await state.json()).toEqual([
+          { balance: 1000, next_date: '2026-11-08', active: 1, count: 0 },
+        ])
+      })
+    }
+  )
+
   it('materializes recurring rules atomically through the dedicated server endpoint', async () => {
     const defaultHeaders = {
       Origin: ORIGIN,

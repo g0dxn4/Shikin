@@ -3,6 +3,10 @@
     "name": "Shikin",
     "tagline": "Personal finance"
   },
+  "recurringRefreshWarning": {
+    "title": "Recurring entries saved",
+    "description": "Your recurring entries were saved, but some views could not be refreshed. Reload the app to refresh them. {{error}}"
+  },
   "sidebar": {
     "expand": "Expand sidebar",
     "collapse": "Collapse sidebar"

@@ -81,6 +81,7 @@ export default function App() {
   const updateInFlightRef = useRef(false)
   const readyUpdateVersionRef = useRef<string | null>(null)
   const materializeTransactions = useRecurringStore((s) => s.materializeTransactions)
+  const recurringRefreshWarning = useRecurringStore((s) => s.refreshWarning)
   const loadRates = useCurrencyStore((s) => s.loadRates)
   const mainCurrency = useCurrencyStore((s) => s.mainCurrency)
   const fetchAccounts = useAccountStore((s) => s.fetch)
@@ -283,6 +284,21 @@ export default function App() {
                 >
                   {t('currencySetup.action')}
                 </Link>
+              </div>
+            </div>
+          )}
+
+          {startupCompleted && recurringRefreshWarning && (
+            <div
+              role="status"
+              className="border-warning/30 bg-warning/10 shrink-0 border-b px-4 py-3"
+              data-recurring-refresh-warning
+            >
+              <div className="mx-auto max-w-5xl break-words">
+                <p className="text-sm font-semibold">{t('recurringRefreshWarning.title')}</p>
+                <p className="mt-0.5 text-xs">
+                  {t('recurringRefreshWarning.description', { error: recurringRefreshWarning })}
+                </p>
               </div>
             </div>
           )}

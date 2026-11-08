@@ -63,11 +63,18 @@ describe('recurring-store', () => {
     mockQuery.mockReset()
     mockExecute.mockReset()
     mockMaterializeRecurringTransactionsBrowser.mockReset()
+    mockWithTransaction.mockReset()
     mockWithTransaction.mockImplementation(
       async (fn: (tx: TransactionClient) => Promise<unknown>) =>
         fn({ query: databaseMocks.query, execute: databaseMocks.execute } as TransactionClient)
     )
-    useRecurringStore.setState({ rules: [], isLoading: false, fetchError: null, error: null })
+    useRecurringStore.setState({
+      rules: [],
+      isLoading: false,
+      fetchError: null,
+      error: null,
+      refreshWarning: null,
+    })
   })
 
   describe('fetch', () => {
@@ -591,21 +598,15 @@ describe('recurring-store', () => {
 
   describe('materializeTransactions', () => {
     it.each([false, true])(
-      'preserves post-commit refresh rejection and skips later reads (native=%s)',
+      'resolves the committed count and attempts every refresh with a warning (native=%s)',
       async (native) => {
         runtimeState.isTauri = native
         const trace: string[] = []
         mockWithTransaction.mockReset()
-        mockQuery.mockResolvedValueOnce([
-          {
-            id: 'due',
-            description: 'Due rule',
-            type: 'expense',
-            currency: 'USD',
-            account_currency: 'USD',
-            account_is_archived: 0,
-          },
-        ])
+        mockQuery.mockImplementationOnce(async () => {
+          trace.push('recurring')
+          return []
+        })
         mockWithTransaction.mockImplementationOnce(async () => {
           trace.push('commit')
           return 1
@@ -626,15 +627,42 @@ describe('recurring-store', () => {
           trace.push('accounts')
         })
 
-        await expect(useRecurringStore.getState().materializeTransactions()).rejects.toThrow(
-          'refresh failed after commit'
-        )
-        trace.push('reject')
-        expect(trace).toEqual(['commit', 'transactions', 'reject'])
-        expect(mockAccountFetch).not.toHaveBeenCalled()
-        expect(mockQuery).toHaveBeenCalledTimes(native ? 1 : 0)
-        expect(useRecurringStore.getState().error).toBe('refresh failed after commit')
+        await expect(useRecurringStore.getState().materializeTransactions()).resolves.toBe(1)
+        trace.push('resolve')
+        expect(trace).toEqual(['commit', 'transactions', 'accounts', 'recurring', 'resolve'])
+        expect(mockAccountFetch).toHaveBeenCalledTimes(1)
+        expect(mockQuery).toHaveBeenCalledTimes(1)
+        expect(useRecurringStore.getState().error).toBeNull()
+        expect(useRecurringStore.getState().refreshWarning).toBe('refresh failed after commit')
         mockAccountFetch.mockReset()
+      }
+    )
+
+    it.each([false, true])(
+      'keeps all refresh failures separate from a committed count (native=%s)',
+      async (native) => {
+        runtimeState.isTauri = native
+        mockWithTransaction.mockResolvedValueOnce(1)
+        mockMaterializeRecurringTransactionsBrowser.mockResolvedValueOnce({
+          success: true,
+          created: 1,
+          message: 'Saved.',
+        })
+        mockTxFetch.mockImplementationOnce(() => {
+          throw new Error('transactions unavailable')
+        })
+        mockAccountFetch.mockRejectedValueOnce(new Error('accounts unavailable'))
+        mockQuery.mockRejectedValueOnce(new Error('rules unavailable'))
+
+        await expect(useRecurringStore.getState().materializeTransactions()).resolves.toBe(1)
+        expect(mockTxFetch).toHaveBeenCalledTimes(1)
+        expect(mockAccountFetch).toHaveBeenCalledTimes(1)
+        expect(mockQuery).toHaveBeenCalledTimes(1)
+        expect(useRecurringStore.getState().error).toBeNull()
+        expect(useRecurringStore.getState().fetchError).toBe('rules unavailable')
+        expect(useRecurringStore.getState().refreshWarning).toBe(
+          'transactions unavailable; accounts unavailable; rules unavailable'
+        )
       }
     )
 

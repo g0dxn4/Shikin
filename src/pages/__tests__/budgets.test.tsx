@@ -1,5 +1,5 @@
 import type * as ScopedReadModule from '@/lib/scoped-report-read'
-import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
@@ -22,7 +22,11 @@ import { formatMoney } from '@/lib/money'
 import { Budgets } from '../budgets'
 const read = vi.mocked(readScopedSnapshot)
 const remove = vi.fn()
+let previousTimezone: string | undefined
 beforeEach(() => {
+  // Plan details show the host-resolved time zone; fix it so CI (UTC) matches.
+  previousTimezone = process.env.TZ
+  process.env.TZ = 'America/Mexico_City'
   read.mockReset()
   read.mockResolvedValue(scopedFixture())
   remove.mockReset()
@@ -30,6 +34,10 @@ beforeEach(() => {
   useBudgetStore.setState({ budgets: [], options: {}, fetchError: null, isLoading: false, remove })
   useUIStore.setState({ openBudgetDialog: vi.fn(), openTransactionDialog: vi.fn() })
   useCurrencyStore.setState({ mainCurrency: 'MXN', preferredCurrency: 'USD', manualRates: [] })
+})
+afterEach(() => {
+  if (previousTimezone === undefined) delete process.env.TZ
+  else process.env.TZ = previousTimezone
 })
 const renderPage = (url = '/budgets') =>
   render(

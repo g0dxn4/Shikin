@@ -130,10 +130,18 @@ async function capturePartitionWitnesses() {
   return { commands, trace: state.trace, dump }
 }
 
-beforeEach(setupPartitionFixture)
+let previousTimezone: string | undefined
+beforeEach(() => {
+  // The pinned witnesses include the host-resolved plan time zone; fix it so CI (UTC) matches.
+  previousTimezone = process.env.TZ
+  process.env.TZ = 'America/Mexico_City'
+  return setupPartitionFixture()
+})
 afterEach(() => {
   state.db.close()
   vi.useRealTimers()
+  if (previousTimezone === undefined) delete process.env.TZ
+  else process.env.TZ = previousTimezone
 })
 
 it('pins parent query cursors, incomplete reports, context order, export bytes and optional-table policy', async () => {

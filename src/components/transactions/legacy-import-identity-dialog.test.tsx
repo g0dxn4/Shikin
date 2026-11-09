@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { LegacyImportIdentityAction } from './legacy-import-identity-dialog'
+import { toast } from 'sonner'
+vi.mock('sonner', () => ({ toast: { warning: vi.fn() } }))
 
 const mocks = vi.hoisted(() => ({
   read: vi.fn(),
@@ -218,15 +220,75 @@ describe('LegacyImportIdentityAction', () => {
     expect(screen.queryByText('identity.savedRefreshFailed')).not.toBeInTheDocument()
   })
 
+  it.each([false, true])(
+    'keeps a committed identity successful when its callback fails (sync=%s)',
+    async (sync) => {
+      const onChanged = vi.fn(() => {
+        if (sync) throw new Error('callback read unavailable')
+        return Promise.reject(new Error('callback read unavailable'))
+      })
+      render(<LegacyImportIdentityAction transactionId="legacy" onChanged={onChanged} />)
+      const user = userEvent.setup()
+      await openAndFill(user)
+      await user.click(screen.getByRole('button', { name: 'identity.review' }))
+      await user.click(await screen.findByRole('button', { name: 'identity.confirm' }))
+      expect(await screen.findByText('identity.savedRefreshFailed')).toBeVisible()
+      expect(screen.queryByText('callback read unavailable')).not.toBeInTheDocument()
+      expect(mocks.bind).toHaveBeenCalledOnce()
+      expect(onChanged).toHaveBeenCalledOnce()
+      expect(screen.queryByRole('button', { name: 'identity.confirm' })).not.toBeInTheDocument()
+    }
+  )
+
+  it.each([
+    [true, false],
+    [false, true],
+    [true, true],
+  ] as const)(
+    'reports one warning after real unmount (storeFailure=%s, callbackFailure=%s)',
+    async (storeFailure, callbackFailure) => {
+      // The project targets ES2020, before Promise.withResolvers.
+      let resolveApply!: (result: typeof preview & { refreshIncomplete: boolean }) => void
+      mocks.bind.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveApply = resolve
+        })
+      )
+      const onChanged = vi.fn()
+      if (callbackFailure)
+        onChanged.mockRejectedValueOnce(new Error('callback refresh unavailable'))
+      const view = render(
+        <LegacyImportIdentityAction transactionId="legacy" onChanged={onChanged} />
+      )
+      const user = userEvent.setup()
+      await openAndFill(user)
+      await user.click(screen.getByRole('button', { name: 'identity.review' }))
+      await user.click(await screen.findByRole('button', { name: 'identity.confirm' }))
+      view.unmount()
+      resolveApply({ ...preview, refreshIncomplete: storeFailure })
+      await waitFor(() =>
+        expect(toast.warning).toHaveBeenCalledExactlyOnceWith('identity.savedRefreshFailed')
+      )
+      expect(onChanged).toHaveBeenCalledOnce()
+      expect(mocks.bind).toHaveBeenCalledOnce()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    }
+  )
+
   it('truthfully reports a committed save when store refresh rejects', async () => {
     mocks.bind.mockResolvedValueOnce({ ...preview, refreshIncomplete: true })
     const user = userEvent.setup()
-    render(<LegacyImportIdentityAction transactionId="legacy" />)
+    const onChanged = vi.fn()
+    render(<LegacyImportIdentityAction transactionId="legacy" onChanged={onChanged} />)
     await openAndFill(user)
     await user.click(screen.getByRole('button', { name: 'identity.review' }))
     await user.click(await screen.findByRole('button', { name: 'identity.confirm' }))
 
     expect(await screen.findByText('identity.savedRefreshFailed')).toBeVisible()
     expect(screen.queryByRole('button', { name: 'identity.confirm' })).not.toBeInTheDocument()
+    expect(onChanged).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ refreshIncomplete: true })
+    )
+    expect(toast.warning).not.toHaveBeenCalled()
   })
 })

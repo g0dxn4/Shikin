@@ -277,4 +277,85 @@ test.describe('Transactions', () => {
       )
       .toBe(10000)
   })
+  for (const closeDuringRefresh of [false, true]) {
+    test(`committed imports stay successful through a failed refresh (closed=${closeDuringRefresh})`, async ({
+      page,
+    }) => {
+      await executeE2eSql(
+        'INSERT INTO accounts (id, name, type, currency, balance) VALUES (?, ?, ?, ?, ?)',
+        ['qa-refresh-account', qaName('Refresh Checking'), 'checking', 'USD', 10000]
+      )
+      await page.goto('/transactions')
+      await expect(page.locator('[data-startup-state="ready"]')).toBeVisible()
+      await page.getByRole('button', { name: 'More actions', exact: true }).click()
+      await page.getByRole('button', { name: 'Import Statement', exact: true }).click()
+      const dialog = page.getByRole('dialog', { name: 'Import Bank Statement' })
+      await dialog.getByLabel('Import to Account', { exact: true }).click()
+      await page.getByRole('option', { name: qaName('Refresh Checking'), exact: true }).click()
+      const date = new Date().toISOString().slice(0, 10).replaceAll('-', '')
+      await dialog.locator('input[type="file"]').setInputFiles({
+        name: 'refresh.ofx',
+        mimeType: 'application/x-ofx',
+        buffer: Buffer.from(`<OFX><STMTRS><CURDEF>USD
+<STMTTRN><DTPOSTED>${date}<TRNAMT>-10.00<FITID>refresh-row<NAME>${qaName('Refresh Import')}</STMTTRN>
+</STMTRS></OFX>`),
+      })
+      await dialog.getByRole('button', { name: 'Preview', exact: true }).click()
+      await expect(
+        dialog.getByRole('button', { name: 'Import Transactions', exact: true })
+      ).toBeEnabled()
+      await page.evaluate(() => {
+        window.addEventListener('shikin:transaction-page-invalidate', (event) => {
+          if ((event as CustomEvent).detail === 'import') {
+            document.documentElement.dataset.importCommitted = 'true'
+          }
+        })
+      })
+      let release!: () => void
+      const heldRead = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      let readStarted = false
+      let committedBeforeRead = false
+      await page.route('**/api/db/query', async (route) => {
+        const body = route.request().postDataJSON() as { sql?: string }
+        if (!readStarted && body.sql?.includes('ORDER BY t.date DESC, t.created_at DESC')) {
+          committedBeforeRead = await page.evaluate(
+            () => document.documentElement.dataset.importCommitted === 'true'
+          )
+          readStarted = true
+          await heldRead
+          await route.fulfill({ status: 500, json: { error: 'Presentation read unavailable' } })
+        } else await route.continue()
+      })
+      try {
+        await dialog.getByRole('button', { name: 'Import Transactions', exact: true }).click()
+        await expect.poll(() => readStarted).toBe(true)
+        // The event is immediate; the serialized database queue can still delay page reads.
+        expect(committedBeforeRead).toBe(true)
+        if (closeDuringRefresh)
+          await dialog.getByRole('button', { name: 'Close', exact: true }).click()
+      } finally {
+        release()
+      }
+      await expect(
+        page.getByText(
+          'The import was saved, but some views could not be refreshed. Reload the view; do not import the file again.',
+          { exact: true }
+        )
+      ).toBeVisible()
+      await expect(dialog).not.toBeVisible()
+      await expect(page.getByText('Import failed', { exact: true })).not.toBeVisible()
+      await expect(page.locator(`[aria-label="Edit ${qaName('Refresh Import')}"]`)).toBeVisible()
+      expect(
+        await queryE2eSql('SELECT amount FROM transactions WHERE account_id = ?', [
+          'qa-refresh-account',
+        ])
+      ).toEqual([{ amount: 1000 }])
+      expect(
+        await queryE2eSql('SELECT balance FROM accounts WHERE id = ?', ['qa-refresh-account'])
+      ).toEqual([{ balance: 9000 }])
+      await page.unrouteAll({ behavior: 'wait' })
+    })
+  }
 })

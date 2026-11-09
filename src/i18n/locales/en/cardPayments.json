@@ -12,7 +12,7 @@
   "legacyBadge": "Legacy overpaid",
   "legacyOverpaid": "This historical statement is overpaid. Its recorded total is preserved; new actions cannot increase the overpayment.",
   "stale": "Payment data changed. Refresh and review again.",
-  "savedRefreshFailed": "Saved successfully, but the latest data could not be refreshed. Close and reopen to retry the refresh; do not submit the payment again.",
+  "savedRefreshFailed": "The change was saved, but the latest data could not be refreshed. Close and reopen to refresh the view; do not submit the change again.",
   "empty": {
     "title": "No statements recorded",
     "description": "Add the card issuer’s statement totals before attributing payment evidence."

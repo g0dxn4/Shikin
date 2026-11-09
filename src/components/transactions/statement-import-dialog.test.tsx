@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { StatementImportDialog } from './statement-import-dialog'
 import type { ImportReviewDecision } from '@shikin/finance-core/imports'
+import type { ImportResult } from '@/lib/statement-import-actions'
 
 const {
   mockImportStatementFile,
@@ -316,6 +317,7 @@ describe('StatementImportDialog', () => {
       imported: 1,
       skipped: 0,
       errors: [],
+      refreshIncomplete: false,
     })
     const file = createStatementFile('history.ofx')
     const { input, user } = await renderDialog()
@@ -434,6 +436,7 @@ describe('StatementImportDialog', () => {
       imported: 0,
       skipped: 0,
       errors: ['Account update affected 0 rows'],
+      refreshIncomplete: false,
     })
     const file = createStatementFile('retry.ofx')
     const { input, onOpenChange, user } = await renderDialog()
@@ -501,7 +504,12 @@ describe('StatementImportDialog', () => {
           parsedTransactions: [parsedTx({ description: 'Fresh bound row' })],
         })
       )
-      mockImportStatementFile.mockResolvedValue({ imported: 1, skipped: 0, errors: [] })
+      mockImportStatementFile.mockResolvedValue({
+        imported: 1,
+        skipped: 0,
+        errors: [],
+        refreshIncomplete: false,
+      })
       const file = createStatementFile('bound.qfx')
       const { input, user } = await renderDialog()
       await chooseAccount(user)
@@ -646,69 +654,77 @@ describe('StatementImportDialog', () => {
     expect(onOpenChange.mock.calls).toEqual([[false]])
   })
 
-  it('invalidates an old committed import without disturbing a reopened import or emitting its toast', async () => {
-    mockParseStatement.mockReturnValue([parsedTx()])
-    mockPreviewStatementFile
-      .mockResolvedValueOnce(previewResult({ previewToken: 'old-token' }))
-      .mockResolvedValueOnce(previewResult({ previewToken: 'reopened-token' }))
-    let resolveOldImport!: (value: unknown) => void
-    let resolveNewImport!: (value: unknown) => void
-    mockImportStatementFile
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveOldImport = resolve
-          })
-      )
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveNewImport = resolve
-          })
-      )
-    const file = createStatementFile('reopened-import.ofx')
-    const { input, user, rerender, onOpenChange, container } = await renderDialog()
-    await chooseAccount(user)
-    await chooseFile(input, file)
-    await user.click(screen.getByRole('button', { name: 'import.preview' }))
-    await user.click(await screen.findByRole('button', { name: 'import.confirm' }))
-    await user.click(screen.getByRole('button', { name: 'Dismiss import dialog' }))
-    rerender(<StatementImportDialog open={false} onOpenChange={onOpenChange} />)
-    rerender(<StatementImportDialog open={true} onOpenChange={onOpenChange} />)
-    await chooseAccount(user)
-    await chooseFile(container.querySelector<HTMLInputElement>('input[type="file"]')!, file)
-    await user.click(screen.getByRole('button', { name: 'import.preview' }))
-    await user.click(await screen.findByRole('button', { name: 'import.confirm' }))
+  it.each([false, true])(
+    'does not disturb a reopened import but reports a committed refresh warning (incomplete=%s)',
+    async (incomplete) => {
+      mockParseStatement.mockReturnValue([parsedTx()])
+      mockPreviewStatementFile
+        .mockResolvedValueOnce(previewResult({ previewToken: 'old-token' }))
+        .mockResolvedValueOnce(previewResult({ previewToken: 'reopened-token' }))
+      let resolveOldImport!: (value: ImportResult) => void
+      let resolveNewImport!: (value: ImportResult) => void
+      mockImportStatementFile
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveOldImport = resolve
+            })
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveNewImport = resolve
+            })
+        )
+      const file = createStatementFile('reopened-import.ofx')
+      const { input, user, rerender, onOpenChange, container } = await renderDialog()
+      await chooseAccount(user)
+      await chooseFile(input, file)
+      await user.click(screen.getByRole('button', { name: 'import.preview' }))
+      await user.click(await screen.findByRole('button', { name: 'import.confirm' }))
+      await user.click(screen.getByRole('button', { name: 'Dismiss import dialog' }))
+      rerender(<StatementImportDialog open={false} onOpenChange={onOpenChange} />)
+      rerender(<StatementImportDialog open={true} onOpenChange={onOpenChange} />)
+      await chooseAccount(user)
+      await chooseFile(container.querySelector<HTMLInputElement>('input[type="file"]')!, file)
+      await user.click(screen.getByRole('button', { name: 'import.preview' }))
+      await user.click(await screen.findByRole('button', { name: 'import.confirm' }))
 
-    await act(async () => {
-      resolveOldImport({ imported: 2, skipped: 0, errors: ['Late committed warning'] })
-    })
-    expect(mockInvalidate.mock.calls).toEqual([['import']])
-    expect(screen.getByText('import.importing')).toBeVisible()
-    expect(mockToastSuccess).not.toHaveBeenCalled()
-    expect(mockToastWarning).not.toHaveBeenCalled()
-    expect(mockToastError).not.toHaveBeenCalled()
-    expect(onOpenChange.mock.calls).toEqual([[false]])
-    expect(mockImportStatementFile.mock.calls).toEqual([
-      [file, 'account-1', { previewToken: 'old-token', decisions: [] }],
-      [file, 'account-1', { previewToken: 'reopened-token', decisions: [] }],
-    ])
+      await act(async () => {
+        resolveOldImport({
+          imported: 2,
+          skipped: 0,
+          errors: incomplete ? [] : ['Late committed warning'],
+          refreshIncomplete: incomplete,
+        })
+      })
+      expect(mockInvalidate.mock.calls).toEqual([['import']])
+      expect(screen.getByText('import.importing')).toBeVisible()
+      expect(mockToastSuccess).not.toHaveBeenCalled()
+      expect(mockToastWarning.mock.calls).toEqual(incomplete ? [['import.savedRefreshFailed']] : [])
+      expect(mockToastError).not.toHaveBeenCalled()
+      expect(onOpenChange.mock.calls).toEqual([[false]])
+      expect(mockImportStatementFile.mock.calls).toEqual([
+        [file, 'account-1', { previewToken: 'old-token', decisions: [] }],
+        [file, 'account-1', { previewToken: 'reopened-token', decisions: [] }],
+      ])
 
-    await act(async () => {
-      resolveNewImport({ imported: 1, skipped: 1, errors: [] })
-    })
-    expect(mockInvalidate.mock.calls).toEqual([['import'], ['import']])
-    expect(mockToastSuccess.mock.calls).toEqual([['import.success imported=1 skipped=1']])
-    expect(mockToastWarning).not.toHaveBeenCalled()
-    expect(mockToastError).not.toHaveBeenCalled()
-    expect(onOpenChange.mock.calls).toEqual([[false], [false]])
-    expect(mockInvalidate.mock.invocationCallOrder[1]).toBeLessThan(
-      mockToastSuccess.mock.invocationCallOrder[0]
-    )
-    expect(mockToastSuccess.mock.invocationCallOrder[0]).toBeLessThan(
-      onOpenChange.mock.invocationCallOrder[1]
-    )
-  })
+      await act(async () => {
+        resolveNewImport({ imported: 1, skipped: 1, errors: [], refreshIncomplete: false })
+      })
+      expect(mockInvalidate.mock.calls).toEqual([['import'], ['import']])
+      expect(mockToastSuccess.mock.calls).toEqual([['import.success imported=1 skipped=1']])
+      expect(mockToastWarning.mock.calls).toEqual(incomplete ? [['import.savedRefreshFailed']] : [])
+      expect(mockToastError).not.toHaveBeenCalled()
+      expect(onOpenChange.mock.calls).toEqual([[false], [false]])
+      expect(mockInvalidate.mock.invocationCallOrder[1]).toBeLessThan(
+        mockToastSuccess.mock.invocationCallOrder[0]
+      )
+      expect(mockToastSuccess.mock.invocationCallOrder[0]).toBeLessThan(
+        onOpenChange.mock.invocationCallOrder[1]
+      )
+    }
+  )
 
   it('invalidates the page query after imported rows commit', async () => {
     const parsed = parsedTx({ description: 'Imported' })
@@ -718,6 +734,7 @@ describe('StatementImportDialog', () => {
       imported: 1,
       skipped: 0,
       errors: [],
+      refreshIncomplete: false,
     })
     const file = createStatementFile('success.ofx')
     const { input, user } = await renderDialog()
@@ -730,11 +747,84 @@ describe('StatementImportDialog', () => {
     await waitFor(() => expect(mockInvalidate).toHaveBeenCalledWith('import'))
   })
 
+  it.each([false, true])(
+    'reports refresh failure separately without a second import (closed=%s)',
+    async (closed) => {
+      mockParseStatement.mockReturnValue([parsedTx()])
+      mockPreviewStatementFile.mockResolvedValue(previewResult())
+      // The project targets ES2020, before Promise.withResolvers.
+      let resolveImport!: (result: ImportResult) => void
+      mockImportStatementFile.mockReturnValueOnce(
+        new Promise<ImportResult>((resolve) => {
+          resolveImport = resolve
+        })
+      )
+      const file = createStatementFile('saved.ofx')
+      const { input, user, rerender, onOpenChange } = await renderDialog()
+      await chooseAccount(user)
+      await chooseFile(input, file)
+      await user.click(screen.getByRole('button', { name: 'import.preview' }))
+      await user.click(await screen.findByRole('button', { name: 'import.confirm' }))
+      if (closed) rerender(<StatementImportDialog open={false} onOpenChange={onOpenChange} />)
+      await act(async () =>
+        resolveImport({
+          imported: 1,
+          skipped: 0,
+          errors: [],
+          mode: 'reviewed_atomic',
+          refreshIncomplete: true,
+        })
+      )
+      expect(mockToastWarning).toHaveBeenCalledExactlyOnceWith('import.savedRefreshFailed')
+      expect(mockToastError).not.toHaveBeenCalled()
+      expect(mockImportStatementFile).toHaveBeenCalledOnce()
+      if (!closed) {
+        expect(mockToastSuccess).toHaveBeenCalledWith('import.successNoSkip imported=1')
+        expect(onOpenChange).toHaveBeenCalledWith(false)
+      } else {
+        expect(mockToastSuccess).not.toHaveBeenCalled()
+        expect(onOpenChange).not.toHaveBeenCalled()
+      }
+    }
+  )
+
+  it('pins completion callbacks after the importing session unmounts', async () => {
+    mockParseStatement.mockReturnValue([parsedTx()])
+    mockPreviewStatementFile.mockResolvedValue(previewResult())
+    let resolveImport!: (result: ImportResult) => void
+    mockImportStatementFile.mockReturnValueOnce(
+      new Promise<ImportResult>((resolve) => {
+        resolveImport = resolve
+      })
+    )
+    const { input, user, unmount, onOpenChange } = await renderDialog()
+    await chooseAccount(user)
+    await chooseFile(input, createStatementFile('unmounted.ofx'))
+    await user.click(screen.getByRole('button', { name: 'import.preview' }))
+    await user.click(await screen.findByRole('button', { name: 'import.confirm' }))
+    unmount()
+    await act(async () =>
+      resolveImport({
+        imported: 1,
+        skipped: 0,
+        errors: [],
+        refreshIncomplete: true,
+        mode: 'reviewed_atomic',
+      })
+    )
+    expect(mockToastWarning).toHaveBeenCalledExactlyOnceWith('import.savedRefreshFailed')
+    expect(mockToastSuccess).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalled()
+    expect(mockImportStatementFile).toHaveBeenCalledOnce()
+    expect(mockInvalidate).toHaveBeenCalledExactlyOnceWith('import')
+    expect(mockToastError).not.toHaveBeenCalled()
+  })
+
   it('invalidates committed imports even if the dialog closes before the request settles', async () => {
     const parsed = parsedTx({ description: 'Committed' })
     mockParseStatement.mockReturnValue([parsed])
     mockPreviewStatementFile.mockResolvedValue(previewResult({ parsedTransactions: [parsed] }))
-    let resolveImport: (value: { imported: number; skipped: number; errors: string[] }) => void
+    let resolveImport: (value: ImportResult) => void
     mockImportStatementFile.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -751,7 +841,7 @@ describe('StatementImportDialog', () => {
     expect(await screen.findByText('import.importing')).toBeVisible()
 
     rerender(<StatementImportDialog open={false} onOpenChange={onOpenChange} />)
-    resolveImport!({ imported: 2, skipped: 0, errors: [] })
+    resolveImport!({ imported: 2, skipped: 0, errors: [], refreshIncomplete: false })
 
     await waitFor(() => expect(mockInvalidate).toHaveBeenCalledWith('import'))
     expect(mockToastSuccess).not.toHaveBeenCalled()
@@ -906,6 +996,7 @@ describe('StatementImportDialog', () => {
       imported: 1,
       skipped: 0,
       errors: [],
+      refreshIncomplete: false,
     })
     const file = createStatementFile('review.ofx')
     const { input, user } = await renderDialog()
@@ -986,8 +1077,9 @@ describe('StatementImportDialog', () => {
         imported: 0,
         skipped: 0,
         errors: ['Statement preview is stale or does not match this file'],
+        refreshIncomplete: false,
       })
-      .mockResolvedValueOnce({ imported: 1, skipped: 0, errors: [] })
+      .mockResolvedValueOnce({ imported: 1, skipped: 0, errors: [], refreshIncomplete: false })
     const file = createStatementFile('stale-apply.ofx')
     const { input, user } = await renderDialog()
     await chooseAccount(user)
@@ -1055,8 +1147,9 @@ describe('StatementImportDialog', () => {
         imported: 0,
         skipped: 0,
         errors: ['Decisions do not belong to this statement plan'],
+        refreshIncomplete: false,
       })
-      .mockResolvedValueOnce({ imported: 1, skipped: 0, errors: [] })
+      .mockResolvedValueOnce({ imported: 1, skipped: 0, errors: [], refreshIncomplete: false })
     const file = createStatementFile('binding-retry.ofx')
     const { input, user, onOpenChange } = await renderDialog()
     await chooseAccount(user)
@@ -1154,6 +1247,7 @@ describe('StatementImportDialog', () => {
       imported: 1,
       skipped: 0,
       errors: [],
+      refreshIncomplete: false,
     })
     const file = createStatementFile('stale-decisions.ofx')
     const { input, user } = await renderDialog()

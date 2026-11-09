@@ -68,6 +68,7 @@
     "created": "Transaction created successfully",
     "updated": "Transaction updated successfully",
     "deleted": "Transaction deleted successfully",
+    "savedRefreshFailed": "The change was saved, but some views could not be refreshed. Reload the view; do not save the change again.",
     "error": "Something went wrong"
   },
   "empty": {
@@ -282,6 +283,7 @@
     "typeCol": "Type",
     "success": "Imported {{imported}} transactions ({{skipped}} duplicates skipped)",
     "successNoSkip": "Imported {{imported}} transactions",
+    "savedRefreshFailed": "The import was saved, but some views could not be refreshed. Reload the view; do not import the file again.",
     "error": "Import failed",
     "partialError": "Imported {{imported}} transactions with {{errorCount}} errors",
     "fileTypes": "Supported: .ofx, .qfx, .qif",

@@ -12,7 +12,7 @@
   "legacyBadge": "Sobrepago histórico",
   "legacyOverpaid": "Este estado histórico tiene un sobrepago. Se conserva el total registrado; las acciones nuevas no pueden aumentarlo.",
   "stale": "Los datos de pago cambiaron. Actualiza y revisa de nuevo.",
-  "savedRefreshFailed": "Se guardó correctamente, pero no se pudieron actualizar los datos. Cierra y vuelve a abrir para reintentar la actualización; no envíes el pago de nuevo.",
+  "savedRefreshFailed": "El cambio se guardó, pero no se pudieron actualizar los datos. Cierra y vuelve a abrir para actualizar la vista; no envíes el cambio de nuevo.",
   "empty": {
     "title": "No hay estados registrados",
     "description": "Agrega los totales exactos del emisor antes de atribuir evidencia de pago."

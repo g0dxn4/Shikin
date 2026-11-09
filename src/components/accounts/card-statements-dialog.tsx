@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import {
   AlertCircle,
   CreditCard,
@@ -24,6 +25,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { formatMoney, fromCentavos, toCentavos } from '@/lib/money'
 import { getErrorMessage } from '@/lib/errors'
+import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 import {
   createCardStatement,
   deleteCardStatement,
@@ -42,6 +44,7 @@ import {
 } from '@/lib/card-payment-service'
 import type { Account } from '@/types/database'
 import { LinkCardPaymentDialog, RecordCardPaymentDialog } from './card-payment-dialogs'
+import type { CardRefreshResult } from './card-payment-dialogs'
 
 interface CardStatementsDialogProps {
   open: boolean
@@ -55,7 +58,7 @@ interface StatementEditorDialogProps {
   onOpenChange: (open: boolean) => void
   account: Account
   statement: CardStatement | null
-  onCompleted: () => void | Promise<void>
+  onCompleted: (isChildOpen: () => boolean) => Promise<CardRefreshResult>
 }
 
 const modeTranslationKey = {
@@ -104,8 +107,11 @@ export function StatementEditorDialog({
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const requestSequence = useRef(0)
+  const visibleRef = useRef(open)
+  visibleRef.current = open
 
   useEffect(() => {
+    visibleRef.current = open
     requestSequence.current += 1
     setPreview(null)
     setSaved(false)
@@ -119,6 +125,10 @@ export function StatementEditorDialog({
     setMinimum(statement ? fromCentavos(statement.minimumPayment).toFixed(2) : '0.00')
     setPaid(statement ? fromCentavos(statement.paidAmount).toFixed(2) : '0.00')
     setNote(statement?.note ?? '')
+    return () => {
+      visibleRef.current = false
+      requestSequence.current += 1
+    }
   }, [account.id, open, statement])
 
   const draft = (): StatementDraft => ({
@@ -168,15 +178,20 @@ export function StatementEditorDialog({
       }
       return
     }
+    let unhandledRefreshFailure: boolean
     try {
-      await onCompleted()
+      const result = await onCompleted(() => visibleRef.current)
+      unhandledRefreshFailure = result.refreshIncomplete && !result.refreshWarningHandled
     } catch {
+      unhandledRefreshFailure = true
+    }
+    if (unhandledRefreshFailure) {
       if (request === requestSequence.current) {
         setPreview(null)
         setSaved(true)
         setError(t('savedRefreshFailed'))
         setLoading(false)
-      }
+      } else toast.warning(t('savedRefreshFailed'))
       return
     }
     if (request === requestSequence.current) {
@@ -361,6 +376,7 @@ export function CardStatementsDialog({
   const [paying, setPaying] = useState<CardStatement | null>(null)
   const refreshSequence = useRef(0)
   const confirmSequence = useRef(0)
+  const mountedRef = useRef(false)
   const [confirm, setConfirm] = useState<
     | { kind: 'delete'; statement: CardStatement; preview: MutationPreview<null> }
     | {
@@ -371,49 +387,84 @@ export function CardStatementsDialog({
       }
     | null
   >(null)
+  const noticeContextRef = useRef({ open, accountId: account.id, childOpen: false })
+  noticeContextRef.current = {
+    open,
+    accountId: account.id,
+    childOpen: editing !== null || linking !== null || paying !== null,
+  }
 
-  const refresh = useCallback(async () => {
-    const request = ++refreshSequence.current
-    if (open) {
-      setLoading(true)
-      setError(null)
-    }
-    try {
-      const rows = await listCardStatements(account.id)
-      const entries = await Promise.all(
-        rows.map(
-          async (statement) =>
-            [statement.id, await listCardPaymentLinks(statement.id, 'all')] as const
-        )
-      )
-      if (request === refreshSequence.current && open) {
-        setStatements(rows)
-        setHistory(Object.fromEntries(entries))
+  const refresh = useCallback(
+    async (committed = false, reportFailure = true) => {
+      const request = ++refreshSequence.current
+      const isCurrent = () =>
+        mountedRef.current &&
+        request === refreshSequence.current &&
+        open &&
+        noticeContextRef.current.open &&
+        noticeContextRef.current.accountId === account.id
+      if (isCurrent()) {
+        setLoading(true)
+        setError(null)
       }
-    } catch (reason) {
-      if (request === refreshSequence.current && open) setError(getErrorMessage(reason))
-      throw reason
-    } finally {
-      if (request === refreshSequence.current && open) setLoading(false)
-    }
-  }, [account.id, open])
+      try {
+        const rows = await listCardStatements(account.id)
+        const entries = await Promise.all(
+          rows.map(
+            async (statement) =>
+              [statement.id, await listCardPaymentLinks(statement.id, 'all')] as const
+          )
+        )
+        if (isCurrent()) {
+          setStatements(rows)
+          setHistory(Object.fromEntries(entries))
+        }
+      } catch (reason) {
+        if (reportFailure && isCurrent()) {
+          setError(committed ? t('savedRefreshFailed') : getErrorMessage(reason))
+        }
+        throw reason
+      } finally {
+        if (isCurrent()) setLoading(false)
+      }
+    },
+    [account.id, open, t]
+  )
 
-  const completed = useCallback(async () => {
-    const results = await Promise.allSettled([
-      refresh(),
-      Promise.resolve().then(() => onChanged?.()),
-    ])
-    const failure = results.find(
-      (result): result is PromiseRejectedResult => result.status === 'rejected'
-    )
-    if (failure) throw failure.reason
-  }, [onChanged, refresh])
+  const completed = useCallback(
+    async (isChildOpen?: () => boolean): Promise<CardRefreshResult> => {
+      const results = await Promise.allSettled([
+        Promise.resolve().then(() => refresh(true, isChildOpen === undefined)),
+        Promise.resolve().then(() => onChanged?.()),
+      ])
+      const refreshIncomplete = results.some((result) => result.status === 'rejected')
+      let refreshWarningHandled = false
+      // A live child keeps its existing notice. After it closes, this parent owns delivery.
+      if (refreshIncomplete && mountedRef.current && !isChildOpen?.()) {
+        const context = noticeContextRef.current
+        if (context.open && context.accountId === account.id && !context.childOpen) {
+          setError(t('savedRefreshFailed'))
+        } else {
+          toast.warning(t('savedRefreshFailed'))
+        }
+        refreshWarningHandled = true
+      }
+      return { refreshIncomplete, refreshWarningHandled }
+    },
+    [account.id, onChanged, refresh, t]
+  )
 
   useEffect(() => {
+    mountedRef.current = true
     confirmSequence.current += 1
     setConfirm(null)
     if (open) void refresh().catch(() => undefined)
     else refreshSequence.current += 1
+    return () => {
+      mountedRef.current = false
+      confirmSequence.current += 1
+      refreshSequence.current += 1
+    }
   }, [account.id, open, refresh])
 
   const requestDelete = async (statement: CardStatement) => {
@@ -479,11 +530,15 @@ export function CardStatementsDialog({
       return
     }
 
+    if (requested.kind === 'unlink') invalidateTransactionPage('review')
     if (request === confirmSequence.current) setConfirm(null)
     try {
-      await completed()
+      const result = await completed()
+      if (result.refreshIncomplete && !result.refreshWarningHandled)
+        toast.warning(t('savedRefreshFailed'))
     } catch {
       if (request === confirmSequence.current) setError(t('savedRefreshFailed'))
+      else toast.warning(t('savedRefreshFailed'))
     } finally {
       if (request === confirmSequence.current) setLoading(false)
     }

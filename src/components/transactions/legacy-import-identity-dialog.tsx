@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Fingerprint, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -24,6 +25,12 @@ import {
 } from '@/lib/import-identity-service'
 import { bindLegacyImportIdentity } from '@/lib/import-identity-actions'
 
+// A parent whose reload can remove this dialog can own its refresh notice.
+type IdentityCompletionNotice = { refreshWarningHandled: true }
+type IdentityCompletionHandler = (result: {
+  refreshIncomplete: boolean
+}) => void | IdentityCompletionNotice | Promise<void | IdentityCompletionNotice>
+
 export function LegacyImportIdentityAction({
   transactionId,
   onChanged,
@@ -32,7 +39,7 @@ export function LegacyImportIdentityAction({
   onActionOpenChange,
 }: {
   transactionId: string
-  onChanged?: () => void
+  onChanged?: IdentityCompletionHandler
   disabled?: boolean
   onClosed?: () => void
   onActionOpenChange?: (open: boolean) => void
@@ -77,9 +84,10 @@ function LegacyImportIdentityDialog({
   transactionId: string
   open: boolean
   onOpenChange: (open: boolean) => void
-  onChanged?: () => void
+  onChanged?: IdentityCompletionHandler
 }) {
   const { t, i18n } = useTranslation('accountHistory')
+  const { t: tCommon } = useTranslation('common')
   const requestRef = useRef(0)
   const contextRef = useRef({ open, transactionId })
   contextRef.current = { open, transactionId }
@@ -133,6 +141,9 @@ function LegacyImportIdentityDialog({
       .finally(() => {
         if (isCurrent(requestId, transactionId)) setBusy(false)
       })
+    return () => {
+      requestRef.current += 1
+    }
     // `t` is not request identity and changes only when locale changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, transactionId])
@@ -174,11 +185,22 @@ function LegacyImportIdentityDialog({
     setError(null)
     try {
       const result = await bindLegacyImportIdentity({ ...requestedInput, previewToken })
-      // The service already invalidated page reads after commit. Keep the callback even if closed.
-      onChanged?.()
-      if (!isCurrent(requestId, requestedTransactionId)) return
+      // Preserve the completion callback even when the dialog closed during the commit.
+      let refreshIncomplete = result.refreshIncomplete
+      let refreshWarningHandled = false
+      try {
+        const notice = await onChanged?.(result)
+        refreshWarningHandled = notice?.refreshWarningHandled === true
+      } catch {
+        refreshIncomplete = true
+      }
+      const showRefreshWarning = refreshIncomplete && !refreshWarningHandled
+      if (!isCurrent(requestId, requestedTransactionId)) {
+        if (showRefreshWarning) toast.warning(t('identity.savedRefreshFailed'))
+        return
+      }
       setPreview(null)
-      if (result.refreshIncomplete) {
+      if (showRefreshWarning) {
         setError(t('identity.savedRefreshFailed'))
       } else {
         onOpenChange(false)
@@ -212,7 +234,14 @@ function LegacyImportIdentityDialog({
           <DialogDescription className="break-words">{t('identity.description')}</DialogDescription>
         </DialogHeader>
 
-        <ErrorBanner message={error} />
+        <ErrorBanner
+          title={
+            error === t('identity.savedRefreshFailed')
+              ? tCommon('savedRefreshWarning.title')
+              : undefined
+          }
+          message={error}
+        />
         {!transaction && busy ? (
           <div className="text-muted-foreground flex min-h-24 items-center justify-center gap-2 text-sm">
             <Loader2 className="animate-spin" aria-hidden="true" /> {t('identity.loading')}

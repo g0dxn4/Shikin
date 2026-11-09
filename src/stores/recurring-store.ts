@@ -6,6 +6,7 @@ import {
   materializeRecurringTransactionsBrowser,
 } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
+import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 import { isTauri } from '@/lib/runtime'
 import { generateId } from '@/lib/ulid'
 import { toCentavos } from '@/lib/money'
@@ -432,6 +433,7 @@ export const useRecurringStore = create<RecurringState>((set, get) => ({
     }
 
     if (created > 0) {
+      invalidateTransactionPage('add')
       const warnings: string[] = []
       for (const refresh of [
         () => useTransactionStore.getState().fetch(),

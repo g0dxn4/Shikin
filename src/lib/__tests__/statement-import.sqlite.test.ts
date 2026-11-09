@@ -171,6 +171,7 @@ describe('importStatementFile real schema 021 SQLite rollback and staging', () =
         skipped: 0,
         mode: 'unreviewed_atomic',
         errors: ['account.currency must be a 2-10 character asset or currency code'],
+        refreshIncomplete: false,
       })
       expect(databaseSnapshot()).toEqual(before)
     }

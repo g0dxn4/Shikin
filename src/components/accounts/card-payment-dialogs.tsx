@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertCircle, ArrowRight } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -32,12 +33,17 @@ import {
 import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 import type { Account } from '@/types/database'
 
+export interface CardRefreshResult {
+  refreshIncomplete: boolean
+  refreshWarningHandled: boolean
+}
+
 interface ControlledPaymentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   account: Account
   statement: CardStatement
-  onCompleted: () => void | Promise<void>
+  onCompleted: (isChildOpen: () => boolean) => Promise<CardRefreshResult>
 }
 
 function ErrorMessage({ message }: { message: string | null }) {
@@ -70,8 +76,11 @@ export function LinkCardPaymentDialog({
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const requestSequence = useRef(0)
+  const visibleRef = useRef(open)
+  visibleRef.current = open
 
   useEffect(() => {
+    visibleRef.current = open
     const request = ++requestSequence.current
     setPreview(null)
     setSaved(false)
@@ -101,6 +110,10 @@ export function LinkCardPaymentDialog({
       .finally(() => {
         if (request === requestSequence.current) setLoading(false)
       })
+    return () => {
+      visibleRef.current = false
+      requestSequence.current += 1
+    }
   }, [account.id, open, statement.id, statement.linkedPaidAmount, statement.statementBalance])
 
   const selected = useMemo(
@@ -157,15 +170,21 @@ export function LinkCardPaymentDialog({
       }
       return
     }
+    invalidateTransactionPage('review')
+    let unhandledRefreshFailure: boolean
     try {
-      await onCompleted()
+      const result = await onCompleted(() => visibleRef.current)
+      unhandledRefreshFailure = result.refreshIncomplete && !result.refreshWarningHandled
     } catch {
+      unhandledRefreshFailure = true
+    }
+    if (unhandledRefreshFailure) {
       if (request === requestSequence.current) {
         setPreview(null)
         setSaved(true)
         setError(t('savedRefreshFailed'))
         setLoading(false)
-      }
+      } else toast.warning(t('savedRefreshFailed'))
       return
     }
     if (request === requestSequence.current) {
@@ -335,8 +354,11 @@ export function RecordCardPaymentDialog({
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const requestSequence = useRef(0)
+  const visibleRef = useRef(open)
+  visibleRef.current = open
 
   useEffect(() => {
+    visibleRef.current = open
     const request = ++requestSequence.current
     setPreview(null)
     setSaved(false)
@@ -358,6 +380,10 @@ export function RecordCardPaymentDialog({
       .finally(() => {
         if (request === requestSequence.current) setLoading(false)
       })
+    return () => {
+      visibleRef.current = false
+      requestSequence.current += 1
+    }
   }, [account.id, open, statement.id, statement.paidAmount, statement.statementBalance])
 
   const input = (): RecordCardPaymentInput => ({
@@ -411,15 +437,20 @@ export function RecordCardPaymentDialog({
     }
 
     if (!requestedInput.statementOnly) invalidateTransactionPage('add')
+    let unhandledRefreshFailure: boolean
     try {
-      await onCompleted()
+      const result = await onCompleted(() => visibleRef.current)
+      unhandledRefreshFailure = result.refreshIncomplete && !result.refreshWarningHandled
     } catch {
+      unhandledRefreshFailure = true
+    }
+    if (unhandledRefreshFailure) {
       if (request === requestSequence.current) {
         setPreview(null)
         setSaved(true)
         setError(t('savedRefreshFailed'))
         setLoading(false)
-      }
+      } else toast.warning(t('savedRefreshFailed'))
       return
     }
     if (request === requestSequence.current) {

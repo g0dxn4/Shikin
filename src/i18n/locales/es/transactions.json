@@ -68,6 +68,7 @@
     "created": "Transaccion creada exitosamente",
     "updated": "Transaccion actualizada exitosamente",
     "deleted": "Transaccion eliminada exitosamente",
+    "savedRefreshFailed": "El cambio se guardó, pero algunas vistas no se pudieron actualizar. Vuelve a cargar la vista; no guardes el cambio de nuevo.",
     "error": "Algo salio mal"
   },
   "empty": {
@@ -282,6 +283,7 @@
     "typeCol": "Tipo",
     "success": "Se importaron {{imported}} transacciones ({{skipped}} duplicados omitidos)",
     "successNoSkip": "Se importaron {{imported}} transacciones",
+    "savedRefreshFailed": "La importación se guardó, pero algunas vistas no se pudieron actualizar. Vuelve a cargar la vista; no importes el archivo de nuevo.",
     "error": "Error al importar",
     "partialError": "Se importaron {{imported}} transacciones con {{errorCount}} errores",
     "fileTypes": "Soportados: .ofx, .qfx, .qif",

@@ -131,6 +131,7 @@
     "paymentSaving": "Registrando...",
     "paymentMax": "Deuda actual de la tarjeta: {{amount}}",
     "paymentSuccess": "Pago de tarjeta registrado",
+    "savedRefreshFailed": "El pago se registró, pero algunas vistas no se pudieron actualizar. Vuelve a cargar la vista; no envíes el pago de nuevo.",
     "paymentError": "No se pudo registrar el pago de tarjeta",
     "paymentValidation": "Ingresa un monto mayor que cero y no mayor al balance de la tarjeta.",
     "paymentInsufficientFunds": "La cuenta origen no tiene saldo suficiente para este pago.",

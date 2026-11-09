@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   query: vi.fn().mockResolvedValue([]),
 }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 vi.mock('@/lib/database', () => ({ query: mocks.query }))
 vi.mock('@/lib/transaction-query', () => ({ getTransactionById: mocks.get }))
 vi.mock('@/lib/split-service', () => ({ getSplits: mocks.splits }))
@@ -25,7 +25,10 @@ vi.mock('@/stores/ui-store', () => ({
   }),
 }))
 vi.mock('@/stores/transaction-store', () => ({
-  useTransactionStore: () => ({ correctMetadata: mocks.correct, update: mocks.update }),
+  useTransactionStore: Object.assign(
+    () => ({ correctMetadata: mocks.correct, update: mocks.update }),
+    { getState: () => ({ fetchError: null }) }
+  ),
 }))
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({

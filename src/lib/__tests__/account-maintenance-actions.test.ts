@@ -124,16 +124,16 @@ describe.each(operations)('$name completion policy', ({ run, committed, result }
   )
 
   it.each(['accounts', 'transactions'] as const)(
-    'still rejects a synchronous %s refresh throw after invalidating',
+    'retains committed data and attempts both reads after a synchronous %s refresh throw',
     async (target) => {
       mocks.commit.mockResolvedValue(committed)
       mocks[target].mockImplementation(() => {
         throw new Error('synchronous refresh failed')
       })
-      await expect(run()).rejects.toThrow('synchronous refresh failed')
+      await expect(run()).resolves.toEqual({ ...result, refreshIncomplete: true })
       expect(mocks.invalidate.mock.calls).toEqual([['store-refresh']])
       expect(mocks.accounts).toHaveBeenCalledOnce()
-      expect(mocks.transactions).toHaveBeenCalledTimes(target === 'accounts' ? 0 : 1)
+      expect(mocks.transactions).toHaveBeenCalledOnce()
     }
   )
 

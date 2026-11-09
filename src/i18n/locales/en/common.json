@@ -7,6 +7,10 @@
     "title": "Recurring entries saved",
     "description": "Your recurring entries were saved, but some views could not be refreshed. Reload the app to refresh them. {{error}}"
   },
+  "savedRefreshWarning": {
+    "title": "Saved; views need refreshing",
+    "reload": "Reload view"
+  },
   "sidebar": {
     "expand": "Expand sidebar",
     "collapse": "Collapse sidebar"

@@ -460,6 +460,7 @@ export function Accounts() {
         notes: null,
       })
       toast.success(t('credit.paymentSuccess'))
+      if (useTransactionStore.getState().fetchError) toast.warning(t('credit.savedRefreshFailed'))
       closePaymentDialog()
     } catch (error) {
       toast.error(getErrorMessage(error, t('credit.paymentError')))

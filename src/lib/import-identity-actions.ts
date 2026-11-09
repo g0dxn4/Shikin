@@ -11,6 +11,8 @@ export async function bindLegacyImportIdentity(
 ): Promise<LegacyImportIdentityPreview & { refreshIncomplete: boolean }> {
   const result = await commitLegacyImportIdentity(input)
   invalidateTransactionPage('import')
-  const refresh = await Promise.allSettled([useTransactionStore.getState().fetch()])
+  const refresh = await Promise.allSettled([
+    Promise.resolve().then(() => useTransactionStore.getState().fetch()),
+  ])
   return { ...result, refreshIncomplete: refresh.some((item) => item.status === 'rejected') }
 }

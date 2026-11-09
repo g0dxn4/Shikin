@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { parseStatement, type ParsedTransaction } from '@/lib/statement-parser'
@@ -145,6 +145,15 @@ export function useStatementImportSession({
     selection
 
   selectionRef.current = { open, ...selection }
+
+  useEffect(
+    () => () => {
+      fileRequestIdRef.current += 1
+      previewRequestIdRef.current += 1
+      importRequestIdRef.current += 1
+    },
+    []
+  )
 
   const clearPreviewBinding = useCallback(() => {
     setPreview(emptyPreview())
@@ -430,6 +439,7 @@ export function useStatementImportSession({
       })
 
       if (result.imported > 0) invalidateTransactionPage('import')
+      if (result.refreshIncomplete) toast.warning(t('import.savedRefreshFailed'))
 
       const isStaleResult =
         requestId !== importRequestIdRef.current ||

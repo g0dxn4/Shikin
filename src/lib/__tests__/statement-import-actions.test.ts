@@ -38,6 +38,26 @@ beforeEach(() => {
 })
 
 describe('statement import completion policy', () => {
+  it('pins committed import invalidation while both reads are pending', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    mocks.transactions.mockReturnValue(gate)
+    mocks.accounts.mockReturnValue(gate)
+    const pending = importStatementFile(file(), 'account')
+    await vi.waitFor(() => expect(mocks.accounts).toHaveBeenCalledOnce())
+    expect(mocks.invalidate.mock.calls).toEqual([['import']])
+    release()
+    expect(await pending).toEqual({
+      imported: 1,
+      skipped: 0,
+      errors: [],
+      mode: 'unreviewed_atomic',
+      refreshIncomplete: false,
+    })
+  })
+
   it.each(['transactions', 'accounts'] as const)(
     'settles synchronous %s refresh throws without changing committed success',
     async (target) => {
@@ -46,6 +66,7 @@ describe('statement import completion policy', () => {
         trace.push('commit')
         return { imported: 1, skipped: 0 }
       })
+      mocks.invalidate.mockImplementation((reason) => trace.push(reason))
       for (const name of ['transactions', 'accounts'] as const) {
         mocks[name].mockImplementation(() => {
           trace.push(name)
@@ -55,9 +76,15 @@ describe('statement import completion policy', () => {
       }
       const result = await importStatementFile(file(), 'account')
       trace.push('resolve')
-      expect(trace).toEqual(['commit', 'transactions', 'accounts', 'resolve'])
-      expect(result).toEqual({ imported: 1, skipped: 0, errors: [], mode: 'unreviewed_atomic' })
-      expect(mocks.invalidate).not.toHaveBeenCalled()
+      expect(trace).toEqual(['commit', 'import', 'transactions', 'accounts', 'resolve'])
+      expect(result).toEqual({
+        imported: 1,
+        skipped: 0,
+        errors: [],
+        mode: 'unreviewed_atomic',
+        refreshIncomplete: true,
+      })
+      expect(mocks.invalidate.mock.calls).toEqual([['import']])
     }
   )
 
@@ -89,6 +116,7 @@ describe('statement import completion policy', () => {
       imported: 0,
       skipped: 1,
       errors: [],
+      refreshIncomplete: false,
       mode: 'unreviewed_atomic',
     })
     expect(trace).toEqual(['commit', 'transactions', 'accounts', 'resolve'])
@@ -102,6 +130,7 @@ describe('statement import completion policy', () => {
         imported: 0,
         skipped: 0,
         errors: [error instanceof Error ? 'commit failed' : 'Unknown error'],
+        refreshIncomplete: false,
         mode: 'reviewed_atomic',
       })
       expect(mocks.transactions).not.toHaveBeenCalled()

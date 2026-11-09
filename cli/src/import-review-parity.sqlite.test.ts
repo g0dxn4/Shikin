@@ -124,6 +124,7 @@ async function apply(
       decisions,
       previewToken,
     })
+    expect(result.refreshIncomplete).toBe(false)
     if (result.errors.length) throw new Error(result.errors.join('\n'))
   }
 }

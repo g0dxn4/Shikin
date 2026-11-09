@@ -5,11 +5,13 @@ import {
 } from '@/lib/statement-import'
 import { useAccountStore } from '@/stores/account-store'
 import { useTransactionStore } from '@/stores/transaction-store'
+import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 
 export interface ImportResult {
   imported: number
   skipped: number
   errors: string[]
+  refreshIncomplete: boolean
   mode?: 'reviewed_atomic' | 'unreviewed_atomic'
 }
 
@@ -22,13 +24,15 @@ export async function importStatementFile(
   try {
     const statement = await readStatementFile(file)
     const counts = await commitStatementFile(file.name, accountId, statement, options)
-    await Promise.allSettled([
+    if (counts.imported > 0) invalidateTransactionPage('import')
+    const refresh = await Promise.allSettled([
       Promise.resolve().then(() => useTransactionStore.getState().fetch()),
       Promise.resolve().then(() => useAccountStore.getState().fetch()),
     ])
     return {
       ...counts,
       errors: [],
+      refreshIncomplete: refresh.some((result) => result.status === 'rejected'),
       mode: options.previewToken ? 'reviewed_atomic' : 'unreviewed_atomic',
     }
   } catch (error) {
@@ -36,6 +40,7 @@ export async function importStatementFile(
       imported: 0,
       skipped: 0,
       errors: [error instanceof Error ? error.message : 'Unknown error'],
+      refreshIncomplete: false,
       mode: options.previewToken ? 'reviewed_atomic' : 'unreviewed_atomic',
     }
   }

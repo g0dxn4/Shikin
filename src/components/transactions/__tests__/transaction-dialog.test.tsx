@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { TransactionDialog } from '../transaction-dialog'
 import type { TransactionPageRow } from '@/lib/transaction-query'
 import { classificationCatalog } from '@shikin/finance-core'
+import { toast } from 'sonner'
+import { getSplits } from '@/lib/split-service'
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -13,7 +15,7 @@ vi.mock('react-i18next', () => ({
 }))
 
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }))
 
 vi.mock('@/components/shared/confirm-dialog', () => ({
@@ -73,6 +75,7 @@ const mockRemove = vi.fn()
 const mockGetTransactionById = vi.fn()
 const mockInvalidateTransactionPage = vi.fn()
 
+let mockRefreshError: string | null = null
 let mockEditingTransactionId: string | null = null
 
 vi.mock('@/stores/ui-store', () => ({
@@ -85,13 +88,16 @@ vi.mock('@/stores/ui-store', () => ({
 }))
 
 vi.mock('@/stores/transaction-store', () => ({
-  useTransactionStore: () => ({
-    add: mockAdd,
-    addWithSplits: vi.fn(),
-    update: mockUpdate,
-    correctMetadata: mockCorrectMetadata,
-    remove: mockRemove,
-  }),
+  useTransactionStore: Object.assign(
+    () => ({
+      add: mockAdd,
+      addWithSplits: vi.fn(),
+      update: mockUpdate,
+      correctMetadata: mockCorrectMetadata,
+      remove: mockRemove,
+    }),
+    { getState: () => ({ fetchError: mockRefreshError }) }
+  ),
 }))
 
 vi.mock('@/lib/split-service', () => ({ getSplits: vi.fn().mockResolvedValue([]) }))
@@ -150,6 +156,7 @@ const mockTransaction: TransactionPageRow = {
 describe('TransactionDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockRefreshError = null
     mockCorrectMetadata.mockResolvedValue(undefined)
     mockRemove.mockResolvedValue(undefined)
     mockEditingTransactionId = null
@@ -176,6 +183,75 @@ describe('TransactionDialog', () => {
       binding: { importSource: 'bank', importExternalId: 'abc' },
     })
     mockBindIdentity.mockResolvedValue({ refreshIncomplete: false })
+  })
+
+  it('closes a committed metadata save and reports refresh failure separately', async () => {
+    mockEditingTransactionId = 'tx-edit'
+    mockGetTransactionById.mockResolvedValueOnce({ ...mockTransaction, is_finalized_statement: 1 })
+    mockCorrectMetadata.mockImplementationOnce(async () => {
+      mockRefreshError = 'read unavailable'
+    })
+    render(<TransactionDialog />)
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'actions.save' }))
+    await waitFor(() => expect(mockCloseTransactionDialog).toHaveBeenCalledOnce())
+    expect(mockCorrectMetadata).toHaveBeenCalledOnce()
+    expect(toast.success).toHaveBeenCalledWith('toast.updated')
+    expect(toast.warning).toHaveBeenCalledWith('toast.savedRefreshFailed')
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it.each(['metadata', 'delete'] as const)(
+    'pins %s completion after dialog unmount',
+    async (operation) => {
+      mockEditingTransactionId = 'tx-edit'
+      mockGetTransactionById.mockResolvedValueOnce({
+        ...mockTransaction,
+        ...(operation === 'metadata' ? { is_finalized_statement: 1 } : {}),
+      })
+      let resolveSave!: () => void
+      const mutate = operation === 'metadata' ? mockCorrectMetadata : mockRemove
+      mutate.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveSave = resolve
+        })
+      )
+      const user = userEvent.setup()
+      const view = render(<TransactionDialog />)
+      if (operation === 'metadata') {
+        await user.click(await screen.findByRole('button', { name: 'actions.save' }))
+      } else {
+        await user.click(await screen.findByText('detail.details'))
+        await user.click(screen.getByRole('button', { name: 'deleteTransaction' }))
+        fireEvent.click(screen.getByText('Confirm action'))
+      }
+      await waitFor(() => expect(mutate).toHaveBeenCalledOnce())
+      view.unmount()
+      mockRefreshError = 'read unavailable'
+      await act(async () => resolveSave())
+      expect(toast.warning).toHaveBeenCalledExactlyOnceWith('toast.savedRefreshFailed')
+      expect(mockCloseTransactionDialog).not.toHaveBeenCalled()
+      expect(mockInvalidateTransactionPage).toHaveBeenCalledWith(
+        operation === 'metadata' ? 'edit' : 'delete'
+      )
+      expect(toast.error).not.toHaveBeenCalled()
+      expect(mutate).toHaveBeenCalledOnce()
+    }
+  )
+
+  it('pins an editing lookup that resolves after unmount', async () => {
+    mockEditingTransactionId = 'tx-edit'
+    let resolveLookup!: (row: TransactionPageRow) => void
+    mockGetTransactionById.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveLookup = resolve
+      })
+    )
+    const view = render(<TransactionDialog />)
+    await waitFor(() => expect(mockGetTransactionById).toHaveBeenCalledOnce())
+    view.unmount()
+    await act(async () => resolveLookup({ ...mockTransaction, has_splits: 1 }))
+    expect(getSplits).not.toHaveBeenCalled()
+    expect(mockCloseTransactionDialog).not.toHaveBeenCalled()
   })
 
   it('inspects the fetched row, protects workflow rows and permits ordinary transfers', async () => {

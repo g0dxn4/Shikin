@@ -74,11 +74,14 @@ describe('legacy import identity completion policy', () => {
     expect(mocks.accounts).not.toHaveBeenCalled()
   })
 
-  it('still rejects synchronous refresh throws after invalidating', async () => {
+  it('retains the committed identity after a synchronous refresh throw', async () => {
     mocks.transactions.mockImplementation(() => {
       throw new Error('synchronous refresh failed')
     })
-    await expect(bindLegacyImportIdentity(input)).rejects.toThrow('synchronous refresh failed')
+    await expect(bindLegacyImportIdentity(input)).resolves.toEqual({
+      ...committed,
+      refreshIncomplete: true,
+    })
     expect(mocks.invalidate.mock.calls).toEqual([['import']])
     expect(mocks.accounts).not.toHaveBeenCalled()
   })

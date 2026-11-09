@@ -1,16 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { CardStatementsDialog } from '../card-statements-dialog'
 import type { Account } from '@/types/database'
 import type { CardStatement } from '@/lib/card-payment-service'
+import { toast } from 'sonner'
+vi.mock('sonner', () => ({ toast: { warning: vi.fn() } }))
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, values?: Record<string, unknown>) =>
-      values ? `${key}:${Object.values(values).join(':')}` : key,
-  }),
-}))
+vi.mock('react-i18next', () => {
+  const t = (key: string, values?: Record<string, unknown>) =>
+    values ? `${key}:${Object.values(values).join(':')}` : key
+  return { useTranslation: () => ({ t }) }
+})
 
 const invalidateTransactionPage = vi.hoisted(() => vi.fn())
 
@@ -77,7 +78,7 @@ const statement: CardStatement = {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
   service.listCardStatements.mockResolvedValue([statement])
   service.listCardPaymentLinks.mockResolvedValue([])
   service.listEligibleCardPayments.mockResolvedValue([])
@@ -181,116 +182,365 @@ describe('CardStatementsDialog', () => {
     })
   })
 
-  it('keeps a committed payment honest and invalidates transactions when refresh fails', async () => {
-    const user = userEvent.setup()
-    const onChanged = vi.fn().mockResolvedValue(undefined)
-    service.listCardStatements
-      .mockResolvedValueOnce([statement])
-      .mockRejectedValueOnce(new Error('refresh unavailable'))
-    service.previewRecordCardPayment.mockResolvedValue({
-      revision: 7,
-      token: 'payment-token',
-      operation: 'record-card-transfer',
-      before: {},
-      after: { sourceBalance: -100, cardBalance: 100, currency: 'USD' },
-    })
-    service.recordCardPayment.mockResolvedValue({ transactionId: 'committed', statement })
-
-    render(
-      <CardStatementsDialog open onOpenChange={vi.fn()} account={account} onChanged={onChanged} />
-    )
-    await user.click(await screen.findByRole('button', { name: /payment.action/ }))
-    const paymentDialog = screen.getByRole('dialog', { name: 'payment.title' })
-    await user.clear(within(paymentDialog).getByLabelText('fields.amount'))
-    await user.type(within(paymentDialog).getByLabelText('fields.amount'), '11.00')
-    await user.click(within(paymentDialog).getByRole('button', { name: 'actions.review' }))
-    expect(
-      await within(paymentDialog).findByText('review.negativeFundsWarning')
-    ).toBeInTheDocument()
-    expect(within(paymentDialog).getByText('review.cardCreditWarning')).toBeInTheDocument()
-    await user.click(within(paymentDialog).getByRole('button', { name: 'actions.confirm' }))
-
-    expect(await within(paymentDialog).findByRole('alert')).toHaveTextContent('savedRefreshFailed')
-    expect(within(paymentDialog).queryByRole('button', { name: 'actions.confirm' })).toBeNull()
-    expect(within(paymentDialog).getByRole('button', { name: 'actions.close' })).toBeInTheDocument()
-    expect(invalidateTransactionPage).toHaveBeenCalledWith('add')
-    expect(onChanged).toHaveBeenCalledTimes(1)
-  })
-
-  it('still refreshes and invalidates a committed transfer after the dialog unmounts', async () => {
-    const user = userEvent.setup()
-    const onChanged = vi.fn().mockResolvedValue(undefined)
-    let resolvePayment!: (value: { transactionId: string; statement: CardStatement }) => void
-    service.previewRecordCardPayment.mockResolvedValue({
-      revision: 7,
-      token: 'payment-token',
-      operation: 'record-card-transfer',
-      before: {},
-      after: { sourceBalance: 4000, cardBalance: 0, currency: 'USD' },
-    })
-    service.recordCardPayment.mockReturnValue(
-      new Promise((resolve) => {
-        resolvePayment = resolve
+  it.each(['read-async', 'read-sync', 'callback-sync'])(
+    'keeps a committed payment successful after %s failure',
+    async (failure) => {
+      const user = userEvent.setup()
+      const onChanged = vi.fn().mockResolvedValue(undefined)
+      if (failure === 'callback-sync') {
+        onChanged.mockImplementationOnce(() => {
+          throw new Error('callback unavailable')
+        })
+      } else {
+        service.listCardStatements.mockResolvedValueOnce([statement]).mockImplementationOnce(() => {
+          expect(invalidateTransactionPage).toHaveBeenCalledWith('add')
+          if (failure === 'read-sync') throw new Error('refresh unavailable')
+          return Promise.reject(new Error('refresh unavailable'))
+        })
+      }
+      service.previewRecordCardPayment.mockResolvedValue({
+        revision: 7,
+        token: 'payment-token',
+        operation: 'record-card-transfer',
+        before: {},
+        after: { sourceBalance: -100, cardBalance: 100, currency: 'USD' },
       })
-    )
+      service.recordCardPayment.mockResolvedValue({ transactionId: 'committed', statement })
 
-    const view = render(
-      <CardStatementsDialog open onOpenChange={vi.fn()} account={account} onChanged={onChanged} />
-    )
-    await user.click(await screen.findByRole('button', { name: /payment.action/ }))
-    const paymentDialog = screen.getByRole('dialog', { name: 'payment.title' })
-    await user.click(within(paymentDialog).getByRole('button', { name: 'actions.review' }))
-    await user.click(await within(paymentDialog).findByRole('button', { name: 'actions.confirm' }))
-    view.unmount()
-    resolvePayment({ transactionId: 'committed', statement })
+      render(
+        <CardStatementsDialog open onOpenChange={vi.fn()} account={account} onChanged={onChanged} />
+      )
+      await user.click(await screen.findByRole('button', { name: /payment.action/ }))
+      const paymentDialog = screen.getByRole('dialog', { name: 'payment.title' })
+      await user.clear(within(paymentDialog).getByLabelText('fields.amount'))
+      await user.type(within(paymentDialog).getByLabelText('fields.amount'), '11.00')
+      await user.click(within(paymentDialog).getByRole('button', { name: 'actions.review' }))
+      expect(
+        await within(paymentDialog).findByText('review.negativeFundsWarning')
+      ).toBeInTheDocument()
+      expect(within(paymentDialog).getByText('review.cardCreditWarning')).toBeInTheDocument()
+      await user.click(within(paymentDialog).getByRole('button', { name: 'actions.confirm' }))
 
-    await waitFor(() => {
+      expect(await within(paymentDialog).findByRole('alert')).toHaveTextContent(
+        'savedRefreshFailed'
+      )
+      expect(within(paymentDialog).queryByRole('button', { name: 'actions.confirm' })).toBeNull()
+      expect(
+        within(paymentDialog).getByRole('button', { name: 'actions.close' })
+      ).toBeInTheDocument()
       expect(invalidateTransactionPage).toHaveBeenCalledWith('add')
       expect(onChanged).toHaveBeenCalledTimes(1)
-    })
-  })
+      expect(screen.queryByText('refresh unavailable')).not.toBeInTheDocument()
+      await user.click(within(paymentDialog).getByRole('button', { name: 'actions.close' }))
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(toast.warning).not.toHaveBeenCalled()
+      expect(service.listCardStatements).toHaveBeenCalledTimes(2)
+      expect(service.recordCardPayment).toHaveBeenCalledOnce()
+    }
+  )
 
-  it('shows explicit ordinary-evidence confirmation and surfaces stale apply errors', async () => {
-    const user = userEvent.setup()
-    service.listEligibleCardPayments.mockResolvedValue([
-      {
-        transactionId: 'ordinary',
-        canonicalTransactionId: 'ordinary',
-        description: 'Manual repayment',
-        date: '2026-02-01',
-        amount: 1000,
-        currency: 'USD',
-        shape: 'ordinary_bank_expense',
-        requiresExplicitConfirmation: true,
-        eligibleCapacity: 1000,
-        activeLinkedAmount: 0,
-        remainingCapacity: 1000,
-      },
-    ])
-    service.previewLinkCardPayment.mockResolvedValue({
-      revision: 8,
-      token: 'link-token',
-      operation: 'link-payment',
-      before: statement,
-      after: { ...statement, paidAmount: 300, linkedPaidAmount: 100 },
-    })
-    service.linkCardPayment.mockRejectedValue(new Error('Payment data changed after preview.'))
+  it.each([false, true])(
+    'refreshes and invalidates after unmount, reporting any warning (incomplete=%s)',
+    async (incomplete) => {
+      const user = userEvent.setup()
+      const onChanged = vi.fn().mockResolvedValue(undefined)
+      if (incomplete) onChanged.mockRejectedValueOnce(new Error('refresh unavailable'))
+      let resolvePayment!: (value: { transactionId: string; statement: CardStatement }) => void
+      service.previewRecordCardPayment.mockResolvedValue({
+        revision: 7,
+        token: 'payment-token',
+        operation: 'record-card-transfer',
+        before: {},
+        after: { sourceBalance: 4000, cardBalance: 0, currency: 'USD' },
+      })
+      service.recordCardPayment.mockReturnValue(
+        new Promise((resolve) => {
+          resolvePayment = resolve
+        })
+      )
 
-    render(<CardStatementsDialog open onOpenChange={vi.fn()} account={account} />)
-    await user.click(await screen.findByRole('button', { name: /link.action/ }))
-    const linkDialog = screen.getByRole('dialog', { name: 'link.title' })
-    const confirmation = await within(linkDialog).findByRole('checkbox')
-    await user.click(confirmation)
-    await user.clear(within(linkDialog).getByLabelText('fields.amount'))
-    await user.type(within(linkDialog).getByLabelText('fields.amount'), '1.00')
-    await user.click(within(linkDialog).getByRole('button', { name: 'actions.review' }))
-    await user.click(await within(linkDialog).findByRole('button', { name: 'actions.confirm' }))
+      const view = render(
+        <CardStatementsDialog open onOpenChange={vi.fn()} account={account} onChanged={onChanged} />
+      )
+      await user.click(await screen.findByRole('button', { name: /payment.action/ }))
+      const paymentDialog = screen.getByRole('dialog', { name: 'payment.title' })
+      await user.click(within(paymentDialog).getByRole('button', { name: 'actions.review' }))
+      await user.click(
+        await within(paymentDialog).findByRole('button', { name: 'actions.confirm' })
+      )
+      view.unmount()
+      resolvePayment({ transactionId: 'committed', statement })
 
-    expect(service.previewLinkCardPayment).toHaveBeenCalledWith(
-      expect.objectContaining({ explicitRepaymentConfirmation: true, amount: 100 })
-    )
-    expect(await within(linkDialog).findByRole('alert')).toHaveTextContent(
-      'Payment data changed after preview.'
-    )
-  })
+      await waitFor(() => {
+        expect(invalidateTransactionPage).toHaveBeenCalledWith('add')
+        expect(onChanged).toHaveBeenCalledTimes(1)
+      })
+      if (incomplete)
+        await waitFor(() =>
+          expect(toast.warning).toHaveBeenCalledExactlyOnceWith('savedRefreshFailed')
+        )
+      else expect(toast.warning).not.toHaveBeenCalled()
+      expect(service.recordCardPayment).toHaveBeenCalledOnce()
+    }
+  )
+
+  it.each([
+    [false, false],
+    [true, false],
+    [true, true],
+  ] as const)(
+    'keeps link save errors distinct from read errors (committed=%s, unmounted=%s)',
+    async (committed, unmounted) => {
+      const user = userEvent.setup()
+      service.listEligibleCardPayments.mockResolvedValue([
+        {
+          transactionId: 'ordinary',
+          canonicalTransactionId: 'ordinary',
+          description: 'Manual repayment',
+          date: '2026-02-01',
+          amount: 1000,
+          currency: 'USD',
+          shape: 'ordinary_bank_expense',
+          requiresExplicitConfirmation: true,
+          eligibleCapacity: 1000,
+          activeLinkedAmount: 0,
+          remainingCapacity: 1000,
+        },
+      ])
+      service.previewLinkCardPayment.mockResolvedValue({
+        revision: 8,
+        token: 'link-token',
+        operation: 'link-payment',
+        before: statement,
+        after: { ...statement, paidAmount: 300, linkedPaidAmount: 100 },
+      })
+      let resolveSave!: (result: typeof statement) => void
+      if (unmounted)
+        service.linkCardPayment.mockReturnValueOnce(
+          new Promise((resolve) => {
+            resolveSave = resolve
+          })
+        )
+      else if (committed) service.linkCardPayment.mockResolvedValue(statement)
+      else
+        service.linkCardPayment.mockRejectedValue(new Error('Payment data changed after preview.'))
+      const onChanged = vi.fn(() => {
+        throw new Error('read unavailable')
+      })
+
+      const view = render(
+        <CardStatementsDialog open onOpenChange={vi.fn()} account={account} onChanged={onChanged} />
+      )
+      await user.click(await screen.findByRole('button', { name: /link.action/ }))
+      const linkDialog = screen.getByRole('dialog', { name: 'link.title' })
+      const confirmation = await within(linkDialog).findByRole('checkbox')
+      await user.click(confirmation)
+      await user.clear(within(linkDialog).getByLabelText('fields.amount'))
+      await user.type(within(linkDialog).getByLabelText('fields.amount'), '1.00')
+      await user.click(within(linkDialog).getByRole('button', { name: 'actions.review' }))
+      await user.click(await within(linkDialog).findByRole('button', { name: 'actions.confirm' }))
+      if (unmounted) {
+        view.unmount()
+        await act(async () => resolveSave(statement))
+      }
+
+      expect(service.previewLinkCardPayment).toHaveBeenCalledWith(
+        expect.objectContaining({ explicitRepaymentConfirmation: true, amount: 100 })
+      )
+      if (unmounted) {
+        await waitFor(() =>
+          expect(toast.warning).toHaveBeenCalledExactlyOnceWith('savedRefreshFailed')
+        )
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      } else {
+        expect(await within(linkDialog).findByRole('alert')).toHaveTextContent(
+          committed ? 'savedRefreshFailed' : 'Payment data changed after preview.'
+        )
+      }
+      expect(service.linkCardPayment).toHaveBeenCalledOnce()
+      expect(onChanged).toHaveBeenCalledTimes(committed ? 1 : 0)
+      if (committed) {
+        expect(invalidateTransactionPage).toHaveBeenCalledWith('review')
+        if (!unmounted) expect(toast.warning).not.toHaveBeenCalled()
+      } else {
+        expect(invalidateTransactionPage).not.toHaveBeenCalled()
+        expect(toast.warning).not.toHaveBeenCalled()
+      }
+    }
+  )
+
+  it.each([false, true])(
+    'uses one statement-editor warning channel (unmounted=%s)',
+    async (unmounted) => {
+      service.previewUpdateCardStatement.mockResolvedValue({
+        token: 'edit-token',
+        after: statement,
+      })
+      let resolveSave!: () => void
+      service.updateCardStatement.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveSave = resolve
+        })
+      )
+      const onChanged = vi.fn().mockRejectedValue(new Error('read unavailable'))
+      const user = userEvent.setup()
+      const view = render(
+        <CardStatementsDialog open onOpenChange={vi.fn()} account={account} onChanged={onChanged} />
+      )
+      await user.click(await screen.findByRole('button', { name: 'actions.edit' }))
+      const dialog = screen.getByRole('dialog', { name: 'editor.editTitle' })
+      await user.click(within(dialog).getByRole('button', { name: 'actions.review' }))
+      await user.click(await within(dialog).findByRole('button', { name: 'actions.confirm' }))
+      if (unmounted) view.unmount()
+      resolveSave()
+      if (unmounted) {
+        await waitFor(() =>
+          expect(toast.warning).toHaveBeenCalledExactlyOnceWith('savedRefreshFailed')
+        )
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      } else {
+        expect(await within(dialog).findByRole('alert')).toHaveTextContent('savedRefreshFailed')
+        expect(toast.warning).not.toHaveBeenCalled()
+      }
+      expect(service.updateCardStatement).toHaveBeenCalledOnce()
+      expect(onChanged).toHaveBeenCalledOnce()
+    }
+  )
+
+  it.each([false, true])(
+    'uses one statement-deletion warning channel (unmounted=%s)',
+    async (unmounted) => {
+      service.previewDeleteCardStatement.mockResolvedValue({ token: 'delete-token', after: null })
+      let resolveSave!: () => void
+      service.deleteCardStatement.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          resolveSave = resolve
+        })
+      )
+      const onChanged = vi.fn().mockRejectedValue(new Error('read unavailable'))
+      const user = userEvent.setup()
+      const view = render(
+        <CardStatementsDialog open onOpenChange={vi.fn()} account={account} onChanged={onChanged} />
+      )
+      await user.click(await screen.findByRole('button', { name: 'actions.delete' }))
+      const dialog = await screen.findByRole('dialog', { name: 'confirm.deleteTitle' })
+      await user.click(within(dialog).getByRole('button', { name: 'actions.confirm' }))
+      if (unmounted) view.unmount()
+      resolveSave()
+      if (unmounted) {
+        await waitFor(() =>
+          expect(toast.warning).toHaveBeenCalledExactlyOnceWith('savedRefreshFailed')
+        )
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      } else {
+        expect(await screen.findByRole('alert')).toHaveTextContent('savedRefreshFailed')
+        expect(toast.warning).not.toHaveBeenCalled()
+      }
+      expect(service.deleteCardStatement).toHaveBeenCalledOnce()
+      expect(onChanged).toHaveBeenCalledOnce()
+    }
+  )
+
+  it.each([
+    ['record', 'open', 1, 0],
+    ['record', 'child-closed', 1, 0],
+    ['record', 'unmounted', 1, 1],
+    ['link', 'open', 1, 0],
+    ['link', 'child-closed', 1, 0],
+    ['link', 'unmounted', 1, 1],
+    ['editor', 'open', 1, 0],
+    ['editor', 'child-closed', 1, 0],
+    ['editor', 'unmounted', 1, 1],
+  ] as const)(
+    'pins %s refresh notices with %s (%i visible, %i toasts)',
+    async (flow, context, notices, toasts) => {
+      service.listCardStatements
+        .mockResolvedValueOnce([statement])
+        .mockRejectedValueOnce(new Error('statement reload unavailable'))
+      const onChanged = vi.fn().mockResolvedValue(undefined)
+      const mutation =
+        flow === 'record'
+          ? service.recordCardPayment
+          : flow === 'link'
+            ? service.linkCardPayment
+            : service.updateCardStatement
+      let resolveCommit!: (result: unknown) => void
+      mutation.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveCommit = resolve
+        })
+      )
+      if (flow === 'record') {
+        service.previewRecordCardPayment.mockResolvedValue({
+          token: 'record-token',
+          after: { sourceBalance: 4200, cardBalance: -200, currency: 'USD' },
+        })
+      } else if (flow === 'link') {
+        service.listEligibleCardPayments.mockResolvedValue([
+          {
+            transactionId: 'ordinary',
+            canonicalTransactionId: 'ordinary',
+            description: 'Manual repayment',
+            date: '2026-02-01',
+            amount: 1000,
+            currency: 'USD',
+            shape: 'ordinary_bank_expense',
+            requiresExplicitConfirmation: true,
+            eligibleCapacity: 1000,
+            activeLinkedAmount: 0,
+            remainingCapacity: 1000,
+          },
+        ])
+        service.previewLinkCardPayment.mockResolvedValue({ token: 'link-token', after: statement })
+      } else {
+        service.previewUpdateCardStatement.mockResolvedValue({
+          token: 'edit-token',
+          after: statement,
+        })
+      }
+      const user = userEvent.setup()
+      const view = render(
+        <CardStatementsDialog open onOpenChange={vi.fn()} account={account} onChanged={onChanged} />
+      )
+      const action =
+        flow === 'record' ? 'payment.action' : flow === 'link' ? 'link.action' : 'actions.edit'
+      const title =
+        flow === 'record' ? 'payment.title' : flow === 'link' ? 'link.title' : 'editor.editTitle'
+      await user.click(await screen.findByRole('button', { name: action }))
+      const child = screen.getByRole('dialog', { name: title })
+      if (flow === 'link') {
+        await user.click(await within(child).findByRole('checkbox'))
+        await user.clear(within(child).getByLabelText('fields.amount'))
+        await user.type(within(child).getByLabelText('fields.amount'), '1.00')
+      }
+      await user.click(within(child).getByRole('button', { name: 'actions.review' }))
+      await user.click(await within(child).findByRole('button', { name: 'actions.confirm' }))
+      await waitFor(() => expect(mutation).toHaveBeenCalledOnce())
+      if (context === 'child-closed') {
+        const input = within(child).getByLabelText(
+          flow === 'editor' ? 'fields.note' : 'fields.amount'
+        )
+        await user.clear(input)
+        await user.type(input, flow === 'editor' ? 'new draft' : '2.00')
+        await user.click(within(child).getByRole('button', { name: 'actions.cancel' }))
+        expect(screen.queryByRole('dialog', { name: title })).not.toBeInTheDocument()
+        expect(screen.getByRole('dialog', { name: 'title:Evidence Card' })).toBeVisible()
+      } else if (context === 'unmounted') view.unmount()
+      await act(async () =>
+        resolveCommit(flow === 'record' ? { transactionId: 'committed', statement } : statement)
+      )
+      if (context !== 'unmounted') {
+        expect(await screen.findByRole('alert')).toHaveTextContent('savedRefreshFailed')
+      } else expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(vi.mocked(toast.warning).mock.calls).toEqual(
+        Array.from({ length: toasts }, () => ['savedRefreshFailed'])
+      )
+      expect(
+        screen.queryAllByRole('alert').length + vi.mocked(toast.warning).mock.calls.length
+      ).toBe(notices)
+      expect(service.listCardStatements).toHaveBeenCalledTimes(2)
+      expect(onChanged).toHaveBeenCalledOnce()
+      expect(mutation).toHaveBeenCalledOnce()
+    }
+  )
 })

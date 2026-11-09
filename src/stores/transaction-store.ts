@@ -10,6 +10,7 @@ import { create } from 'zustand'
 import { query, withTransaction } from '@/lib/database'
 import type { TransactionClient } from '@/lib/database'
 import { getErrorMessage } from '@/lib/errors'
+import { invalidateTransactionPage } from '@/lib/transaction-query-events'
 import { generateId } from '@/lib/ulid'
 import { fromCentavos, toCentavos } from '@/lib/money'
 import { learnFromTransaction } from '@/lib/auto-categorize'
@@ -861,6 +862,18 @@ interface TransactionState {
   isSplit: (id: string) => boolean
 }
 
+async function refreshTransactionViews(includeAccounts = true): Promise<void> {
+  const reads = [Promise.resolve().then(() => useTransactionStore.getState().fetch())]
+  if (includeAccounts) {
+    reads.push(Promise.resolve().then(() => useAccountStore.getState().fetch()))
+  }
+  const results = await Promise.allSettled(reads)
+  const errors = results.flatMap((result) =>
+    result.status === 'rejected' ? [getErrorMessage(result.reason)] : []
+  )
+  if (errors.length > 0) useTransactionStore.setState({ fetchError: errors.join('; ') })
+}
+
 export const useTransactionStore = create<TransactionState>((set, get) => ({
   transactions: [],
   splitTransactionIds: new Set<string>(),
@@ -1005,18 +1018,18 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
           )
         }
       })
-
-      // Learn categorization from this transaction
-      if (data.categoryId && data.description) {
-        learnFromTransaction(data.description, data.categoryId).catch(() => {})
-      }
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error
     }
 
+    invalidateTransactionPage('add')
+    // Learn categorization from this transaction
+    if (data.categoryId && data.description) {
+      learnFromTransaction(data.description, data.categoryId).catch(() => {})
+    }
     if (!options?.skipRefresh) {
-      await Promise.allSettled([get().fetch(), useAccountStore.getState().fetch()])
+      await refreshTransactionViews()
     }
   },
 
@@ -1030,7 +1043,8 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       throw error
     }
 
-    await Promise.allSettled([get().fetch(), useAccountStore.getState().fetch()])
+    invalidateTransactionPage('edit')
+    await refreshTransactionViews()
   },
 
   correctMetadata: async (id, patch, splits, auditSource, auditNote) => {
@@ -1045,7 +1059,8 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       set({ error: getErrorMessage(error) })
       throw error
     }
-    await get().fetch()
+    invalidateTransactionPage('edit')
+    await refreshTransactionViews(false)
   },
 
   updateReviewFields: async (id, fields) => {
@@ -1106,7 +1121,8 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       throw error
     }
 
-    await Promise.allSettled([get().fetch(), useAccountStore.getState().fetch()])
+    invalidateTransactionPage('review')
+    await refreshTransactionViews()
   },
 
   remove: async (id) => {
@@ -1193,7 +1209,8 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       throw error
     }
 
-    await Promise.allSettled([get().fetch(), useAccountStore.getState().fetch()])
+    invalidateTransactionPage('delete')
+    await refreshTransactionViews()
   },
 
   addWithSplits: async (data, splits) => {
@@ -1253,7 +1270,8 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
       throw error
     }
 
-    await Promise.allSettled([get().fetch(), useAccountStore.getState().fetch()])
+    invalidateTransactionPage('add')
+    await refreshTransactionViews()
   },
 
   getSplits: async (id) => {

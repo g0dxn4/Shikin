@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -55,6 +56,7 @@ export function AccountMaintenanceDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const { t, i18n } = useTranslation('accountHistory')
+  const { t: tCommon } = useTranslation('common')
   const [history, setHistory] = useState<AccountMaintenanceHistory | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -93,26 +95,40 @@ export function AccountMaintenanceDialog({
     currentContextRef.current.open &&
     currentContextRef.current.accountId === accountId
 
-  const reload = async (epoch = contextEpochRef.current): Promise<boolean> => {
+  const reload = async (
+    epoch = contextEpochRef.current,
+    committed = false,
+    failureOwner: 'reload' | 'caller' = 'reload'
+  ): Promise<boolean> => {
     const requestId = ++requestSequenceRef.current
     const requestedAccountId = account.id
     if (contextIsCurrent(epoch, requestedAccountId)) setError(null)
     try {
       const result = await readAccountMaintenance(requestedAccountId)
       if (!contextIsCurrent(epoch, requestedAccountId) || requestId !== requestSequenceRef.current)
-        return false
+        return true
       setHistory(result)
       return true
     } catch (reason) {
-      if (!contextIsCurrent(epoch, requestedAccountId) || requestId !== requestSequenceRef.current)
+      if (
+        !contextIsCurrent(epoch, requestedAccountId) ||
+        requestId !== requestSequenceRef.current
+      ) {
+        if (committed && failureOwner === 'reload') toast.warning(t('errors.savedRefreshFailed'))
         return false
+      }
       setHistory(null)
-      setError(getErrorMessage(reason, t('errors.load')))
-      return true
+      if (failureOwner === 'reload') {
+        setError(
+          committed ? t('errors.savedRefreshFailed') : getErrorMessage(reason, t('errors.load'))
+        )
+      }
+      return false
     }
   }
 
   useEffect(() => {
+    currentContextRef.current = { open, accountId: account.id }
     if (!open) {
       setBusy(false)
       return
@@ -127,6 +143,11 @@ export function AccountMaintenanceDialog({
     setSettlementReviewed(false)
     const epoch = contextEpochRef.current
     void reload(epoch)
+    return () => {
+      contextEpochRef.current += 1
+      requestSequenceRef.current += 1
+      currentContextRef.current.open = false
+    }
     // Reload only when this dialog opens for a different account.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account.id, open])
@@ -194,17 +215,29 @@ export function AccountMaintenanceDialog({
       // The database commit already happened. Invalidate page reads even if refresh failed
       // or this controlled dialog closed while the operation was in flight.
       invalidateTransactionPage('store-refresh')
-      if (!contextIsCurrent(epoch, requestedAccountId)) return
+      if (!contextIsCurrent(epoch, requestedAccountId)) {
+        if (
+          typeof result === 'object' &&
+          result !== null &&
+          'refreshIncomplete' in result &&
+          result.refreshIncomplete === true
+        )
+          toast.warning(t('errors.savedRefreshFailed'))
+        return
+      }
       after?.()
-      await reload(epoch)
+      const reloaded = await reload(epoch, true, 'caller')
+      // Review cleanup can advance the epoch without undoing the committed warning.
       if (
-        contextIsCurrent(epoch, requestedAccountId) &&
-        typeof result === 'object' &&
-        result !== null &&
-        'refreshIncomplete' in result &&
-        result.refreshIncomplete === true
-      )
-        setError(t('errors.savedRefreshFailed'))
+        !reloaded ||
+        (typeof result === 'object' &&
+          result !== null &&
+          'refreshIncomplete' in result &&
+          result.refreshIncomplete === true)
+      ) {
+        if (contextIsCurrent(epoch, requestedAccountId)) setError(t('errors.savedRefreshFailed'))
+        else toast.warning(t('errors.savedRefreshFailed'))
+      }
     } catch (reason) {
       if (!contextIsCurrent(epoch, requestedAccountId)) return
       onError?.()
@@ -286,6 +319,16 @@ export function AccountMaintenanceDialog({
         </DialogHeader>
 
         <ErrorBanner
+          title={
+            error === t('errors.savedRefreshFailed')
+              ? tCommon('savedRefreshWarning.title')
+              : undefined
+          }
+          retryLabel={
+            error === t('errors.savedRefreshFailed')
+              ? tCommon('savedRefreshWarning.reload')
+              : undefined
+          }
           message={error}
           onRetry={history ? undefined : () => void reload(contextEpochRef.current)}
         />
@@ -565,7 +608,19 @@ export function AccountMaintenanceDialog({
                         <div className="border-border mt-2 flex justify-end border-t pt-2">
                           <LegacyImportIdentityAction
                             transactionId={row.id}
-                            onChanged={() => void reload(contextEpochRef.current)}
+                            onChanged={async ({ refreshIncomplete }) => {
+                              const epoch = contextEpochRef.current
+                              const reloaded = await reload(epoch, true, 'caller')
+                              if (refreshIncomplete || !reloaded) {
+                                if (contextIsCurrent(epoch, account.id)) {
+                                  setError(t('errors.savedRefreshFailed'))
+                                } else {
+                                  toast.warning(t('errors.savedRefreshFailed'))
+                                }
+                              }
+                              // This reload can remove the identity dialog's launcher.
+                              return { refreshWarningHandled: true }
+                            }}
                           />
                         </div>
                       ) : null}

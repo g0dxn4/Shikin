@@ -7,6 +7,10 @@
     "title": "Movimientos recurrentes guardados",
     "description": "Tus movimientos recurrentes se guardaron, pero algunas vistas no se pudieron actualizar. Vuelve a cargar la aplicación para actualizarlas. {{error}}"
   },
+  "savedRefreshWarning": {
+    "title": "Guardado; es necesario actualizar las vistas",
+    "reload": "Volver a cargar la vista"
+  },
   "sidebar": {
     "expand": "Expandir barra lateral",
     "collapse": "Contraer barra lateral"

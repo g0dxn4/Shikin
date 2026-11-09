@@ -48,6 +48,9 @@ vi.mock('../account-store', () => ({
   },
 }))
 
+const mockInvalidate = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/transaction-query-events', () => ({ invalidateTransactionPage: mockInvalidate }))
+
 import { query, execute, withTransaction } from '@/lib/database'
 import { useTransactionStore } from '../transaction-store'
 
@@ -105,6 +108,98 @@ describe('transaction-store', () => {
       error: null,
     })
   })
+
+  it('pins metadata commit followed by a failed presentation read', async () => {
+    mockWithTransaction.mockResolvedValueOnce(undefined)
+    mockQuery.mockRejectedValueOnce(new Error('metadata refresh unavailable'))
+    await expect(
+      useTransactionStore.getState().correctMetadata('tx', { notes: 'saved' })
+    ).resolves.toBeUndefined()
+    expect(useTransactionStore.getState().error).toBeNull()
+    expect(useTransactionStore.getState().fetchError).toBe('metadata refresh unavailable')
+    expect(mockWithTransaction).toHaveBeenCalledOnce()
+    expect(mockAccountFetch).not.toHaveBeenCalled()
+    expect(mockInvalidate.mock.calls).toEqual([['edit']])
+  })
+
+  it('pins committed add invalidation while reads remain pending', async () => {
+    let release!: (rows: never[]) => void
+    mockWithTransaction.mockResolvedValueOnce(undefined)
+    mockQuery.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve
+      })
+    )
+    const pending = useTransactionStore.getState().add({
+      amount: 1,
+      type: 'expense',
+      description: 'Saved',
+      accountId: 'a',
+      categoryId: null,
+      transferToAccountId: null,
+      currency: 'USD',
+      date: '2025-01-01',
+      notes: null,
+    })
+    await vi.waitFor(() => expect(mockAccountFetch).toHaveBeenCalledOnce())
+    expect(mockInvalidate.mock.calls).toEqual([['add']])
+    release([])
+    await expect(pending).resolves.toBeUndefined()
+  })
+
+  it.each(['add', 'update', 'review', 'delete', 'splits', 'metadata'] as const)(
+    'settles synchronous reads after committed %s and retains the visible fetchError channel',
+    async (operation) => {
+      mockWithTransaction.mockResolvedValueOnce(true)
+      const fetch = vi.spyOn(useTransactionStore.getState(), 'fetch').mockImplementationOnce(() => {
+        expect(mockInvalidate).toHaveBeenCalledOnce()
+        throw new Error('transaction read unavailable')
+      })
+      mockAccountFetch.mockImplementationOnce(() => {
+        throw new Error('account read unavailable')
+      })
+      const data = {
+        amount: 1,
+        type: 'expense' as const,
+        description: 'Saved',
+        accountId: 'a',
+        categoryId: null,
+        transferToAccountId: null,
+        currency: 'USD' as const,
+        date: '2025-01-01',
+        notes: null,
+      }
+      const store = useTransactionStore.getState()
+      try {
+        const pending =
+          operation === 'add'
+            ? store.add(data)
+            : operation === 'update'
+              ? store.update('tx', data)
+              : operation === 'review'
+                ? store.updateReviewFields('tx', { categoryId: 'food' })
+                : operation === 'delete'
+                  ? store.remove('tx')
+                  : operation === 'splits'
+                    ? store.addWithSplits(data, [])
+                    : store.correctMetadata('tx', { notes: 'saved' })
+        await expect(pending).resolves.toBeUndefined()
+        expect(mockWithTransaction).toHaveBeenCalledOnce()
+        expect(fetch).toHaveBeenCalledOnce()
+        expect(mockAccountFetch).toHaveBeenCalledTimes(operation === 'metadata' ? 0 : 1)
+        expect(store.error).toBeNull()
+        expect(useTransactionStore.getState().fetchError).toBe(
+          operation === 'metadata'
+            ? 'transaction read unavailable'
+            : 'transaction read unavailable; account read unavailable'
+        )
+        expect(mockInvalidate).toHaveBeenCalledOnce()
+      } finally {
+        fetch.mockRestore()
+        mockAccountFetch.mockReset()
+      }
+    }
+  )
 
   describe('fetch', () => {
     it('loads transactions with joined names', async () => {
@@ -204,6 +299,7 @@ describe('transaction-store', () => {
       expect(mockWithTransaction).toHaveBeenCalledOnce()
       expect(mockQuery).not.toHaveBeenCalled()
       expect(mockAccountFetch).not.toHaveBeenCalled()
+      expect(mockInvalidate.mock.calls).toEqual([['add']])
     })
 
     it('does not refresh a no-op update', async () => {
@@ -224,6 +320,7 @@ describe('transaction-store', () => {
       expect(mockWithTransaction).toHaveBeenCalledOnce()
       expect(mockQuery).not.toHaveBeenCalled()
       expect(mockAccountFetch).not.toHaveBeenCalled()
+      expect(mockInvalidate).not.toHaveBeenCalled()
     })
 
     it('inserts transaction and updates account balance for expense', async () => {

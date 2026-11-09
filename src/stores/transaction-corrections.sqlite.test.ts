@@ -53,6 +53,23 @@ beforeEach(() => {
 })
 afterEach(() => state.db?.close())
 describe('frontend shared correction policy on real SQLite', () => {
+  it('pins durable metadata and its audit when the presentation refresh rejects', async () => {
+    const before = row()
+    const accounts = state.db!.prepare('SELECT * FROM accounts').all()
+    const fetch = vi
+      .spyOn(useTransactionStore.getState(), 'fetch')
+      .mockRejectedValueOnce(new Error('refresh unavailable'))
+    try {
+      await expect(
+        useTransactionStore.getState().correctMetadata('tx', { notes: 'saved note' })
+      ).resolves.toBeUndefined()
+      expect(row()).toEqual({ ...before, notes: 'saved note', updated_at: row().updated_at })
+      expect(state.db!.prepare('SELECT * FROM accounts').all()).toEqual(accounts)
+      expect(state.db!.prepare('SELECT COUNT(*) AS n FROM audit_log').get()).toEqual({ n: 1 })
+    } finally {
+      fetch.mockRestore()
+    }
+  })
   it('edits finalized ordinary metadata from actual form path without touching evidence or balance', async () => {
     state.db!.exec(
       "INSERT INTO account_reconciliations (id,account_id,reconciliation_date,actual_balance,stored_balance_before,ledger_balance_before,ledger_balance_after,adjustment_amount,selection_mode) VALUES ('final','a','2026-01-31',-1000,-1000,-1000,-1000,0,'explicit_rows'); UPDATE transactions SET finalization_id='final' WHERE id='tx'"

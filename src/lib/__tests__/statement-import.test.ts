@@ -131,6 +131,7 @@ describe('statement import service boundaries', () => {
       imported: 1,
       skipped: 0,
       errors: [],
+      refreshIncomplete: true,
       mode: 'unreviewed_atomic',
     })
     expect(mocks.fetchTransactions).toHaveBeenCalledOnce()
@@ -151,6 +152,7 @@ describe('statement import service boundaries', () => {
       imported: 0,
       skipped: 0,
       errors: ['stale revision'],
+      refreshIncomplete: false,
       mode: 'reviewed_atomic',
     })
   })

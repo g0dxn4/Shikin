@@ -107,7 +107,7 @@ vi.mock('react-i18next', () => ({
 }))
 
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }))
 
 vi.mock('@/components/accounts/account-maintenance-dialog', () => ({
@@ -235,11 +235,15 @@ vi.mock('@/stores/account-store', () => ({
   },
 }))
 
+let mockTransactionRefreshError: string | null = null
 vi.mock('@/stores/transaction-store', () => ({
-  useTransactionStore: (selector?: (state: { add: typeof mockAddTransaction }) => unknown) => {
-    const state = { add: mockAddTransaction }
-    return selector ? selector(state) : state
-  },
+  useTransactionStore: Object.assign(
+    (selector?: (state: { add: typeof mockAddTransaction }) => unknown) => {
+      const state = { add: mockAddTransaction }
+      return selector ? selector(state) : state
+    },
+    { getState: () => ({ fetchError: mockTransactionRefreshError }) }
+  ),
 }))
 
 const fxRate = (fromCurrency: string, toCurrency: string, rateDecimal: string) => ({
@@ -256,6 +260,7 @@ const fxRate = (fromCurrency: string, toCurrency: string, rateDecimal: string) =
 describe('Accounts', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockTransactionRefreshError = null
     mockRemove.mockReset()
     mockArchive.mockReset()
     mockUnarchive.mockReset()
@@ -754,52 +759,64 @@ describe('Accounts', () => {
     expect(screen.getByRole('button', { name: 'statements.action' })).toBeInTheDocument()
   })
 
-  it('records a credit card payment as a transfer from a cash account', async () => {
-    const { toast } = await import('sonner')
-    const user = userEvent.setup()
-    mockAddTransaction.mockResolvedValueOnce(undefined)
-    mockAccounts = [
-      {
-        id: 'acc-checking',
-        name: 'Daily Checking',
-        type: 'checking',
-        currency: 'USD',
-        balance: 50000,
-        is_primary: 1,
-      },
-      {
-        id: 'acc-card',
-        name: 'Travel Card',
-        type: 'credit_card',
-        currency: 'USD',
-        balance: -10000,
-        credit_limit: 100000,
-      },
-    ]
-
-    renderAccounts()
-
-    await chooseAccountAction(user, 'Travel Card', 'credit.pay')
-    await user.clear(screen.getByLabelText('credit.amount'))
-    await user.type(screen.getByLabelText('credit.amount'), '25')
-    await user.click(screen.getByRole('button', { name: 'credit.confirmPayment' }))
-
-    await waitFor(() => {
-      expect(mockAddTransaction).toHaveBeenCalledWith(
-        expect.objectContaining({
-          amount: 25,
-          type: 'transfer',
-          accountId: 'acc-checking',
-          transferToAccountId: 'acc-card',
+  it.each([false, true])(
+    'records a credit card payment as a transfer with separate refresh status (incomplete=%s)',
+    async (incomplete) => {
+      const { toast } = await import('sonner')
+      const user = userEvent.setup()
+      mockAddTransaction.mockImplementationOnce(async () => {
+        mockTransactionRefreshError = incomplete ? 'read unavailable' : null
+      })
+      mockAccounts = [
+        {
+          id: 'acc-checking',
+          name: 'Daily Checking',
+          type: 'checking',
           currency: 'USD',
-          categoryId: null,
-          description: 'credit.paymentDescriptionPrefix Travel Card',
-          notes: null,
-        })
-      )
-      expect(toast.success).toHaveBeenCalledWith('credit.paymentSuccess')
-    })
-  })
+          balance: 50000,
+          is_primary: 1,
+        },
+        {
+          id: 'acc-card',
+          name: 'Travel Card',
+          type: 'credit_card',
+          currency: 'USD',
+          balance: -10000,
+          credit_limit: 100000,
+        },
+      ]
+
+      renderAccounts()
+
+      await chooseAccountAction(user, 'Travel Card', 'credit.pay')
+      await user.clear(screen.getByLabelText('credit.amount'))
+      await user.type(screen.getByLabelText('credit.amount'), '25')
+      await user.click(screen.getByRole('button', { name: 'credit.confirmPayment' }))
+
+      await waitFor(() => {
+        expect(mockAddTransaction).toHaveBeenCalledWith(
+          expect.objectContaining({
+            amount: 25,
+            type: 'transfer',
+            accountId: 'acc-checking',
+            transferToAccountId: 'acc-card',
+            currency: 'USD',
+            categoryId: null,
+            description: 'credit.paymentDescriptionPrefix Travel Card',
+            notes: null,
+          })
+        )
+        expect(toast.success).toHaveBeenCalledWith('credit.paymentSuccess')
+      })
+      expect(mockAddTransaction).toHaveBeenCalledOnce()
+      expect(toast.error).not.toHaveBeenCalled()
+      if (incomplete) expect(toast.warning).toHaveBeenCalledWith('credit.savedRefreshFailed')
+      else expect(toast.warning).not.toHaveBeenCalled()
+      expect(
+        screen.queryByRole('button', { name: 'credit.confirmPayment' })
+      ).not.toBeInTheDocument()
+    }
+  )
 
   it('shows a specific error toast when recording a credit card payment fails', async () => {
     const { toast } = await import('sonner')

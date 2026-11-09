@@ -51,6 +51,7 @@ export function TransactionDialog() {
   const protectLoadedForm = useRef(false)
   const loadedTransactionId = useRef<string | undefined>(undefined)
   const currentSession = useRef<{ open: boolean; id: string | null }>({ open: false, id: null })
+  const mountedRef = useRef(false)
   const {
     transactionDialogOpen,
     editingTransactionId,
@@ -58,6 +59,13 @@ export function TransactionDialog() {
     openTransactionDialog,
   } = useUIStore()
   const { add, addWithSplits, update, correctMetadata, remove } = useTransactionStore()
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      lookupSequence.current += 1
+    }
+  }, [])
   // Keep the current form mounted until a dirty session explicitly discards changes.
   useEffect(() => {
     if (!transactionDialogOpen) {
@@ -115,6 +123,7 @@ export function TransactionDialog() {
   const isEditing = !!activeEditingId
 
   const loadEditingTransaction = useCallback(async (id: string, refresh = false) => {
+    if (!mountedRef.current) return
     const sequence = ++lookupSequence.current
     const isCurrent = () =>
       sequence === lookupSequence.current &&
@@ -236,13 +245,15 @@ export function TransactionDialog() {
         invalidateTransactionPage('add')
         toast.success(t('toast.created'))
       }
+      if (useTransactionStore.getState().fetchError) toast.warning(t('toast.savedRefreshFailed'))
+      if (!mountedRef.current) return
       setIsDirty(false)
       committedClose.current = true
       closeTransactionDialog()
     } catch (error) {
       toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
-      setIsLoading(false)
+      if (mountedRef.current) setIsLoading(false)
     }
   }
 
@@ -263,13 +274,15 @@ export function TransactionDialog() {
       await remove(activeEditingId)
       invalidateTransactionPage('delete')
       toast.success(t('toast.deleted'))
+      if (useTransactionStore.getState().fetchError) toast.warning(t('toast.savedRefreshFailed'))
+      if (!mountedRef.current) return
       setDeleteOpen(false)
       committedClose.current = true
       closeTransactionDialog()
     } catch (error) {
       toast.error(getErrorMessage(error, t('toast.error')))
     } finally {
-      setIsLoading(false)
+      if (mountedRef.current) setIsLoading(false)
     }
   }
 
@@ -279,6 +292,7 @@ export function TransactionDialog() {
     focusAfterIdentity.current = true
     // The nested dialog has closed; keep its launcher mounted through focus restoration.
     setTimeout(() => {
+      if (!mountedRef.current) return
       const inspection = document.querySelector<HTMLElement>(
         '[data-transaction-details-summary], [data-transaction-details-readonly]'
       )
@@ -289,6 +303,7 @@ export function TransactionDialog() {
 
   const refreshInspection = () => {
     if (
+      !mountedRef.current ||
       !activeEditingId ||
       isDirty ||
       !currentSession.current.open ||

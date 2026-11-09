@@ -445,6 +445,7 @@ export function Transactions() {
       await remove(deleteId)
       invalidateTransactionPage('delete')
       toast.success(t('toast.deleted'))
+      if (useTransactionStore.getState().fetchError) toast.warning(t('toast.savedRefreshFailed'))
       setDeleteId(null)
     } catch (error) {
       toast.error(getErrorMessage(error, t('toast.error')))
@@ -461,6 +462,7 @@ export function Transactions() {
       const message = t('review.updated', { description: transaction.description })
       setReviewAnnouncement(message)
       toast.success(message)
+      if (useTransactionStore.getState().fetchError) toast.warning(t('toast.savedRefreshFailed'))
     } catch (error) {
       const message = getErrorMessage(error, t('toast.error'))
       setReviewAnnouncement(message)

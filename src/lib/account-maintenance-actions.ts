@@ -15,8 +15,8 @@ import { useTransactionStore } from '@/stores/transaction-store'
 
 async function refreshViews(): Promise<boolean> {
   const results = await Promise.allSettled([
-    useAccountStore.getState().fetch(),
-    useTransactionStore.getState().fetch(),
+    Promise.resolve().then(() => useAccountStore.getState().fetch()),
+    Promise.resolve().then(() => useTransactionStore.getState().fetch()),
   ])
   return results.some((result) => result.status === 'rejected')
 }

@@ -7,11 +7,12 @@ import { Transactions } from '../transactions'
 import { transactionDateBounds } from '@/lib/transaction-date-presets'
 import { formatMoney } from '@/lib/money'
 import type { TransactionPageResult, TransactionPageRow } from '@/lib/transaction-query'
+import { toast } from 'sonner'
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }))
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }))
 
 vi.mock('@/components/shared/confirm-dialog', () => ({
   ConfirmDialog: ({ open, onConfirm }: { open: boolean; onConfirm: () => void }) =>
@@ -73,6 +74,7 @@ vi.mock('@/lib/classification-type-service', () => ({
 let accounts: unknown[] = []
 let categories: unknown[] = []
 let pageResult: TransactionPageResult & { isLoading: boolean; error: string | null }
+let mockRefreshError: string | null = null
 
 vi.mock('@/stores/ui-store', () => ({
   useUIStore: () => ({
@@ -81,11 +83,14 @@ vi.mock('@/stores/ui-store', () => ({
   }),
 }))
 vi.mock('@/stores/transaction-store', () => ({
-  useTransactionStore: () => ({
-    remove: mockRemove,
-    getSplits: mockGetSplits,
-    updateReviewFields: mockUpdateReviewFields,
-  }),
+  useTransactionStore: Object.assign(
+    () => ({
+      remove: mockRemove,
+      getSplits: mockGetSplits,
+      updateReviewFields: mockUpdateReviewFields,
+    }),
+    { getState: () => ({ fetchError: mockRefreshError }) }
+  ),
 }))
 vi.mock('@/stores/account-store', () => ({
   useAccountStore: () => ({
@@ -150,6 +155,7 @@ function setRows(rows: TransactionPageRow[], total = rows.length) {
 describe('Transactions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockRefreshError = null
     window.history.replaceState(null, '', '/transactions')
     window.localStorage.clear()
     accounts = []
@@ -558,6 +564,21 @@ describe('Transactions', () => {
     expect(mockInvalidate).toHaveBeenCalledWith('review')
   })
 
+  it('reports a committed review edit separately from a failed refresh', async () => {
+    window.history.replaceState(null, '', '/transactions?view=review')
+    categories = [{ id: 'food', name: 'Food', type: 'expense' }]
+    setRows([makeRow({ category_id: null })])
+    mockUpdateReviewFields.mockImplementationOnce(async () => {
+      mockRefreshError = 'read unavailable'
+    })
+    render(<Transactions />)
+    await userEvent.setup().selectOptions(screen.getByLabelText('review.category'), 'food')
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledWith('toast.savedRefreshFailed'))
+    expect(toast.success).toHaveBeenCalledWith('review.updated')
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(mockUpdateReviewFields).toHaveBeenCalledOnce()
+  })
+
   it.each<{
     name: string
     patch: Partial<TransactionPageRow>
@@ -781,17 +802,29 @@ describe('Transactions', () => {
     await waitFor(() => expect(document.activeElement).toHaveTextContent('Second'))
   })
 
-  it('invalidates the complete page query only after successful deletion', async () => {
-    setRows([makeRow({ id: 'delete-me', description: 'Delete me' })])
-    const user = userEvent.setup()
-    render(<Transactions />)
+  it.each([false, true])(
+    'reports committed deletion separately from refresh failure (incomplete=%s)',
+    async (incomplete) => {
+      setRows([makeRow({ id: 'delete-me', description: 'Delete me' })])
+      mockRemove.mockImplementationOnce(async () => {
+        mockRefreshError = incomplete ? 'read unavailable' : null
+      })
+      const user = userEvent.setup()
+      render(<Transactions />)
 
-    await user.click(screen.getByLabelText('Delete Delete me'))
-    await user.click(screen.getByText('Confirm delete'))
+      await user.click(screen.getByLabelText('Delete Delete me'))
+      await user.click(screen.getByText('Confirm delete'))
 
-    await waitFor(() => expect(mockRemove).toHaveBeenCalledWith('delete-me'))
-    expect(mockInvalidate).toHaveBeenCalledWith('delete')
-  })
+      await waitFor(() => expect(mockRemove).toHaveBeenCalledWith('delete-me'))
+      expect(mockInvalidate).toHaveBeenCalledWith('delete')
+      expect(mockRemove).toHaveBeenCalledOnce()
+      expect(toast.success).toHaveBeenCalledWith('toast.deleted')
+      expect(toast.error).not.toHaveBeenCalled()
+      if (incomplete) expect(toast.warning).toHaveBeenCalledWith('toast.savedRefreshFailed')
+      else expect(toast.warning).not.toHaveBeenCalled()
+      expect(screen.queryByText('Confirm delete')).not.toBeInTheDocument()
+    }
+  )
 
   it('clamps to the previous page after deleting the last row on the last page', async () => {
     window.history.replaceState(null, '', '/transactions?page=2&pageSize=25')

@@ -131,6 +131,7 @@
     "paymentSaving": "Recording...",
     "paymentMax": "Current card debt: {{amount}}",
     "paymentSuccess": "Credit card payment recorded",
+    "savedRefreshFailed": "The payment was recorded, but some views could not be refreshed. Reload the view; do not submit the payment again.",
     "paymentError": "Could not record credit card payment",
     "paymentValidation": "Enter an amount greater than zero and no more than the card balance.",
     "paymentInsufficientFunds": "The source account does not have enough balance for this payment.",

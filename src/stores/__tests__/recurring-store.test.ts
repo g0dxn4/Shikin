@@ -41,6 +41,9 @@ vi.mock('../account-store', () => ({
   },
 }))
 
+const mockInvalidate = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/transaction-query-events', () => ({ invalidateTransactionPage: mockInvalidate }))
+
 import {
   query,
   execute,
@@ -597,11 +600,36 @@ describe('recurring-store', () => {
   })
 
   describe('materializeTransactions', () => {
+    it('invalidates the committed page while the first required read is still pending', async () => {
+      runtimeState.isTauri = false
+      mockMaterializeRecurringTransactionsBrowser.mockResolvedValueOnce({
+        success: true,
+        created: 1,
+        message: 'Created 1 transaction(s) from recurring rules.',
+      })
+      let release!: () => void
+      mockTxFetch.mockReturnValueOnce(
+        new Promise<void>((resolve) => {
+          release = resolve
+        })
+      )
+      mockQuery.mockResolvedValueOnce([])
+      const pending = useRecurringStore.getState().materializeTransactions()
+      await vi.waitFor(() => expect(mockTxFetch).toHaveBeenCalledOnce())
+      expect(mockInvalidate.mock.calls).toEqual([['add']])
+      release()
+      await expect(pending).resolves.toBe(1)
+      expect(mockAccountFetch).toHaveBeenCalledOnce()
+      expect(mockQuery).toHaveBeenCalledOnce()
+      expect(useRecurringStore.getState().refreshWarning).toBeNull()
+    })
+
     it.each([false, true])(
       'resolves the committed count and attempts every refresh with a warning (native=%s)',
       async (native) => {
         runtimeState.isTauri = native
         const trace: string[] = []
+        mockInvalidate.mockImplementationOnce((reason) => trace.push(reason))
         mockWithTransaction.mockReset()
         mockQuery.mockImplementationOnce(async () => {
           trace.push('recurring')
@@ -629,7 +657,7 @@ describe('recurring-store', () => {
 
         await expect(useRecurringStore.getState().materializeTransactions()).resolves.toBe(1)
         trace.push('resolve')
-        expect(trace).toEqual(['commit', 'transactions', 'accounts', 'recurring', 'resolve'])
+        expect(trace).toEqual(['commit', 'add', 'transactions', 'accounts', 'recurring', 'resolve'])
         expect(mockAccountFetch).toHaveBeenCalledTimes(1)
         expect(mockQuery).toHaveBeenCalledTimes(1)
         expect(useRecurringStore.getState().error).toBeNull()
@@ -677,6 +705,7 @@ describe('recurring-store', () => {
       expect(mockTxFetch).not.toHaveBeenCalled()
       expect(mockAccountFetch).not.toHaveBeenCalled()
       expect(mockQuery).not.toHaveBeenCalled()
+      expect(mockInvalidate).not.toHaveBeenCalled()
     })
 
     it('uses the data-server materialization endpoint in browser mode', async () => {

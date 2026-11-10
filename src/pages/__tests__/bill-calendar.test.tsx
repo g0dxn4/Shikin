@@ -1,11 +1,25 @@
 import { useCurrencyStore } from '@/stores/currency-store'
 import { query } from '@/lib/database'
-vi.mock('@/lib/database', () => ({ query: vi.fn().mockResolvedValue([]), execute: vi.fn() }))
+vi.mock('@/lib/database', () => ({ query: vi.fn().mockResolvedValue([]), ...ledgerWrites }))
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { BillCalendar } from '../bill-calendar'
+import dayjs from 'dayjs'
+import { createInstance } from 'i18next'
+import type { i18n, Namespace } from 'i18next'
+import en from '@/i18n/locales/en/billCalendar.json'
+import es from '@/i18n/locales/es/billCalendar.json'
+import enCommon from '@/i18n/locales/en/common.json'
+import esCommon from '@/i18n/locales/es/common.json'
+
+const translationMock = vi.hoisted(() => ({ i18n: null as i18n | null }))
+const ledgerWrites = vi.hoisted(() => ({
+  execute: vi.fn(),
+  withTransaction: vi.fn(),
+  materializeRecurringTransactionsBrowser: vi.fn(),
+}))
 
 const recurringStoreMock = vi.hoisted(() => ({
   fetch: vi.fn().mockResolvedValue(undefined),
@@ -37,10 +51,16 @@ const recurringStoreMock = vi.hoisted(() => ({
 }))
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, params?: { count?: number }) =>
-      typeof params?.count === 'number' ? `${key} ${params.count}` : key,
-    i18n: { language: 'en', changeLanguage: vi.fn() },
+  useTranslation: (namespace: Namespace) => ({
+    t: (key: string, params?: { count?: number; rules?: string; currency?: string }) =>
+      translationMock.i18n
+        ? translationMock.i18n.t(key, { ns: namespace, defaultValue: key, ...params })
+        : params?.rules
+          ? `${key} ${params.rules}`
+          : typeof params?.count === 'number'
+            ? `${key} ${params.count}`
+            : key,
+    i18n: { language: translationMock.i18n?.language ?? 'en', changeLanguage: vi.fn() },
   }),
 }))
 
@@ -62,6 +82,8 @@ async function renderBillCalendar() {
 }
 
 const originalRule = recurringStoreMock.rules[0]
+const convertCurrent = useCurrencyStore.getState().convertCurrentToPreferred
+const convertHistorical = useCurrencyStore.getState().convertHistoricalToPreferred
 
 const fxRate = (fromCurrency: string, toCurrency: string, rateDecimal: string) => ({
   id: `${fromCurrency}-${toCurrency}-${rateDecimal}`,
@@ -74,11 +96,33 @@ const fxRate = (fromCurrency: string, toCurrency: string, rateDecimal: string) =
   sourceNote: null,
 })
 
+async function setLocale(language: 'en' | 'es') {
+  const i18n = createInstance()
+  await i18n.init({
+    lng: language,
+    fallbackLng: false,
+    resources: {
+      en: { billCalendar: en, common: enCommon },
+      es: { billCalendar: es, common: esCommon },
+    },
+    interpolation: { escapeValue: false },
+  })
+  translationMock.i18n = i18n
+}
+
 describe('BillCalendar', () => {
   beforeEach(() => {
+    translationMock.i18n = null
+    Object.values(ledgerWrites).forEach((write) => write.mockClear())
     recurringStoreMock.rules = [originalRule]
     vi.mocked(query).mockResolvedValue([])
-    useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'USD', manualRates: [] })
+    useCurrencyStore.setState({
+      mainCurrency: 'USD',
+      preferredCurrency: 'USD',
+      manualRates: [],
+      convertCurrentToPreferred: convertCurrent,
+      convertHistoricalToPreferred: convertHistorical,
+    })
   })
   it('renders calendar grid and navigation', async () => {
     await renderBillCalendar()
@@ -181,6 +225,216 @@ describe('BillCalendar', () => {
       vi.useRealTimers()
     }
   })
+
+  it('withholds a rule without recorded currency and marks its plain amount', async () => {
+    recurringStoreMock.rules = [
+      Object.assign({}, originalRule, { currency: null, account_currency: null }),
+    ]
+    const convert = vi.fn(convertCurrent)
+    useCurrencyStore.setState({ convertCurrentToPreferred: convert })
+
+    await renderBillCalendar()
+
+    expect(convert).not.toHaveBeenCalled()
+    expect(within(screen.getByText('thisMonth').parentElement!).getByText('—')).toBeInTheDocument()
+    expect(screen.getByText('currency.unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('status').textContent).toBe('estimate.unknownCurrencyRules Rent')
+    await userEvent
+      .setup()
+      .click(within(screen.getByRole('list', { name: 'calendar.markedDays' })).getByRole('button'))
+    const list = within(screen.getByRole('list', { name: 'schedule.list' }))
+    expect(list.getByText('Rent')).toBeInTheDocument()
+    expect(list.getByText('1,200.00 · currency.unknown')).toBeInTheDocument()
+    expect(list.queryByText('$1,200.00')).not.toBeInTheDocument()
+    expect(screen.getByText('scheduledCount 1')).toBeInTheDocument()
+    Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
+  })
+
+  it('withholds empty unconfigured totals instead of using the EUR setup preference', async () => {
+    recurringStoreMock.rules = []
+    useCurrencyStore.setState({ mainCurrency: null, preferredCurrency: 'EUR' })
+
+    await renderBillCalendar()
+
+    for (const label of ['thisMonth', 'paid', 'remaining']) {
+      expect(within(screen.getByText(label).parentElement!).getByText('—')).toBeInTheDocument()
+    }
+    expect(screen.queryByText('€0.00')).not.toBeInTheDocument()
+    expect(screen.queryByText('EUR')).not.toBeInTheDocument()
+    expect(screen.getByText('currency.unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('status').textContent).toBe('common:currencySetup.title')
+    await userEvent.setup().click(screen.getByRole('button', { name: 'currency.basis' }))
+    expect(screen.queryByText('currency.actualAndEstimate')).not.toBeInTheDocument()
+    Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
+  })
+
+  it.each([false, true])(
+    'keeps unknown bills counted and names them once alongside a valid bill (paid=%s)',
+    async (paid) => {
+      const date = dayjs().startOf('month').format('YYYY-MM-DD')
+      recurringStoreMock.rules = [
+        { ...originalRule, next_date: date },
+        Object.assign({}, originalRule, {
+          id: 'unknown',
+          description: 'Unknown bill',
+          amount: 4000,
+          currency: null,
+          account_currency: null,
+          frequency: 'weekly',
+          next_date: date,
+          end_date: dayjs(date).add(7, 'day').format('YYYY-MM-DD'),
+        }),
+        Object.assign({}, originalRule, {
+          id: 'other-unknown',
+          description: 'Other unknown bill',
+          amount: 5000,
+          currency: null,
+          account_currency: undefined,
+          next_date: date,
+        }),
+      ]
+      if (paid) {
+        vi.mocked(query).mockResolvedValue([
+          {
+            id: 'paid-rent',
+            recurring_rule_id: originalRule.id,
+            date,
+            type: 'expense',
+            status: 'posted',
+            amount: 120000,
+            currency: 'USD',
+            description: 'Rent',
+          },
+        ])
+      }
+      const before = JSON.stringify(recurringStoreMock.rules)
+      const current = vi.fn(convertCurrent)
+      const historical = vi.fn(convertHistorical)
+      useCurrencyStore.setState({
+        convertCurrentToPreferred: current,
+        convertHistoricalToPreferred: historical,
+      })
+
+      await renderBillCalendar()
+
+      for (const label of ['thisMonth', 'remaining']) {
+        const metric = within(screen.getByText(label).parentElement!)
+        expect(metric.getByText('—')).toBeInTheDocument()
+        expect(metric.queryByText('$1,200.00')).not.toBeInTheDocument()
+      }
+      expect(
+        within(screen.getByText('paid').parentElement!).getByText(paid ? '$1,200.00' : '$0.00')
+      ).toBeInTheDocument()
+      expect(screen.getByText('currency.unavailable')).toBeInTheDocument()
+      expect(screen.getByRole('status').textContent).toBe(
+        'estimate.unknownCurrencyRules Other unknown bill, Unknown bill'
+      )
+      expect(screen.getByRole('status')).toHaveClass('break-words')
+      expect(screen.getByText('scheduledCount 4')).toBeInTheDocument()
+      expect(
+        within(screen.getByRole('list', { name: 'schedule.list' })).getAllByRole('listitem')
+      ).toHaveLength(4)
+      expect(
+        [...current.mock.calls, ...historical.mock.calls].every(([amount]) => amount === 120000)
+      ).toBe(true)
+      current.mockClear()
+      historical.mockClear()
+      await userEvent
+        .setup()
+        .click(
+          within(screen.getByRole('list', { name: 'calendar.markedDays' })).getAllByRole(
+            'button'
+          )[0]
+        )
+      if (paid) {
+        expect(historical).toHaveBeenCalledWith(120000, 'USD', date)
+        expect(current).not.toHaveBeenCalled()
+      } else {
+        expect(current).toHaveBeenCalledWith(120000, 'USD')
+        expect(historical).not.toHaveBeenCalled()
+      }
+      const list = within(screen.getByRole('list', { name: 'schedule.list' }))
+      expect(list.getByText('40.00 · currency.unknown')).toBeInTheDocument()
+      expect(list.getByText('50.00 · currency.unknown')).toBeInTheDocument()
+      expect(list.getByText('$1,200.00')).toBeInTheDocument()
+      expect(list.getAllByRole('listitem')).toHaveLength(3)
+      expect(screen.getByRole('status').textContent).toBe(
+        'estimate.unknownCurrencyRules Other unknown bill, Unknown bill'
+      )
+      expect(JSON.stringify(recurringStoreMock.rules)).toBe(before)
+      Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
+    }
+  )
+
+  it.each([
+    { billCount: 0, total: '$0.00' },
+    { billCount: 1, total: '$1,200.00' },
+  ])(
+    'formats $billCount bills and the FX basis in main currency, not the setup draft',
+    async ({ billCount, total }) => {
+      await setLocale('en')
+      recurringStoreMock.rules = recurringStoreMock.rules.slice(0, billCount)
+      useCurrencyStore.setState({ mainCurrency: 'USD', preferredCurrency: 'EUR' })
+
+      await renderBillCalendar()
+
+      for (const label of ['This Month', 'Remaining']) {
+        expect(within(screen.getByText(label).parentElement!).getByText(total)).toBeInTheDocument()
+      }
+      expect(
+        within(screen.getByText('Paid', { selector: 'span' }).parentElement!).getByText('$0.00')
+      ).toBeInTheDocument()
+      expect(screen.getByText('USD')).toBeInTheDocument()
+      expect(screen.queryByText('EUR')).not.toBeInTheDocument()
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Rate basis' }))
+      expect(
+        screen.getByText('USD · paid at transaction date; estimates use today’s rate')
+      ).toBeInTheDocument()
+      Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
+    }
+  )
+
+  it.each([
+    {
+      language: 'en' as const,
+      unavailable: 'Unavailable',
+      markedDays: 'Marked days',
+      rowAmount: '1,200.00 · Unknown currency',
+      reason: 'Total unavailable: no currency recorded (Rent).',
+      setupReason: 'Main currency needs to be configured',
+    },
+    {
+      language: 'es' as const,
+      unavailable: 'No disponible',
+      markedDays: 'Días marcados',
+      rowAmount: '1200,00 · Moneda desconocida',
+      reason: 'Total no disponible: no hay moneda registrada (Rent).',
+      setupReason: 'Falta configurar la moneda principal',
+    },
+  ])(
+    'renders unknown currency and setup reasons in $language',
+    async ({ language, unavailable, markedDays, rowAmount, reason, setupReason }) => {
+      await setLocale(language)
+      recurringStoreMock.rules = [
+        Object.assign({}, originalRule, { currency: null, account_currency: null }),
+      ]
+
+      await renderBillCalendar()
+
+      expect(screen.getByText(unavailable)).toBeInTheDocument()
+      expect(screen.getByRole('status').textContent).toBe(reason)
+      await userEvent
+        .setup()
+        .click(within(screen.getByRole('list', { name: markedDays })).getByRole('button'))
+      expect(screen.getByText(rowAmount)).toBeInTheDocument()
+      act(() => useCurrencyStore.setState({ mainCurrency: null, preferredCurrency: 'EUR' }))
+      expect(screen.getByRole('status').textContent).toBe(`${setupReason} ${reason}`)
+      expect(screen.queryByText('€0.00')).not.toBeInTheDocument()
+      expect(screen.queryByText('$0.00')).not.toBeInTheDocument()
+      Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
+    }
+  )
 
   it('converts scheduled and actually paid bills, withholding missing-rate totals', async () => {
     recurringStoreMock.rules.push({

@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { PageToolbar, NativePanel } from '@/components/ui/native-layout'
 import { ErrorBanner } from '@/components/ui/error-banner'
 import { MonthGrid } from '@/components/bill-calendar/month-grid'
-import { formatMoney } from '@/lib/money'
+import { formatMoney, fromCentavos } from '@/lib/money'
 import { query } from '@/lib/database'
 import { useRecurringStore } from '@/stores/recurring-store'
 import { useCurrencyStore } from '@/stores/currency-store'
@@ -71,13 +71,8 @@ export function BillCalendar() {
   const fxPanelId = useId()
   const scheduleAboutId = useId()
   const { rules, isLoading, fetchError, fetch } = useRecurringStore()
-  const {
-    convertCurrentToPreferred,
-    convertHistoricalToPreferred,
-    preferredCurrency,
-    mainCurrency,
-    manualRates,
-  } = useCurrencyStore()
+  const { convertCurrentToPreferred, convertHistoricalToPreferred, mainCurrency, manualRates } =
+    useCurrencyStore()
   const [payments, setPayments] = useState<{ month: string; rows: Transaction[] } | null>(null)
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [retry, setRetry] = useState(0)
@@ -125,8 +120,13 @@ export function BillCalendar() {
   const moneyTotal = (items: typeof bills) => {
     let total = 0
     const missing = new Set<string>()
+    const unknownRules = new Set<string>()
     let complete = true
     for (const bill of items) {
+      if (bill.currency === null || bill.currency === undefined) {
+        unknownRules.add(bill.description)
+        continue
+      }
       const result = bill.paid
         ? convertHistoricalToPreferred(bill.amount, bill.currency, bill.date)
         : convertCurrentToPreferred(bill.amount, bill.currency)
@@ -137,12 +137,15 @@ export function BillCalendar() {
       }
     }
     return {
-      value: ready && complete && !unresolved ? formatMoney(total, preferredCurrency) : '—',
+      value:
+        ready && mainCurrency !== null && complete && unknownRules.size === 0 && !unresolved
+          ? formatMoney(total, mainCurrency)
+          : '—',
       complete,
       missing: [...missing],
+      unknownRules: [...unknownRules],
     }
   }
-  void mainCurrency
   void manualRates
   const days = Array.from({ length: Math.ceil((startDay + totalDays) / 7) * 7 }, (_, index) => {
     const day = index - startDay + 1
@@ -168,7 +171,10 @@ export function BillCalendar() {
   const fxMissing = [
     ...new Set([...monthTotal.missing, ...paidTotal.missing, ...remainingTotal.missing]),
   ]
-  const fxIncomplete = !monthTotal.complete || !paidTotal.complete || !remainingTotal.complete
+  const conversionIncomplete =
+    !monthTotal.complete || !paidTotal.complete || !remainingTotal.complete
+  const fxIncomplete =
+    mainCurrency === null || conversionIncomplete || monthTotal.unknownRules.length > 0
 
   return (
     <div className="page-content max-w-full min-w-0">
@@ -242,7 +248,7 @@ export function BillCalendar() {
                 fxIncomplete ? 'border-warning text-warning' : 'border-border text-foreground'
               )}
             >
-              {fxIncomplete ? t('currency.unavailable') : preferredCurrency}
+              {fxIncomplete ? t('currency.unavailable') : mainCurrency}
             </span>
             <MethodButton
               label={t('currency.basis')}
@@ -253,15 +259,27 @@ export function BillCalendar() {
           </div>
           {fxIncomplete ? (
             <p className="text-warning mt-1 text-xs break-words" role="status">
-              {t('currency.missing', { currencies: fxMissing.join(', ') })}
+              {[
+                mainCurrency === null ? t('common:currencySetup.title') : null,
+                mainCurrency !== null && conversionIncomplete
+                  ? t('currency.missing', { currencies: fxMissing.join(', ') })
+                  : null,
+                monthTotal.unknownRules.length
+                  ? t('estimate.unknownCurrencyRules', {
+                      rules: monthTotal.unknownRules.join(', '),
+                    })
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' ')}
             </p>
           ) : null}
-          {fxOpen ? (
+          {fxOpen && mainCurrency !== null ? (
             <div
               id={fxPanelId}
               className="text-muted-foreground mt-1 max-w-2xl text-xs break-words"
             >
-              <p>{t('currency.actualAndEstimate', { currency: preferredCurrency })}</p>
+              <p>{t('currency.actualAndEstimate', { currency: mainCurrency })}</p>
             </div>
           ) : null}
           <div className="mt-2 grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-4">
@@ -347,7 +365,12 @@ export function BillCalendar() {
                   </div>
                   {selectedDate ? (
                     <p className="min-w-0 text-sm font-medium break-all tabular-nums sm:max-w-[50%] sm:text-right">
-                      {formatMoney(bill.amount, bill.currency)}
+                      {bill.currency === null || bill.currency === undefined
+                        ? `${fromCentavos(bill.amount).toLocaleString(i18n.language, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })} · ${t('currency.unknown')}`
+                        : formatMoney(bill.amount, bill.currency)}
                     </p>
                   ) : null}
                 </div>

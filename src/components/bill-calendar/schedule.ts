@@ -13,7 +13,7 @@ export interface ScheduledBill {
   date: string
   description: string
   amount: number
-  currency: string
+  currency: string | null | undefined
   paid: boolean
 }
 
@@ -38,7 +38,7 @@ export function buildBillSchedule(
           date,
           description: rule.description,
           amount: rule.amount,
-          currency: rule.currency ?? rule.account_currency ?? 'USD',
+          currency: rule.currency ?? rule.account_currency,
           paid: false,
         })
       let next: string

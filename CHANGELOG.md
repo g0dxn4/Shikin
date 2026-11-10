@@ -7,6 +7,7 @@ All notable changes to Shikin are documented in this file.
 ### Fixed
 
 - Bills no longer assumes US dollars for a recurring bill that has no currency on the rule or its account. The bill stays listed with an "unknown currency" marker, and the monthly run rate is unavailable with a reason naming it. Without a configured main currency, the run rate is unavailable instead of showing zero in the setup-screen currency.
+- Bill Calendar gets the same treatment: an unknown-currency bill stays on the calendar but is left out of the month totals with a named reason, and an unconfigured main currency shows unavailable totals instead of amounts in the setup-screen currency.
 
 ### Changed
 

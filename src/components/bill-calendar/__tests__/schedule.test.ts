@@ -16,6 +16,56 @@ const rule = {
 } as RecurringRuleWithDetails
 
 describe('read-only monthly bill schedule', () => {
+  it('preserves missing rule and account currency instead of inventing USD', () => {
+    const unknown = Object.assign({}, rule, { currency: null, account_currency: null })
+    expect(buildBillSchedule([unknown], [], '2028-02').bills[0]).toMatchObject({
+      description: 'Rent',
+      amount: 10000,
+      currency: null,
+      paid: false,
+    })
+  })
+
+  it.each([
+    { currency: 'EUR', account_currency: 'USD', expected: 'EUR' },
+    { currency: null, account_currency: 'USD', expected: 'USD' },
+    { currency: null, account_currency: undefined, expected: undefined },
+  ])(
+    'keeps rule/account currency precedence without normalizing $currency',
+    ({ currency, account_currency, expected }) => {
+      const source = Object.assign({}, rule, { currency, account_currency })
+      const before = JSON.stringify(source)
+      expect(buildBillSchedule([source], [], '2028-02').bills[0].currency).toBe(expected)
+      expect(JSON.stringify(source)).toBe(before)
+    }
+  )
+
+  it('uses recorded payment currency rather than an unknown projected currency', () => {
+    const unknown = Object.assign({}, rule, { currency: null, account_currency: null })
+    const payment = {
+      id: 'posted-known',
+      recurring_rule_id: rule.id,
+      date: '2028-02-29',
+      type: 'expense',
+      status: 'posted',
+      amount: 12345,
+      currency: 'GBP',
+      description: 'Actual rent',
+    } as Transaction
+    const before = JSON.stringify({ unknown, payment })
+    expect(buildBillSchedule([unknown], [payment], '2028-02').bills).toEqual([
+      {
+        id: 'posted-known',
+        date: '2028-02-29',
+        description: 'Actual rent',
+        amount: 12345,
+        currency: 'GBP',
+        paid: true,
+      },
+    ])
+    expect(JSON.stringify({ unknown, payment })).toBe(before)
+  })
+
   it('preserves fixed-day anchors across leap February and March', () => {
     expect(buildBillSchedule([rule], [], '2028-02').bills[0]).toMatchObject({
       date: '2028-02-29',

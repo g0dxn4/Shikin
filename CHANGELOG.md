@@ -4,6 +4,10 @@ All notable changes to Shikin are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Bills no longer assumes US dollars for a recurring bill that has no currency on the rule or its account. The bill stays listed with an "unknown currency" marker, and the monthly run rate is unavailable with a reason naming it. Without a configured main currency, the run rate is unavailable instead of showing zero in the setup-screen currency.
+
 ### Changed
 
 - Removed the unused undated currency-conversion API (`convertCurrencyTotals` and its types) from `@shikin/finance-core`. Ledger conversions use only exact, dated manual exchange-rate evidence.

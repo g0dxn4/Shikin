@@ -7,6 +7,14 @@ import userEvent from '@testing-library/user-event'
 import dayjs from 'dayjs'
 import { MemoryRouter } from 'react-router'
 import { BillsPage } from '../bills'
+import { createInstance } from 'i18next'
+import type { i18n, Namespace } from 'i18next'
+import en from '@/i18n/locales/en/billCalendar.json'
+import es from '@/i18n/locales/es/billCalendar.json'
+import enCommon from '@/i18n/locales/en/common.json'
+import esCommon from '@/i18n/locales/es/common.json'
+
+const translationMock = vi.hoisted(() => ({ i18n: null as i18n | null }))
 
 const ledgerWrites = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -51,14 +59,16 @@ const recurringStoreMock = vi.hoisted(() => ({
 }))
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, params?: { count?: number; rules?: string }) =>
-      params?.rules
-        ? `${key} ${params.rules}`
-        : typeof params?.count === 'number'
-          ? `${key} ${params.count}`
-          : key,
-    i18n: { language: 'en', changeLanguage: vi.fn() },
+  useTranslation: (namespace: Namespace) => ({
+    t: (key: string, params?: { count?: number; rules?: string; currency?: string }) =>
+      translationMock.i18n
+        ? translationMock.i18n.t(key, { ns: namespace, defaultValue: key, ...params })
+        : params?.rules
+          ? `${key} ${params.rules}`
+          : typeof params?.count === 'number'
+            ? `${key} ${params.count}`
+            : key,
+    i18n: { language: translationMock.i18n?.language ?? 'en', changeLanguage: vi.fn() },
   }),
 }))
 
@@ -81,8 +91,23 @@ const fxRate = (fromCurrency: string, toCurrency: string, rateDecimal: string) =
   sourceNote: null,
 })
 
+async function setLocale(language: 'en' | 'es') {
+  const i18n = createInstance()
+  await i18n.init({
+    lng: language,
+    fallbackLng: false,
+    resources: {
+      en: { billCalendar: en, common: enCommon },
+      es: { billCalendar: es, common: esCommon },
+    },
+    interpolation: { escapeValue: false },
+  })
+  translationMock.i18n = i18n
+}
+
 describe('BillsPage', () => {
   beforeEach(() => {
+    translationMock.i18n = null
     useCurrencyStore.setState({
       mainCurrency: 'USD',
       preferredCurrency: 'USD',
@@ -453,17 +478,184 @@ describe('BillsPage', () => {
     Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
   })
 
-  it('rounds before conversion and keeps the existing rule/account/USD currency boundary', () => {
+  it('withholds estimates for a rule with no recorded currency and marks its plain amount', () => {
+    Object.assign(recurringStoreMock.rules[0], { currency: null, account_currency: null })
+    const convert = vi.fn(convertMonthlyEstimate)
+    useCurrencyStore.setState({ convertCurrentToPreferred: convert })
+
+    render(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
+
+    expect(convert).not.toHaveBeenCalled()
+    const row = within(screen.getByText('Rent').closest('li')!)
+    expect(row.getByText('1,200.00 · currency.unknown')).toBeInTheDocument()
+    expect(row.queryByText('$1,200.00')).not.toBeInTheDocument()
+    const total = within(screen.getByText('monthlyRunRate').parentElement!)
+    expect(total.getByText('currency.unavailable')).toBeInTheDocument()
+    expect(total.queryByText('$1,200.00')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('estimate.unknownCurrencyRules Rent')
+    expect(screen.getByText('horizon.activeCount 1')).toBeInTheDocument()
+    Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
+  })
+
+  it('withholds an empty unconfigured run rate instead of using the EUR setup preference', () => {
+    recurringStoreMock.rules = []
+    useCurrencyStore.setState({ mainCurrency: null, preferredCurrency: 'EUR' })
+
+    render(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
+
+    const total = within(screen.getByText('monthlyRunRate').parentElement!)
+    expect(total.getByText('currency.unavailable')).toBeInTheDocument()
+    expect(total.queryByText('€0.00')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('currencySetup.title')
+    expect(screen.getByText('horizon.activeCount 0')).toBeInTheDocument()
+    Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
+  })
+
+  it.each([
+    { descriptions: ['Unknown bill'] },
+    { descriptions: ['Unknown bill', 'Another unknown bill'] },
+  ])(
+    'withholds mixed totals and names only unknown-currency rules: $descriptions',
+    ({ descriptions }) => {
+      for (const [index, description] of descriptions.entries()) {
+        recurringStoreMock.rules.push(
+          Object.assign(
+            { ...recurringStoreMock.rules[0], id: `unknown-${index}`, description },
+            { currency: null, account_currency: null }
+          )
+        )
+      }
+      const before = JSON.stringify(recurringStoreMock.rules)
+      const convert = vi.fn(convertMonthlyEstimate)
+      useCurrencyStore.setState({ convertCurrentToPreferred: convert })
+
+      render(
+        <MemoryRouter>
+          <BillsPage />
+        </MemoryRouter>
+      )
+
+      expect(convert).toHaveBeenCalledExactlyOnceWith(120000, 'USD')
+      const total = within(screen.getByText('monthlyRunRate').parentElement!)
+      expect(total.getByText('currency.unavailable')).toBeInTheDocument()
+      expect(total.queryByText('$1,200.00')).not.toBeInTheDocument()
+      expect(screen.getByRole('status').textContent).toBe(
+        `estimate.unknownCurrencyRules ${descriptions.join(', ')}`
+      )
+      expect(screen.getByRole('status')).toHaveClass('max-w-2xl', 'break-words')
+      expect(screen.getByText('Rent')).toBeInTheDocument()
+      for (const description of descriptions) {
+        expect(screen.getByText(description)).toBeInTheDocument()
+      }
+      expect(screen.getByText(`horizon.activeCount ${descriptions.length + 1}`)).toBeInTheDocument()
+      expect(
+        within(screen.getByRole('list', { name: 'horizon.legend' })).getByRole('listitem', {
+          name: `horizon.next7Count ${descriptions.length + 1}`,
+        })
+      ).toBeInTheDocument()
+      expect(JSON.stringify(recurringStoreMock.rules)).toBe(before)
+      Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
+    }
+  )
+
+  it.each([
+    { billCount: 0, amount: '€0.00' },
+    { billCount: 1, amount: '€1,200.00' },
+  ])(
+    'uses the configured main currency for $billCount bills, not the setup draft',
+    async ({ billCount, amount }) => {
+      await setLocale('en')
+      recurringStoreMock.rules = recurringStoreMock.rules.slice(0, billCount)
+      recurringStoreMock.rules.forEach((rule) => Object.assign(rule, { currency: 'EUR' }))
+      useCurrencyStore.setState({ mainCurrency: 'EUR', preferredCurrency: 'USD' })
+
+      render(
+        <MemoryRouter>
+          <BillsPage />
+        </MemoryRouter>
+      )
+
+      const total = within(screen.getByText('Monthly Run Rate').parentElement!)
+      expect(total.getByText(amount)).toBeInTheDocument()
+      expect(total.queryByText(/\$/)).not.toBeInTheDocument()
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Due count method' }))
+      expect(screen.getByText('EUR · planning estimate using today’s rate')).toBeInTheDocument()
+      Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
+    }
+  )
+
+  it.each([
+    {
+      language: 'en' as const,
+      unavailable: 'Unavailable',
+      rowAmount: '1,200.00 · Unknown currency',
+      reason: 'Total unavailable: no currency recorded (Rent).',
+      setupReason: 'Main currency needs to be configured',
+    },
+    {
+      language: 'es' as const,
+      unavailable: 'No disponible',
+      rowAmount: '1200,00 · Moneda desconocida',
+      reason: 'Total no disponible: no hay moneda registrada (Rent).',
+      setupReason: 'Falta configurar la moneda principal',
+    },
+  ])(
+    'renders the currency reasons and unknown marker in $language',
+    async ({ language, unavailable, rowAmount, reason, setupReason }) => {
+      for (const copy of [en, es]) {
+        expect(copy.currency.unknown.length).toBeGreaterThan(0)
+        expect(copy.estimate.unknownCurrencyRules).toContain('{{rules}}')
+      }
+      await setLocale(language)
+      Object.assign(recurringStoreMock.rules[0], { currency: null, account_currency: null })
+
+      render(
+        <MemoryRouter>
+          <BillsPage />
+        </MemoryRouter>
+      )
+
+      expect(screen.getByText(unavailable)).toBeInTheDocument()
+      expect(screen.getByText(rowAmount)).toBeInTheDocument()
+      expect(screen.getByRole('status').textContent).toBe(reason)
+      expect(screen.getByRole('status')).toHaveClass('max-w-2xl', 'break-words')
+      act(() => useCurrencyStore.setState({ mainCurrency: null, preferredCurrency: 'EUR' }))
+      expect(screen.getByRole('status').textContent).toBe(`${setupReason} ${reason}`)
+      expect(screen.queryByText('€0.00')).not.toBeInTheDocument()
+    }
+  )
+
+  it('rounds before conversion, prefers rule over account currency, and withholds unknown currency', () => {
     Object.assign(recurringStoreMock.rules[0], {
       amount: 1,
       frequency: 'quarterly',
-      currency: null,
+      currency: 'USD',
       account_currency: 'EUR',
     })
     useCurrencyStore.setState({ manualRates: [fxRate('EUR', 'USD', '2')] })
     const convert = vi.fn(convertMonthlyEstimate)
     useCurrencyStore.setState({ convertCurrentToPreferred: convert })
     const page = render(
+      <MemoryRouter>
+        <BillsPage />
+      </MemoryRouter>
+    )
+
+    expect(convert).toHaveBeenCalledExactlyOnceWith(0, 'USD')
+    expect(within(screen.getByText('Rent').closest('li')!).getByText('$0.01')).toBeInTheDocument()
+    Object.assign(recurringStoreMock.rules[0], { currency: null })
+    recurringStoreMock.rules = [...recurringStoreMock.rules]
+    convert.mockClear()
+    page.rerender(
       <MemoryRouter>
         <BillsPage />
       </MemoryRouter>
@@ -482,7 +674,11 @@ describe('BillsPage', () => {
         <BillsPage />
       </MemoryRouter>
     )
-    expect(convert).toHaveBeenCalledExactlyOnceWith(0, 'USD')
+    expect(convert).not.toHaveBeenCalled()
+    expect(
+      within(screen.getByText('monthlyRunRate').parentElement!).getByText('currency.unavailable')
+    ).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('estimate.unknownCurrencyRules Rent')
     Object.values(ledgerWrites).forEach((write) => expect(write).not.toHaveBeenCalled())
   })
 

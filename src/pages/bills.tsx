@@ -11,7 +11,7 @@ import { recurringEquivalentCentavos } from '@shikin/finance-core'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ShowMorePagination } from '@/components/shared/show-more-pagination'
-import { formatMoney } from '@/lib/money'
+import { formatMoney, fromCentavos } from '@/lib/money'
 import { useRecurringStore, type RecurringRuleWithDetails } from '@/stores/recurring-store'
 import { useUIStore } from '@/stores/ui-store'
 import { cn } from '@/lib/utils'
@@ -38,6 +38,7 @@ function BillRow({ rule, onEdit }: { rule: RecurringRuleWithDetails; onEdit: () 
   const isOverdue = dueIn < 0
   const isSoon = dueIn >= 0 && dueIn <= 7
   const statusClass = isOverdue ? 'text-destructive' : isSoon ? 'text-warning' : 'text-success'
+  const currency = rule.currency ?? rule.account_currency
 
   const dueStatus = isOverdue ? 'overdue' : isSoon ? 'soon' : 'later'
 
@@ -86,7 +87,12 @@ function BillRow({ rule, onEdit }: { rule: RecurringRuleWithDetails; onEdit: () 
         </div>
         <div className="flex min-w-0 items-center justify-between gap-2 sm:justify-end">
           <p className="min-w-0 flex-1 text-sm font-medium break-all tabular-nums sm:flex-none sm:text-right">
-            {formatMoney(rule.amount, rule.currency ?? rule.account_currency ?? 'USD')}
+            {currency === null || currency === undefined
+              ? `${fromCentavos(rule.amount).toLocaleString(i18n.language, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })} · ${t('currency.unknown')}`
+              : formatMoney(rule.amount, currency)}
           </p>
           <Button
             type="button"
@@ -113,8 +119,7 @@ export function BillsPage() {
   const [listAboutOpen, setListAboutOpen] = useState(false)
   const listAboutId = useId()
 
-  const { convertCurrentToPreferred, preferredCurrency, mainCurrency, manualRates } =
-    useCurrencyStore()
+  const { convertCurrentToPreferred, mainCurrency, manualRates } = useCurrencyStore()
   const [status, setStatus] = useState('all')
 
   useEffect(() => {
@@ -132,6 +137,7 @@ export function BillsPage() {
     missingCurrencies,
     currencyComplete,
     invalidEstimates,
+    unknownCurrencyEstimates,
   } = useMemo(() => {
     const today = dayjs()
     const todayStart = today.startOf('day')
@@ -145,6 +151,7 @@ export function BillsPage() {
     let conversionComplete = true
     const missing = new Set<string>()
     const invalid: string[] = []
+    const unknownCurrencies: string[] = []
 
     for (const rule of rules) {
       if (
@@ -156,6 +163,9 @@ export function BillsPage() {
         continue
 
       activeBills.push(rule)
+      const sourceCurrency = rule.currency ?? rule.account_currency
+      if (sourceCurrency === null || sourceCurrency === undefined)
+        unknownCurrencies.push(rule.description)
       let monthlyCentavos: number | null = null
       try {
         monthlyCentavos = recurringEquivalentCentavos(
@@ -166,11 +176,8 @@ export function BillsPage() {
       } catch {
         invalid.push(rule.description)
       }
-      if (monthlyCentavos !== null) {
-        const result = convertCurrentToPreferred(
-          monthlyCentavos,
-          rule.currency ?? rule.account_currency ?? 'USD'
-        )
+      if (monthlyCentavos !== null && sourceCurrency !== null && sourceCurrency !== undefined) {
+        const result = convertCurrentToPreferred(monthlyCentavos, sourceCurrency)
         if (result.complete) total += result.amountCentavos
         else {
           conversionComplete = false
@@ -199,34 +206,43 @@ export function BillsPage() {
       monthlyTotal: total,
       currencyComplete: conversionComplete,
       invalidEstimates: invalid,
+      unknownCurrencyEstimates: unknownCurrencies,
       missingCurrencies: [...missing],
     }
     // Manual authority is read by the stable store converter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rules, convertCurrentToPreferred, manualRates, mainCurrency, preferredCurrency])
+  }, [rules, convertCurrentToPreferred, manualRates, mainCurrency])
 
-  const complete = currencyComplete && invalidEstimates.length === 0
+  const complete =
+    mainCurrency !== null &&
+    currencyComplete &&
+    invalidEstimates.length === 0 &&
+    unknownCurrencyEstimates.length === 0
   const filteredBills = status === 'overdue' ? overdue : status === 'soon' ? dueSoon : bills
   const visibleBills = filteredBills.slice(0, visibleBillCount)
   const runRateValue = isLoading
     ? '—'
     : complete
-      ? formatMoney(monthlyTotal, preferredCurrency)
+      ? formatMoney(monthlyTotal, mainCurrency)
       : t('currency.unavailable')
   const runRateDetail = isLoading
     ? null
     : !complete
       ? [
-          !currencyComplete
+          mainCurrency === null ? tCommon('currencySetup.title') : null,
+          mainCurrency !== null && !currencyComplete
             ? t('currency.missing', { currencies: missingCurrencies.join(', ') })
             : null,
           invalidEstimates.length
             ? t('estimate.invalidRules', { rules: invalidEstimates.join(', ') })
             : null,
+          unknownCurrencyEstimates.length
+            ? t('estimate.unknownCurrencyRules', { rules: unknownCurrencyEstimates.join(', ') })
+            : null,
         ]
           .filter(Boolean)
           .join(' ')
-      : t('currency.estimateToday', { currency: preferredCurrency })
+      : t('currency.estimateToday', { currency: mainCurrency })
 
   return (
     <div className="page-content max-w-full min-w-0">

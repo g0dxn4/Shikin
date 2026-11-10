@@ -85,6 +85,7 @@
   },
   "currency": {
     "unavailable": "No disponible",
+    "unknown": "Moneda desconocida",
     "estimate": "Estimación",
     "basis": "Base de la tasa",
     "missing": "Total no disponible: revisa los tipos de cambio y las monedas ({{currencies}}).",
@@ -92,7 +93,8 @@
     "actualAndEstimate": "{{currency}} · pagos a la fecha de transacción; estimaciones con la tasa de hoy"
   },
   "estimate": {
-    "invalidRules": "Total no disponible: importes no válidos, frecuencias no admitidas o equivalentes mensuales o anuales demasiado grandes ({{rules}})."
+    "invalidRules": "Total no disponible: importes no válidos, frecuencias no admitidas o equivalentes mensuales o anuales demasiado grandes ({{rules}}).",
+    "unknownCurrencyRules": "Total no disponible: no hay moneda registrada ({{rules}})."
   },
   "schedule": {
     "allDays": "Todo el mes",

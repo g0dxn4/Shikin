@@ -85,6 +85,7 @@
   },
   "currency": {
     "unavailable": "Unavailable",
+    "unknown": "Unknown currency",
     "estimate": "Estimate",
     "basis": "Rate basis",
     "missing": "Total unavailable: check exchange rates and currency data ({{currencies}}).",
@@ -92,7 +93,8 @@
     "actualAndEstimate": "{{currency}} · paid at transaction date; estimates use today’s rate"
   },
   "estimate": {
-    "invalidRules": "Total unavailable: invalid amounts, unsupported frequencies, or oversized monthly or yearly equivalents ({{rules}})."
+    "invalidRules": "Total unavailable: invalid amounts, unsupported frequencies, or oversized monthly or yearly equivalents ({{rules}}).",
+    "unknownCurrencyRules": "Total unavailable: no currency recorded ({{rules}})."
   },
   "schedule": {
     "allDays": "Whole month",

@@ -14,7 +14,7 @@ test.describe('Settings', () => {
       await expect(page.getByRole('heading', { name, exact: true })).toBeVisible()
     }
     await expect(page.getByLabel('Language')).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Theme & Appearance' })).toBeVisible()
+    await expect(page.getByRole('radiogroup', { name: 'Appearance', exact: true })).toBeVisible()
     await expect(page.getByLabel('Main currency')).toBeVisible()
     await expect(page.getByRole('button', { name: /Export Data/i })).toBeVisible()
   })
@@ -36,7 +36,7 @@ test.describe('Settings', () => {
     await expect(page.locator('#manual-rates')).not.toHaveAttribute('open', '')
     await page.locator('#manual-rates > summary').click()
     await expect(page.getByLabel('Exact decimal rate')).toHaveValue('17.25')
-    await expect(page.getByRole('heading', { name: 'Theme & Appearance' })).toBeVisible()
+    await expect(page.getByRole('radiogroup', { name: 'Appearance', exact: true })).toBeVisible()
   })
 
   test('provider keys and diagnostics open via canonical links', async ({ page }) => {

@@ -29,11 +29,10 @@ test.describe('Dashboard', () => {
     await page.goto('/')
     await page.waitForLoadState('networkidle')
 
-    await expect(
-      page.locator('#overview-summary-panel').getByText('Net worth', { exact: true })
-    ).toBeVisible()
-    await expect(page.getByText('Income').first()).toBeVisible()
-    await expect(page.getByText('Spent').first()).toBeVisible()
+    const metrics = page.getByTestId('overview-summary-metrics')
+    await expect(metrics.getByText('Net worth', { exact: true })).toBeVisible()
+    await expect(metrics.getByText('Income', { exact: true })).toBeVisible()
+    await expect(metrics.getByText('Spent', { exact: true })).toBeVisible()
     await expect(page.getByRole('img', { name: 'Net worth over time' })).toHaveCount(0)
 
     await page.getByRole('tab', { name: 'History' }).click()

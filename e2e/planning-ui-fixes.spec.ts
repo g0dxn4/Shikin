@@ -80,18 +80,41 @@ test.describe('planning UI mobile fixes', () => {
     })
   }
 
-  test('heatmap range controls do not overlap the description at 390px', async ({ page }) => {
+  test('heatmap range controls do not overlap daily activity at 390px', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/spending-heatmap')
-    await expect(page.getByText('Daily Spending Activity')).toBeVisible({ timeout: 15000 })
+    const activityHeading = page.getByRole('heading', {
+      name: 'Daily Spending Activity',
+      exact: true,
+    })
+    await expect(activityHeading).toBeVisible()
+    await expect(page.getByText('Calendar intensity by day', { exact: true })).toHaveCount(0)
 
-    const description = page.getByText('Calendar intensity by day')
-    const rangeGroup = page.getByRole('group', { name: 'Time range' })
-    const descriptionBox = await description.boundingBox()
+    const rangeGroup = page.getByRole('group', { name: 'Time range', exact: true })
+    await expect(rangeGroup).toBeVisible()
+    const activityBox = await activityHeading.boundingBox()
     const rangeBox = await rangeGroup.boundingBox()
-    expect(descriptionBox).not.toBeNull()
+    expect(activityBox).not.toBeNull()
     expect(rangeBox).not.toBeNull()
-    expect(rectsOverlap(descriptionBox!, rangeBox!)).toBe(false)
+    expect(rectsOverlap(activityBox!, rangeBox!)).toBe(false)
+    expect(rangeBox!.y + rangeBox!.height).toBeLessThanOrEqual(activityBox!.y)
+    expect(rangeBox!.x).toBeGreaterThanOrEqual(0)
+    expect(rangeBox!.x + rangeBox!.width).toBeLessThanOrEqual(390)
+
+    const buttonBoxes = []
+    for (const name of ['This Month', '3 Months', '6 Months', 'This Year']) {
+      const button = rangeGroup.getByRole('button', { name, exact: true })
+      await expect(button).toBeVisible()
+      const box = await button.boundingBox()
+      expect(box).not.toBeNull()
+      expect(box!.height).toBeGreaterThanOrEqual(44)
+      expect(box!.x).toBeGreaterThanOrEqual(rangeBox!.x)
+      expect(box!.x + box!.width).toBeLessThanOrEqual(rangeBox!.x + rangeBox!.width)
+      for (const previous of buttonBoxes) {
+        expect(rectsOverlap(previous, box!)).toBe(false)
+      }
+      buttonBoxes.push(box!)
+    }
   })
 
   test('selecting the active heatmap range does not stick on loading', async ({ page }) => {

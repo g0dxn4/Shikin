@@ -19,7 +19,7 @@ test.describe('i18n', () => {
     await page.waitForLoadState('networkidle')
 
     // Change language to Spanish
-    await page.selectOption('select', 'es')
+    await page.getByRole('combobox', { name: 'Language', exact: true }).selectOption('es')
 
     await page.goto('/transactions')
     await page.waitForLoadState('networkidle')
@@ -33,7 +33,7 @@ test.describe('i18n', () => {
     await page.waitForLoadState('networkidle')
 
     // Switch to Spanish
-    await page.selectOption('select', 'es')
+    await page.getByRole('combobox', { name: 'Language', exact: true }).selectOption('es')
 
     // Navigate to transactions page
     await page.goto('/transactions')
@@ -49,12 +49,12 @@ test.describe('i18n', () => {
     await page.waitForLoadState('networkidle')
 
     // Switch to Spanish first
-    await page.selectOption('select', 'es')
+    await page.getByRole('combobox', { name: 'Language', exact: true }).selectOption('es')
     await expect(page.getByRole('heading', { level: 1, name: 'Preferencias' })).toBeVisible()
     await expect(page.locator('html')).toHaveAttribute('lang', 'es')
 
     // Switch back to English
-    await page.selectOption('select', 'en')
+    await page.getByRole('combobox', { name: 'Idioma', exact: true }).selectOption('en')
     await expect(page.getByRole('heading', { level: 1, name: 'Preferences' })).toBeVisible()
     await expect(page.locator('html')).toHaveAttribute('lang', 'en')
   })
@@ -63,7 +63,7 @@ test.describe('i18n', () => {
     await page.goto('/settings')
     await page.waitForLoadState('networkidle')
 
-    await page.selectOption('select', 'es')
+    await page.getByRole('combobox', { name: 'Language', exact: true }).selectOption('es')
     await expect(page.locator('html')).toHaveAttribute('lang', 'es')
 
     await page.reload()

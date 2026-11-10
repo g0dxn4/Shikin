@@ -140,7 +140,7 @@ test.describe('Transactions', () => {
     await expect(views.getByRole('tab', { name: 'Review' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'All' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Expense' })).toBeVisible()
-    const dateRange = page.getByLabel('Date range')
+    const dateRange = page.getByRole('combobox', { name: 'Date range', exact: true })
     await expect(dateRange).toBeVisible()
     for (const [value, label] of [
       ['this-month', 'This month'],
@@ -152,6 +152,11 @@ test.describe('Transactions', () => {
       await expect(dateRange.locator(`option[value="${value}"]`)).toHaveText(label)
     }
     await dateRange.selectOption('three-months')
+    const dateRangeChip = page.getByRole('button', {
+      name: 'Remove filter Date range: 3 months',
+      exact: true,
+    })
+    await expect(dateRangeChip).toBeVisible()
     const start = await page.evaluate(() => {
       const now = new Date()
       const date = new Date(now.getFullYear(), now.getMonth() - 2, 1)
@@ -160,6 +165,7 @@ test.describe('Transactions', () => {
     await expect.poll(() => new URL(page.url()).searchParams.get('dateFrom')).toBe(start)
     await dateRange.selectOption('all')
     await expect.poll(() => new URL(page.url()).searchParams.has('dateFrom')).toBe(false)
+    await expect(dateRangeChip).not.toBeVisible()
     if ((page.viewportSize()?.width ?? 0) < 768) {
       await page.getByRole('button', { name: 'Advanced filters' }).click()
     }
